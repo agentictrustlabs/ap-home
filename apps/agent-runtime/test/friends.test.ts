@@ -109,12 +109,14 @@ describe('two-way: their half decides (owner, 2026-10-26)', () => {
     expect(out.ended).toEqual([{ agent: BOB, name: 'bob.me', type: 'friend', endedAt: new Date(1_800_000_000_000).toISOString() }]);
     expect(out.note).toMatch(/removed you/);
   });
-  it('a removal from before my newer offer is history: my offer is SENT (waiting on them), not ENDED', async () => {
+  it('a removal from before my newer offer is history: my offer is SENT (waiting on them) — not ENDED, and never a friend on an old inbox request', async () => {
     // they removed an earlier friendship at 1.6e12; I offered again at 1.7e12 (an invitation accepted, a new request)
-    const d = { ...deps(), readSubjectRecord: async (s: string, t: string) => (s === ALICE ? store.get(t) ?? null : s === DAN && t === contactRecordType(ALICE) ? removedNamingAlice(1_600_000_000_000) : null) };
-    const out = (await friendListInvoker(d, ALICE)('person.friend.list', {}, ctx())) as { requested: Array<{ agent: string }>; ended: Array<{ agent: string }> };
-    expect(out.ended.map((r) => r.agent)).not.toContain(DAN);
-    expect(out.requested.map((r) => r.agent)).toContain(DAN);
+    const d = { ...deps(), readSubjectRecord: async (s: string, t: string) => (s === ALICE ? store.get(t) ?? null : s === BOB && t === contactRecordType(ALICE) ? removedNamingAlice(1_600_000_000_000) : null) };
+    const out = (await friendListInvoker(d, ALICE)('person.friend.list', {}, ctx())) as { friends: Array<{ agent: string }>; requested: Array<{ agent: string }>; ended: Array<{ agent: string }> };
+    expect(out.ended.map((r) => r.agent)).not.toContain(BOB);
+    // Bob's old request still sits in my inbox — his record says he withdrew, and his record decides: not a friend
+    expect(out.friends.map((r) => r.agent)).not.toContain(BOB);
+    expect(out.requested.map((r) => r.agent)).toContain(BOB);
   });
   it('a request they withdrew (removed me since) is no longer a request', async () => {
     const FAY = '0x00000000000000000000000000000000000000f1';

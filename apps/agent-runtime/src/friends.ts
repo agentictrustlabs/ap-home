@@ -73,10 +73,11 @@ export async function friendsOf(deps: FriendsDeps, person: string): Promise<{ fr
     if (!isPersonName(name)) continue;
     const half = await theirHalf(agent);
     // A removal from BEFORE my offer is history, not an answer: they removed an earlier friendship and have not yet
-    // answered this request (my newer offer is waiting on them — SENT, never ENDED).
+    // answered this request (my newer offer is waiting on them — SENT, never ENDED). Their record WAS read, so the
+    // evidence below (an old request in my inbox) never stands in for it.
     const stale = half?.status === 'withdrawn' && half.at !== null && half.at < offer.offeredAt;
     // A read that says nothing (unreachable, never written) falls back to MY evidence that they offered.
-    const theirs = (stale ? null : half?.status) ?? (offeredMe.has(agent) || offer.mutual ? 'standing' : null);
+    const theirs = stale ? null : (half?.status ?? (offeredMe.has(agent) || offer.mutual ? 'standing' : null));
     const state = friendshipState('standing', theirs);
     const since = new Date(offer.offeredAt).toISOString();
     if (state === 'ended') ended.push({ agent, name, type: offer.friendType, endedAt: half?.at ? new Date(half.at).toISOString() : null });
