@@ -46,11 +46,9 @@ export function IdentityChip({ open, onOpenChange }: { open?: boolean; onOpenCha
           Sign out
         </button>
         <div className="identity-popover-divider" />
-        <a className="identity-popover-item" href="/" role="menuitem">View your portal</a>
         {buildUserMenu(whitelabel).map((item) => (
           <a key={item.id} className="identity-popover-item" href={item.href} role="menuitem">{item.label}</a>
         ))}
-        <a className="identity-popover-item" href="/names" role="menuitem">Registered names</a>
       </Popover>
     </div>
   );

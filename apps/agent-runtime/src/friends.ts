@@ -88,8 +88,8 @@ export function friendListInvoker(deps: FriendsDeps, person: string | undefined)
       note: friends.length
         ? `${friends.length} friend(s)${requests.length ? `; ${requests.length} waiting on you — add them back to be friends` : ''}${requested.length ? `; ${requested.length} not yet added you back` : ''}.`
         : requests.length
-          ? `${requests.length} person(s) added you — add them back ("add bob.me as a contact") and you are friends.`
-          : 'No friends yet — add a person as a contact (role friend); you are friends once they add you back.',
+          ? `${requests.length} person(s) added you — add them back ("add bob.me as a friend") and you are mutual friends.`
+          : 'No friends yet — add a person as a friend; you are mutual friends once they add you back.',
     };
   };
 }

@@ -6,6 +6,9 @@ describe('an app\'s one request', () => {
     expect(appRequestOf({ pathname: '/contacts', search: '?add=0xabc&from=seed-reader&name=Ruth' })).toEqual({ act: 'add', name: 'Ruth', from: 'seed-reader' });
     expect(appRequestOf({ pathname: '/contacts', search: '?remove=0xabc&from=seed-reader' })).toEqual({ act: 'remove', name: null, from: 'seed-reader' });
   });
+  it('is the same act on Friends, the page Contacts became', () => {
+    expect(appRequestOf({ pathname: '/friends', search: '?add=0xabc&from=seed-reader' })).toEqual({ act: 'add', name: null, from: 'seed-reader' });
+  });
   it('is nothing without an app, without an act, or elsewhere', () => {
     expect(appRequestOf({ pathname: '/contacts', search: '?add=0xabc' })).toBeNull();
     expect(appRequestOf({ pathname: '/contacts', search: '?from=seed-reader' })).toBeNull();

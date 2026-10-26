@@ -113,7 +113,9 @@ const nextConfig = {
     ];
   },
   async redirects() {
-    return canonicalHostRedirects;
+    // "Contacts" is called "Friends" now. `/contacts` stays a door so an app's one-question window
+    // (`/contacts?add=…&from=<app>`) and old bookmarks still land; Next carries the query across.
+    return [...canonicalHostRedirects, { source: '/contacts', destination: '/friends', permanent: false }];
   },
   async headers() {
     return [

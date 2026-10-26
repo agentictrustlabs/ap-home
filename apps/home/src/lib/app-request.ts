@@ -1,4 +1,4 @@
-// AN APP'S ONE REQUEST — a window an app opened for one friend act (`/contacts?add|remove=…&from=<app>&name=…`). The
+// AN APP'S ONE REQUEST — a window an app opened for one friend act (`/friends?add|remove=…&from=<app>&name=…`). The
 // Home shows only that act; if the person must sign in first, the sign-in says what it is for and brings them back
 // here afterwards (Google returns to `/`, so the request is remembered across that trip).
 export interface AppRequest {
@@ -14,7 +14,7 @@ export function appRequestOf(loc: Pick<Location, 'pathname' | 'search'> = window
   const q = new URLSearchParams(loc.search);
   const from = q.get('from');
   const act = q.get('add') ? 'add' : q.get('remove') ? 'remove' : null;
-  if (loc.pathname !== '/contacts' || !from || !act) return null;
+  if ((loc.pathname !== '/friends' && loc.pathname !== '/contacts') || !from || !act) return null;
   return { act, name: q.get('name')?.trim() || null, from };
 }
 
@@ -30,7 +30,7 @@ export function takeAppRequestReturn(): string | null {
   try {
     const to = sessionStorage.getItem(RETURN_KEY);
     sessionStorage.removeItem(RETURN_KEY);
-    return to && to.startsWith('/contacts?') ? to : null;
+    return to && (to.startsWith('/friends?') || to.startsWith('/contacts?')) ? to : null;
   } catch {
     return null;
   }

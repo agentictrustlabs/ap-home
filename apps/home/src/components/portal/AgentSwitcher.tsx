@@ -18,6 +18,7 @@ import { UserIcon, BuildingIcon, LandmarkIcon, CheckIcon } from '../shared/Icons
 import { nameLabel } from '../../lib/domain';
 import { Popover } from '../shared/ui';
 import { actingBasis } from '../../lib/acting-basis';
+import { useOwnPhoto } from './chat/use-avatar';
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const lc = (s: string) => s.toLowerCase();
@@ -111,6 +112,13 @@ export function AgentSwitcher() {
   }).caption;
 
   const go = (href: string) => { router.push(href); setOpen(false); };
+  // Your profile photo stands for you — on the trigger while you are in your own home, and on your row. Never for
+  // another name of yours: that name is not you, so it does not wear your face.
+  const photo = useOwnPhoto(acting ? null : agentAddress);
+  const face = (px: number) => photo
+    // eslint-disable-next-line @next/next/no-img-element -- a data-URL photo from the vault profile
+    ? <img src={photo} alt="" aria-hidden width={px} height={px} style={{ width: px, height: px, borderRadius: '50%', objectFit: 'cover', flex: 'none' }} />
+    : <UserIcon size={px - 1} />;
 
   const Row = ({ icon, title, sub, activeRow, onClick }: {
     icon: React.ReactNode; title: string; sub: string; activeRow: boolean; onClick: () => void;
@@ -156,7 +164,7 @@ export function AgentSwitcher() {
               color: 'var(--color-text-primary)', cursor: 'pointer', fontWeight: 400, maxWidth: 260,
             }}
           >
-            {active.kind === 'org' ? <BuildingIcon size={16} /> : active.kind === 'service' ? <LandmarkIcon size={16} /> : <UserIcon size={16} />}
+            {active.kind === 'org' ? <BuildingIcon size={16} /> : active.kind === 'service' ? <LandmarkIcon size={16} /> : active.kind === 'person' ? face(18) : <UserIcon size={16} />}
             <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, maxWidth: 200 }}>
               <span style={{ fontWeight: 650, fontSize: '.84rem', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 170 }}>
                 {triggerName}
@@ -169,7 +177,7 @@ export function AgentSwitcher() {
       >
         {heading('Your smart agents')}
         <Row
-          icon={<UserIcon size={17} />}
+          icon={acting ? <UserIcon size={17} /> : face(20)}
           title={acting ? 'Return to your home' : personLabel}
           sub={acting ? 'leave this name — back to you' : (personName && agentName ? `person · ${handleLabel}` : 'person · your home')}
           activeRow={!acting && active.kind === 'person'}

@@ -17,13 +17,13 @@ import { useInboxView, shortId, agentLabel } from '../../home/use-inbox';
 import { activateInteractionsIfNeeded, resolveVia } from '../../home/onboarding';
 import { directMessageKey, type DirectMessageSummaryV1 } from '@agenticprimitives/fabric/messaging';
 import { searchAgentsKb } from '../../lib/agent-search';
-import { personAvatarKey, setPersonAvatar } from '../../lib/avatar-store';
+import { personAvatarKey } from '../../lib/avatar-store';
 import { AvatarUpload } from './chat/AvatarUpload';
 import { useMessagingDelivery } from './agent/AgentTab';
 import { MessageBubble } from './chat/MessageBubble';
 import { MessageComposer } from './chat/MessageComposer';
 import { messagePreview } from './chat/message-content';
-import { useAvatar } from './chat/use-avatar';
+import { useAvatar, setOwnPhoto } from './chat/use-avatar';
 import { useManagedAgents } from './ManagedAgents';
 import { railDate, railGroup, type RailGroup } from './chat/rail-date';
 import { RecipientPicker } from './chat/RecipientPicker';
@@ -105,8 +105,8 @@ function ContextChip({ r, names }: { r: { kind: string; id: string; label?: stri
     return (
       <button type="button" className="badge"
         style={{ border: '1px solid var(--color-sage-500)', background: 'var(--color-sage-50)', color: 'var(--color-sage-700)', fontWeight: 600, cursor: 'pointer' }}
-        title={`Add ${who ?? r.id} to your contacts`}
-        onClick={() => askCommand({ toolId: 'person.contact.invite', args: { contact: r.id.toLowerCase(), role: 'friend' }, message: `add ${who ?? r.id} as a contact (friend)` })}>
+        title={`Add ${who ?? r.id} as a friend`}
+        onClick={() => askCommand({ toolId: 'person.contact.invite', args: { contact: r.id.toLowerCase(), role: 'friend' }, message: `add ${who ?? r.id} as a friend` })}>
         {r.label ?? 'Add back'} →
       </button>
     );
@@ -565,7 +565,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
               imageUrl={selfAvatar}
               size={26}
               editable={!!agentAddress}
-              onUpload={(url) => { if (agentAddress) setPersonAvatar(agentAddress, url); }}
+              onUpload={(url) => { if (agentAddress) void setOwnPhoto(agentAddress, url).catch(() => { /* not saved: the avatar keeps the photo it had */ }); }}
             />
             <span className="chat-rail-head__title">Messages</span>
             {!targetAgent && (

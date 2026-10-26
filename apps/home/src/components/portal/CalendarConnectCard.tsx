@@ -16,7 +16,7 @@ const COPY: Record<ConnectorName, { title: string; reads: string; write?: { labe
   calendar: { title: 'Google Calendar', reads: 'read your calendar', write: { label: 'adding events', may: 'add events (each one under your signature)', ask: 'Also let it add events' }, pitch: 'so your agent can answer “what’s on today”, put it on Today, and — if you allow it — add events under your signature', ask: '“what’s on my calendar today”' },
   gmail: { title: 'Gmail', reads: 'read your mail', write: { label: 'writing and sending', may: 'write drafts in your Gmail, and send — only under your signature, one message at a time', ask: 'Also let it write drafts and send' }, pitch: 'so your agent can answer “any mail from the elders this week”, read a thread you point at, and — if you allow it — leave a draft for you to review and send it on your signature', ask: '“any unanswered mail from the elders”' },
   drive: { title: 'Google Drive', reads: 'find and read your files', pitch: 'so your agent can find the document you mean and read a Doc or Sheet you point at — read only', ask: '“find the retreat budget”' },
-  contacts: { title: 'Google Contacts', reads: 'read the names and emails in your Google address book', pitch: 'so you can pick a friend to invite from the book, on Contacts — the list is not stored as friends', ask: '“who is in my Google contacts”' },
+  contacts: { title: 'Google Contacts', reads: 'read the names and emails in your Google address book', pitch: 'so you can pick a friend to invite from the book, on Friends — the list is not stored as friends', ask: '“who is in my Google contacts”' },
 };
 
 export function connectorClient(token: string, name: ConnectorName) {

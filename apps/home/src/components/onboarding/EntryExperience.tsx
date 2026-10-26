@@ -811,7 +811,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
   }
 
   const enroll = Boolean(enrollApi);
-  // An app's one friend act (`/contacts?add=…&from=<app>`): the sign-in says what it is for, briefly.
+  // An app's one friend act (`/friends?add=…&from=<app>`): the sign-in says what it is for, briefly.
   const appRequest = typeof window !== 'undefined' ? appRequestOf() : null;
   // Curation applies to the ENROLL screen only — the one a relying app sends people to. The
   // self-serve lane below has no app asking on anyone's behalf, so it keeps every method, and

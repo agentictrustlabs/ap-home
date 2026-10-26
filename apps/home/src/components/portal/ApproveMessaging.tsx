@@ -58,7 +58,7 @@ export function ApproveMessaging({
       <span style={{ fontSize: '0.85rem' }}>
         {need.reason === 'wire_absent'
           ? 'Approve this agent to send messages on your behalf — one signature, and you can revoke it anytime.'
-          : 'You haven’t approved messaging this contact yet — one signature adds them.'}
+          : 'You haven’t approved messaging this person yet — one signature adds them.'}
       </span>
       <BusyButton
         busy={busy}

@@ -14,12 +14,15 @@ import { useSession } from '../../context/session';
 import { whitelabel } from '../../whitelabel/config';
 import { buildUserMenu } from './nav';
 import { AddressChip } from '../shared/AddressChip';
+import { useOwnPhoto } from './chat/use-avatar';
 
 export function SidebarFootMenu() {
   const { agentName, agentAddress, personName, signOut } = useSession();
   // The profile name leads (initial + label) when given; the handle is the fallback and, when both
   // exist, the handle stays as the second line of the menu heading.
   const shown = personName ?? agentName;
+  // Your profile photo, when you have set one (Profile); the initial otherwise.
+  const photo = useOwnPhoto(agentAddress);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -52,10 +55,16 @@ export function SidebarFootMenu() {
           border: 'none', cursor: 'pointer', padding: '.35rem .4rem', borderRadius: 10, font: 'inherit',
         }}
       >
-        <span aria-hidden style={{
-          width: 30, height: 30, borderRadius: '50%', background: 'var(--color-sage-700, #3f6212)', color: '#fff',
-          display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 13, flexShrink: 0,
-        }}>{initial}</span>
+        {photo ? (
+          // eslint-disable-next-line @next/next/no-img-element -- a data-URL photo from the vault profile
+          <img src={photo} alt="" aria-hidden width={30} height={30} data-testid="sidebar-person-photo"
+            style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+        ) : (
+          <span aria-hidden style={{
+            width: 30, height: 30, borderRadius: '50%', background: 'var(--color-sage-700, #3f6212)', color: '#fff',
+            display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 13, flexShrink: 0,
+          }}>{initial}</span>
+        )}
         <span style={{ fontSize: '.85rem', fontWeight: 600, color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {shown ?? 'Account'}
         </span>
@@ -79,11 +88,9 @@ export function SidebarFootMenu() {
             Sign out
           </button>
           <div style={{ height: 1, background: 'var(--color-border)', margin: '4px 0' }} />
-          <a role="menuitem" href="/" style={item}>View your portal</a>
           {buildUserMenu(whitelabel).map((it) => (
             <a key={it.id} role="menuitem" href={it.href} style={item}>{it.label}</a>
           ))}
-          <a role="menuitem" href="/names" style={item}>Registered names</a>
         </div>
       )}
     </div>

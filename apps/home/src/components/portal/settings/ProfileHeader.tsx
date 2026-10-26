@@ -1,8 +1,7 @@
 'use client';
 
 import { AvatarUpload } from '../chat/AvatarUpload';
-import { personAvatarKey, setPersonAvatar } from '../../../lib/avatar-store';
-import { useAvatar } from '../chat/use-avatar';
+import { useOwnPhoto, setOwnPhoto } from '../chat/use-avatar';
 
 export function ProfileHeader({
   name,
@@ -15,8 +14,7 @@ export function ProfileHeader({
   address?: string;
   editable?: boolean;
 }) {
-  const avatarKey = address ? personAvatarKey(address) : null;
-  const imageUrl = useAvatar(avatarKey);
+  const imageUrl = useOwnPhoto(address);
 
   return (
     <>
@@ -25,7 +23,7 @@ export function ProfileHeader({
         imageUrl={imageUrl}
         size={72}
         editable={editable && !!address}
-        onUpload={(url) => { if (address) setPersonAvatar(address, url); }}
+        onUpload={(url) => { if (address) void setOwnPhoto(address, url).catch(() => { /* not saved: the avatar keeps the photo it had */ }); }}
       />
       <div className="settings-hub__header-meta">
         <h1 className="settings-hub__name">{name}</h1>

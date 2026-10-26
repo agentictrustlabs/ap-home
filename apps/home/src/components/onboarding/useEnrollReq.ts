@@ -54,8 +54,8 @@ export interface EnrollReq {
   /** workspace-member-invite: where the invited person picks the invitation up IN THE APP — the page the
    *  message the host's agent sends them points at. Accepted only on the relying app's own origin. */
   appLink?: string;
-  /** What this same window does once the sign-in is delivered: ONE friend act on this Home's Contacts
-   *  (`/contacts?add|remove=…&from=<app>`), so an invited person signs in and adds who invited them in one window. */
+  /** What this same window does once the sign-in is delivered: ONE friend act on this Home's Friends
+   *  (`/friends?add|remove=…&from=<app>`), so an invited person signs in and adds who invited them in one window. */
   then?: string;
   existingOrg?: Address; // org_create: reuse an EXISTING org the person stewards — grant from it instead of deploying a new one
   sessionKey?: Address; // spec 270 v4 W2 — the relying app's session-key address; the home signs the DEL-001 leaf for it
@@ -77,10 +77,12 @@ export interface EnrollReq {
 // via `isAllowedRelyingOrigin` (imported above). The previously-hardcoded array is removed
 // to prevent drift between the OIDC client registry and the cross-origin postMessage gate.
 
-/** A next step this window may take after the sign-in: only a friend act an app names on this Home's own Contacts. */
+/** A next step this window may take after the sign-in: only a friend act an app names on this Home's own Friends page. */
 export function thenStep(raw: string | null): string | undefined {
-  if (!raw || !raw.startsWith('/contacts?')) return undefined;
-  const q = new URLSearchParams(raw.slice('/contacts?'.length));
+  // `/friends?` is the page; `/contacts?` is its old name, still sent by apps and redirected there.
+  const prefix = raw?.startsWith('/friends?') ? '/friends?' : raw?.startsWith('/contacts?') ? '/contacts?' : null;
+  if (!raw || !prefix) return undefined;
+  const q = new URLSearchParams(raw.slice(prefix.length));
   const target = q.get('add') ?? q.get('remove') ?? '';
   return q.get('from') && /^0x[0-9a-fA-F]{40}$/.test(target) ? raw : undefined;
 }

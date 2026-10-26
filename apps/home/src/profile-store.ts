@@ -56,6 +56,10 @@ export interface ImpactContactProfile {
    *  "the org you're part of" is a community-wide identity fact, not app-specific. */
   organizationName?: string;
   organizationCountry?: string;
+  /** The person's profile photo: a small square JPEG as a data URL (≤ 256 px, made by `fileToAvatarDataUrl`).
+   *  Held here, in the vault, so it follows the person to every device; the browser keeps only a cache of it
+   *  (`lib/avatar-store.ts`). Not one of the shareable fields: no app receives it through a profile grant. */
+  photo?: string;
 }
 
 /** Where a `signed-release` document's commitment came from: the publisher's signed release, read over A2A.
@@ -95,8 +99,8 @@ export interface ImpactStoredProfile {
   attestations?: { wea?: StoredAttestation } & Record<string, StoredAttestation | undefined>;
 }
 
-export type ImpactContactScalarKey = Exclude<keyof ImpactContactProfile, 'location'>;
-export type ImpactProfileFieldKey = keyof ImpactContactProfile;
+export type ImpactContactScalarKey = Exclude<keyof ImpactContactProfile, 'location' | 'photo'>;
+export type ImpactProfileFieldKey = Exclude<keyof ImpactContactProfile, 'photo'>;
 
 export const SHAREABLE_PROFILE_KEYS: readonly ImpactProfileFieldKey[] = [
   'firstName', 'lastName', 'email', 'phone', 'location', 'country', 'city',
@@ -272,6 +276,26 @@ export async function saveImpactProfile(addr: Address, profile: ImpactStoredProf
   };
   const out = await postProfile('set', addr, next);
   if (out.ok !== true) throw new Error(`save failed: ${String(out.error ?? 'unknown')}`);
+}
+
+/** The largest photo the record takes. `fileToAvatarDataUrl` makes ~20–40 KB; this refuses anything that is
+ *  clearly not one of those rather than letting a pasted original bloat every profile read. */
+export const MAX_PHOTO_CHARS = 200_000;
+
+/** Is this a photo the profile may hold: an inline JPEG/PNG/WebP data URL of a sane size. */
+export function isProfilePhoto(v: unknown): v is string {
+  return typeof v === 'string' && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(v) && v.length <= MAX_PHOTO_CHARS;
+}
+
+/** Set (or, with null, remove) the person's profile photo. Reads the record fresh and changes only the photo,
+ *  so nothing else in it — a field edited elsewhere a moment ago — is overwritten. */
+export async function saveProfilePhoto(addr: Address, photo: string | null): Promise<void> {
+  if (photo !== null && !isProfilePhoto(photo)) throw new Error('that image could not be used as a profile photo');
+  const cur = await loadImpactProfile(addr);
+  const contact: ImpactContactProfile = { ...(cur.contact ?? {}) };
+  if (photo) contact.photo = photo;
+  else delete contact.photo;
+  await saveImpactProfile(addr, { ...cur, contact });
 }
 
 /** Seed vault-profile fields from a CONNECTION (metadata-tiers doctrine: a verified contact point is

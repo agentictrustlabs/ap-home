@@ -21,7 +21,7 @@ export default function ApproveMessagingPage() {
   const [state, setState] = useState<'working' | 'done' | 'error'>('working');
   const [msg, setMsg] = useState('Approving…');
   const [ret, setRet] = useState('');
-  const [label, setLabel] = useState('this contact');
+  const [label, setLabel] = useState('this person');
 
   useEffect(() => {
     if (phase === 'restoring') return;
@@ -33,7 +33,7 @@ export default function ApproveMessagingPage() {
     const r = params?.get('return') || '';
     const back = r && isAllowedRelyingOrigin(r) ? r : '';
     setRet(back);
-    setLabel(name || (ADDR.test(to) ? `${to.slice(0, 6)}…${to.slice(-4)}` : 'this contact'));
+    setLabel(name || (ADDR.test(to) ? `${to.slice(0, 6)}…${to.slice(-4)}` : 'this person'));
     if (!ADDR.test(to)) {
       setState('error');
       setMsg('This link did not name who to approve.');

@@ -97,7 +97,7 @@ export default function SecurityOverviewPage() {
       <Panel title="This section" icon={<LockIcon size={18} />} state="ready" testId="sec-pages">
         <List>
           <Row href="/security/sign-in" title="Sign-in" meta="Which credentials open and sign for this home, on which devices; the emails and phones we tell." side={<FingerprintIcon size={16} />} />
-          <Row href="/grants" title="Grants" meta="Every grant you issued — apps, assistants, organizations, contacts, runtimes — one list, one Revoke each." side={<ShieldIcon size={16} />} />
+          <Row href="/grants" title="Grants" meta="Every grant you issued — apps, assistants, organizations, friends, runtimes — one list, one Revoke each." side={<ShieldIcon size={16} />} />
           <Row href="/apps" title="Connected" meta="Accounts your agent reads through and apps that are clients of you." side={<LinkIcon size={16} />} />
           <Row href="/vault-key" title="Vault key" meta="The key your records are sealed under, and the authorization that lets the vault server use it." side={<LockIcon size={16} />} />
         </List>

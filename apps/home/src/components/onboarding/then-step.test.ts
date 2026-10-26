@@ -7,6 +7,10 @@ describe('the step a sign-in window takes next', () => {
     expect(thenStep(`/contacts?add=${A}&from=seed-reader&name=Ruth`)).toBe(`/contacts?add=${A}&from=seed-reader&name=Ruth`);
     expect(thenStep(`/contacts?remove=${A}&from=seed-reader`)).toBe(`/contacts?remove=${A}&from=seed-reader`);
   });
+  it('is the same act on Friends, the page Contacts became', () => {
+    expect(thenStep(`/friends?add=${A}&from=seed-reader`)).toBe(`/friends?add=${A}&from=seed-reader`);
+    expect(thenStep(`/friends?add=${A}`)).toBeUndefined();
+  });
   it('is nothing else: another page, another site, no app, or no address', () => {
     expect(thenStep(null)).toBeUndefined();
     expect(thenStep(`/settings?add=${A}&from=x`)).toBeUndefined();

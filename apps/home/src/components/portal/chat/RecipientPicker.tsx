@@ -122,7 +122,7 @@ export function RecipientPicker({
     return [
       // Spec 401 — CONTACTS FIRST: the people and agents the person let in, from their own vault; the derived scopes
       // (names, organizations, workspaces) follow.
-      { id: 'contacts', scope: 'contacts', label: 'Contacts', sub: 'people and services you let in', Icon: GlobeIcon },
+      { id: 'contacts', scope: 'contacts', label: 'Friends', sub: 'people and services you let in', Icon: GlobeIcon },
       { id: 'names', scope: 'names', label: 'People', sub: 'anyone with a name', Icon: GlobeIcon },
       ...orgs.sort(byLabel),
       ...(services.length ? [{ id: 'services', scope: 'services' as const, label: 'Services', sub: `${services.length} you steward`, Icon: WorkspaceIcon }] : []),
@@ -186,7 +186,7 @@ export function RecipientPicker({
     { key: 'orgs', title: 'Organizations', items: entries.filter((e) => e.scope === 'organization') },
     { key: 'services', title: '', items: entries.filter((e) => e.scope === 'services') },
   ];
-  const paneTitle = active.scope === 'contacts' ? 'Your contacts' : active.scope === 'names' ? 'People with a name' : active.scope === 'services' ? 'Services you steward' : `Members of ${active.label}`;
+  const paneTitle = active.scope === 'contacts' ? 'Your friends' : active.scope === 'names' ? 'People with a name' : active.scope === 'services' ? 'Services you steward' : `Members of ${active.label}`;
 
   return (
     <div className="chat-picker" data-testid="dm-picker">
@@ -197,7 +197,7 @@ export function RecipientPicker({
           autoFocus
           data-testid="dm-compose-to"
           className="chat-compose-to__input"
-          placeholder={active.scope === 'names' ? 'Search by name…' : active.scope === 'contacts' ? 'Search your contacts…' : `Search ${active.label}…`}
+          placeholder={active.scope === 'names' ? 'Search by name…' : active.scope === 'contacts' ? 'Search your friends…' : `Search ${active.label}…`}
           value={query}
           onChange={(e) => onQuery(e.target.value)}
           onKeyDown={(e) => {

@@ -32,7 +32,7 @@ export const CONTACT_RESOURCE_SCOPE = 'vault:profile.contact';
 export const CONTACT_INVITE_TOOL: ToolSpec = {
   id: CONTACT_INVITE_CAPABILITY,
   adapter: ADAPTER.sync, carries: CARRIES.contact,
-  verbs: ['add as a contact', 'add contact', 'add to my contacts', 'make a contact', 'befriend'],
+  verbs: ['add as a contact', 'add contact', 'add to my contacts', 'make a contact', 'befriend', 'add as a friend', 'add friend', 'add to my friends'],
   establishes: 'submission',
   description:
     'ADD AN AGENT TO YOUR CONTACTS — a person, a coach service, an outside runtime, an assistant. Requires your own mandate '
@@ -58,7 +58,7 @@ export const CONTACT_INVITE_TOOL: ToolSpec = {
 
 export const CONTACT_LIST_TOOL: ToolSpec = {
   id: CONTACT_LIST_CAPABILITY,
-  answers: ['my contacts', 'who are my contacts', 'contacts', 'who have i added', 'my coach', 'my runtimes'],
+  answers: ['my contacts', 'who are my contacts', 'contacts', 'who have i added', 'my coach', 'my runtimes', 'everyone i added'],
   description:
     'YOUR CONTACTS — the agents you have let in (people, coaches, runtimes, assistants), each with their role and '
     + 'whether their access grant stands. Your own records only. Args: none.',
@@ -69,7 +69,7 @@ export const CONTACT_LIST_TOOL: ToolSpec = {
 export const CONTACT_REMOVE_TOOL: ToolSpec = {
   id: CONTACT_REMOVE_CAPABILITY,
   adapter: ADAPTER.chain,
-  verbs: ['remove contact', 'remove from my contacts', 'drop contact', 'fire', 'unfriend'],
+  verbs: ['remove contact', 'remove from my contacts', 'drop contact', 'fire', 'unfriend', 'remove friend', 'remove as a friend', 'remove from my friends'],
   establishes: 'submission',
   description:
     'REMOVE A CONTACT — revokes the access grant you gave them on chain (one act: they stop being able to read your '
@@ -222,7 +222,7 @@ export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresen
         ? await deps.deliverContactNotice({ sender: person, recipient: contact, grantDigest: existing.grantDigest }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
         : undefined;
       if (mayBePerson(kind)) await noticeBack(deps, person, contact);
-      return { added: false, contact, role: existing.role, alreadyContact: true, grantDigest: existing.grantDigest, ...(noticed ? { noticed } : {}), note: 'already among your contacts — nothing changed' };
+      return { added: false, contact, role: existing.role, alreadyContact: true, grantDigest: existing.grantDigest, ...(noticed ? { noticed } : {}), note: 'already among your friends — nothing changed' };
     }
     // the grant, signed by the person (the second prompt of a two-prompt path in C1; the one-prompt fold is C2's)
     const digest = intentDigest(ctx.intent);
@@ -249,7 +249,7 @@ export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresen
     // as "accept" (a person adds you back; an agent needs nothing). An effect never fails the act; it is reported.
     let told: { ok: boolean; error?: string } = { ok: false, error: 'the contact was not told — telling them is a message sent as you, which needs your session' };
     if (session && deps.sendDirectMessage) {
-      told = await deps.sendDirectMessage({ sender: person, recipient: contact, bodyText: kind === 'person' ? `I've added you to my contacts as ${role}. Add me back and we're mutual.` : `You're now in my contacts as ${role}.`, session, contextRefs: [{ kind: 'contact', id: me, label: 'Add back' }] }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+      told = await deps.sendDirectMessage({ sender: person, recipient: contact, bodyText: kind === 'person' ? (role === 'friend' ? `I've added you as a friend. Add me back and we're mutual friends.` : `I've added you as a friend (${role}). Add me back and we're mutual.`) : `You're now among my friends as ${role}.`, session, contextRefs: [{ kind: 'contact', id: me, label: 'Add back' }] }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
     }
     // THE NOTICE (spec 401): the friend request itself — delivered whether or not the message could be; the message
     // needs a messaging wire to this contact, which a new friend never has.
@@ -257,7 +257,7 @@ export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresen
       ? await deps.deliverContactNotice({ sender: person, recipient: contact, grantDigest }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
       : undefined;
     if (mayBePerson(kind)) await noticeBack(deps, person, contact);
-    return { added: true, contact, role, grantDigest, delegation, told, ...(noticed ? { noticed } : {}), kind: kind ?? 'unknown', ...(mutual !== undefined ? { mutual } : {}), note: kind === 'person' ? (mutual ? 'recorded in your contacts — mutual: they had already added you' : 'recorded in your contacts; mutual once they add you back') : 'recorded in your contacts' };
+    return { added: true, contact, role, grantDigest, delegation, told, ...(noticed ? { noticed } : {}), kind: kind ?? 'unknown', ...(mutual !== undefined ? { mutual } : {}), note: kind === 'person' ? (mutual ? 'added as a friend — mutual: they had already added you' : 'added as a friend; mutual once they add you back') : 'added to your friends' };
   };
 }
 
@@ -280,7 +280,7 @@ export function contactListInvoker(deps: ContactDeps, person: Address | undefine
     const addedMeBack = await whoAddedMe(deps, me);
     for (const c of contacts) if (c.mutual === false && addedMeBack.has(c.contact.toLowerCase())) c.mutual = true;
     const current = contacts.filter((c) => c.status === 'contact');
-    return { count: current.length, contacts: current, removed: contacts.length - current.length, interpretation: `read the person's own contacts (${contacts.length} record(s))`, note: current.length ? 'Your contacts, from your own records; the role is declarative — the grant is what each may read.' : 'No contacts yet — "add bob.me as a contact".' };
+    return { count: current.length, contacts: current, removed: contacts.length - current.length, interpretation: `read the person's own contacts (${contacts.length} record(s))`, note: current.length ? 'Your friends, from your own records; the role is declarative — the grant is what each may read.' : 'No friends yet — "add bob.me as a friend".' };
   };
 }
 

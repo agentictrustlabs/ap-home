@@ -21,6 +21,8 @@ import { profileThroughHarness, type ProfileFields } from '../../../home/profile
 import { activateInteractionsIfNeeded, resolveVia, isKmsVia } from '../../../home/onboarding';
 import { BusyButton } from '../../shared/BusyButton';
 import { LocationFields } from './LocationFields';
+import { ProfilePhoto } from './ProfilePhoto';
+import { setPersonAvatar } from '../../../lib/avatar-store';
 import type { ProfileLocation } from '../../../lib/profile-location';
 
 export function PersonalInfoPanel({
@@ -73,6 +75,8 @@ export function PersonalInfoPanel({
     try {
       const p = await loadImpactProfile(agentAddress);
       setStored(p); setContact(p.contact ?? {});
+      // The vault is the record; refresh the page's cached copy of the photo from it.
+      setPersonAvatar(agentAddress, p.contact?.photo ?? null);
     } catch (err) {
       if (err instanceof VaultKeyUnauthorizedError) { setNeedsVaultKey(true); onNeedsVaultKey?.(); }
       else if (err instanceof InteractionsNotEnabledError) {
@@ -216,6 +220,18 @@ export function PersonalInfoPanel({
     <form className="settings-form" onSubmit={(e) => void handleSubmit(e)}>
       {loadError && <div className="settings-banner settings-banner--error" role="alert">{loadError}</div>}
       {savedNotice && <div className="settings-banner settings-banner--success" role="status">✓ {savedNotice}</div>}
+
+      {/* The photo is not asked for by a relying app's handoff, so it shows only on the person's own profile. */}
+      {!requiredKeys && agentAddress && (
+        <ProfilePhoto
+          address={agentAddress}
+          name={[contact.firstName, contact.lastName].filter(Boolean).join(' ') || homeProfile?.name || ''}
+          photo={contact.photo ?? null}
+          onChange={(photo) => {
+            setContact((c) => { const n = { ...c }; if (photo) n.photo = photo; else delete n.photo; return n; });
+          }}
+        />
+      )}
 
       {PROFILE_FIELDS.filter((f) => f.key === 'firstName' || f.key === 'lastName' || f.key === 'email' || f.key === 'phone').map((f) => (
         <ScalarField

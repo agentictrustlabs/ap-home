@@ -1,5 +1,7 @@
 'use client';
-// Demo avatar persistence — localStorage until vault profile gains avatarDataUrl (P1).
+// Avatar cache. A PERSON's own photo is held in their vault profile (`contact.photo`, profile-store.ts) — that
+// is the record; this localStorage copy only lets every avatar on the page draw it at once and without a vault
+// read each time (`useOwnPhoto` refreshes it from the vault). Community avatars are still local-only.
 // Keys: chat-avatar:person:{address} | chat-avatar:community:{orgAddress}
 
 const PERSON_PREFIX = 'chat-avatar:person:';

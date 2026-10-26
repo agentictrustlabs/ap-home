@@ -21,7 +21,7 @@ import { readContactsThroughHarness, readFriendsThroughHarness, readGoogleContac
 import { searchAgentsKb } from '../../lib/agent-search';
 import { connectorClient } from './CalendarConnectCard';
 
-const ROLE_WORDS: Record<string, string> = { friend: 'friend', family: 'family', coach: 'coach', assistant: 'assistant', runtime: 'runtime', other: 'contact' };
+const ROLE_WORDS: Record<string, string> = { friend: 'friend', family: 'family', coach: 'coach', assistant: 'assistant', runtime: 'runtime', other: 'other' };
 
 export function ContactsPanel() {
   const { session, agentAddress, agentName } = useSession();
@@ -94,7 +94,7 @@ export function ContactsPanel() {
     window.addEventListener('pagehide', gone);
     return () => { clearInterval(t); window.removeEventListener('pagehide', gone); gone(); };
   }, [session]);
-  // A link from an app can name whom to add (`/contacts?add=bob.me`) or open the email invitation (`?invite=1`).
+  // A link from an app can name whom to add (`/friends?add=bob.me`) or open the email invitation (`?invite=1`).
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     const add = (q.get('add') ?? '').trim();
@@ -165,11 +165,11 @@ export function ContactsPanel() {
     const contact = picked?.agent ?? who.trim();
     if (!contact) return;
     const label = picked?.label ?? contact;
-    askCommand({ toolId: 'person.contact.invite', args: { contact, role }, message: `add ${label} as a contact (${ROLE_WORDS[role]})` });
+    askCommand({ toolId: 'person.contact.invite', args: { contact, role }, message: role === 'friend' ? `add ${label} as a friend` : `add ${label} as a friend (${ROLE_WORDS[role]})` });
     setWho(''); setPicked(null); setHits([]);
   };
   const remove = (c: ContactRow) => {
-    askCommand({ toolId: 'person.contact.remove', args: { contact: c.contact }, message: `remove ${c.name ?? c.contact} as a contact` });
+    askCommand({ toolId: 'person.contact.remove', args: { contact: c.contact }, message: `remove ${c.name ?? c.contact} as a friend` });
   };
 
   const sendInvite = async () => {
@@ -189,7 +189,7 @@ export function ContactsPanel() {
     } catch (e) { setInviteState({ busy: false, error: e instanceof Error ? e.message : String(e) }); }
   };
   const addBack = (agent: string, name: string | null) => {
-    askCommand({ toolId: 'person.contact.invite', args: { contact: agent, role: 'friend' }, message: `add ${name ?? agent} as a contact (friend)` });
+    askCommand({ toolId: 'person.contact.invite', args: { contact: agent, role: 'friend' }, message: `add ${name ?? agent} as a friend` });
   };
 
   if (!session || !agentAddress) return null;
@@ -221,7 +221,7 @@ export function ContactsPanel() {
           </>
         )}
         {friends && friends.friends.length === 0 && friends.requests.length === 0 && (
-          <Empty title="No friends yet.">Add a person as a contact (role friend) below, or invite one by email. You are friends once they add you back.</Empty>
+          <Empty title="No friends yet.">Add a person as a friend below, or invite one by email. You are mutual friends once they add you back.</Empty>
         )}
         {friends && friends.friends.length > 0 && (
           <List>
@@ -254,7 +254,7 @@ export function ContactsPanel() {
               try {
                 const st = await connectorClient(session.token, 'contacts').status();
                 if (st.connected) { setBook((p) => ({ ...p, connected: true, open: true })); await loadBook(); }
-                else window.location.assign(await connectorClient(session.token, 'contacts').start(false, '/contacts'));
+                else window.location.assign(await connectorClient(session.token, 'contacts').start(false, '/friends'));
               } catch (e) { setBook((p) => ({ ...p, error: e instanceof Error ? e.message : String(e) })); setBookBusy(false); }
             })();
           }}>{bookBusy ? 'Reading…' : book.open ? 'Hide Google contacts' : 'From Google contacts'}</Button>
@@ -279,7 +279,7 @@ export function ContactsPanel() {
         {inviteState.error && <ErrorNote>{inviteState.error}</ErrorNote>}
         <Note>The mail goes out as you. The link lets them sign in or set up a home and add you as a friend; you then add them back. Nothing in the link grants anything.</Note>
       </Section>
-      <Section title="Add a contact">
+      <Section title="Add a friend">
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <div style={{ flex: '1 1 260px', minWidth: 0 }}>
             <input value={who} onChange={(e) => { setWho(e.target.value); setPicked(null); }} placeholder="a name, bob.me, goose-1.svc, or an address" aria-label="Who to add" style={{ width: '100%' }} />
@@ -296,9 +296,9 @@ export function ContactsPanel() {
           </select>
           <Button variant="primary" onClick={add} disabled={!who.trim()}>Add</Button>
         </div>
-        <Note>Adding a contact is your act: you sign a grant that lets them read your contact profile — nothing else. The role says what they are to you; it authorizes nothing. A person becomes mutual when they add you back; a coach or a runtime is one-way.</Note>
+        <Note>Adding a friend is your act: you sign a grant that lets them read your profile — nothing else. The role says what they are to you; it authorizes nothing. A person becomes mutual when they add you back; a coach or a runtime is one-way.</Note>
       </Section>
-      <Section title="Your contacts" count={rows.length || undefined} aside={removedCount ? <Meta>{removedCount} removed</Meta> : undefined}>
+      <Section title="All your friends" count={rows.length || undefined} aside={removedCount ? <Meta>{removedCount} removed</Meta> : undefined}>
         {/* agent-vocabulary.md D3 — a role is what the contact is TO YOU; the filter narrows by it. A coach is a contact with
             role coach: hiring a coaching SERVICE (the study grant, the specialist lines) lives behind that filter. */}
         {rows.length > 0 && (
@@ -309,8 +309,8 @@ export function ContactsPanel() {
         )}
         {roleFilter === 'coach' && <Note>A coach is a service you consult under a study grant. <a href="/coaches">Hire or release a coaching service →</a></Note>}
         {err && <ErrorNote>{err}</ErrorNote>}
-        {!loaded && !err && <Meta>Reading your contacts…</Meta>}
-        {loaded && !err && rows.length === 0 && <Empty title="No contacts yet.">Add a person, a coach service, or an outside runtime above — or tell your agent: “add bob.me as a contact”.</Empty>}
+        {!loaded && !err && <Meta>Reading your friends…</Meta>}
+        {loaded && !err && rows.length === 0 && <Empty title="No friends yet.">Add a person, a coach service, or an outside runtime above — or tell your agent: “add bob.me as a friend”.</Empty>}
         {rows.length > 0 && (
           <List>
             {rows.filter((c) => roleFilter === 'all' || c.role === roleFilter).map((c) => (
@@ -322,7 +322,7 @@ export function ContactsPanel() {
             ))}
           </List>
         )}
-        <Note>Held in your own vault, published nowhere. Removing a contact revokes the grant on chain — every gate refuses it from the next request.</Note>
+        <Note>Held in your own vault, published nowhere. Removing a friend revokes the grant on chain — every gate refuses it from the next request.</Note>
       </Section>
     </>
   );

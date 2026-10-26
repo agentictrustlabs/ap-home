@@ -183,13 +183,13 @@ export function buildNav(
     // own work by words (400 B5). They used to sit under "You steward", where four of seven items were not stewardship.
     /**
      * YOURS, and only on your own home — NOT a persona's. These three panels read the connected person from
-     * the session and take no agent, so under another of your names they would show YOUR contacts and YOUR
+     * the session and take no agent, so under another of your names they would show YOUR friends and YOUR
      * grants with that name in the title bar: the same data wearing a second identity, which is the one thing
      * a second identity must never be. A persona has its own vault, card and playbook below; it gets these
      * when each panel can be pointed at an agent, and not before.
      */
     ...(isSelf ? [
-      { id: 'contacts', label: 'Contacts', href: '/contacts', Icon: UserIcon, status: 'live' as const },
+      { id: 'friends', label: 'Friends', href: '/friends', Icon: UserIcon, status: 'live' as const },
       { id: 'grants', label: 'Grants', href: '/grants', Icon: ShieldIcon, status: 'live' as const },
       { id: 'search', label: 'Search', href: '/search', Icon: DatabaseIcon, status: 'live' as const },
     ] : []),
@@ -481,9 +481,8 @@ export function buildUserMenu(wl: WhiteLabelConfig): NavItem[] {
     // register, the evals (skill selection, acts, techniques, live gates, a comparison you run), and the kit.
     items.push({ id: 'developer', label: 'Developer tools', href: '/developer', Icon: CodeIcon, status: 'live', opensPane: 'developer' });
   }
-  // P1.4 — everything the person stewards, one screen; budgets set here.
-  items.push({ id: 'estate', label: 'Estate', href: '/estate', Icon: BuildingIcon, status: 'live' });
-  items.push({ id: 'network', label: 'Network', href: '/network', Icon: GlobeIcon, status: 'live' });
+  // Owner (2026-10-26): Estate and Network left the menu (as did "View your portal" and "Registered names" from the
+  // menus that render this list). The pages stay reachable by their URLs.
   return items;
 }
 

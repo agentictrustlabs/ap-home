@@ -313,7 +313,7 @@ export default function SignInPage() {
         title={rotate.move ? 'Move to another Home' : 'Replace this device’s passkey'}
         description={rotate.move
           ? 'At the other Home, open “Move your Home here”, create a passkey there and paste its ticket below. One signature here adds that passkey, retires this device’s, and re-approves everything you have granted — so nothing you connected has to reconnect. It is not a recovery: nothing was lost, and the other Home is trusted with a public key and nothing else.'
-          : 'A new passkey is created on this device and the old one retired. Everything you have granted — apps, your agent’s planes, contacts — is re-approved under the new key in the same signature, so nothing you connected has to reconnect. Untick anything you want to stop.'}
+          : 'A new passkey is created on this device and the old one retired. Everything you have granted — apps, your agent’s planes, friends — is re-approved under the new key in the same signature, so nothing you connected has to reconnect. Untick anything you want to stop.'}
       >
         {rotate.done ? (
           <Stack gap={0.5}>

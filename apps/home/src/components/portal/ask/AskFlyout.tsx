@@ -75,7 +75,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   /** Spec 361 I4 — a screen's command: the one act it knows, with the person's choices as arguments. */
   command?: AskCommand | null;
   onCommandUsed?: () => void;
-  /** An app opened this window for ONE act (`/contacts?add=…&from=<app>`): only that act's question, its progress and
+  /** An app opened this window for ONE act (`/friends?add=…&from=<app>`): only that act's question, its progress and
    *  "Done" — no conversation, composer, controls or memory lines. Nothing about what is signed changes. */
   focused?: boolean;
 }) {
@@ -1411,7 +1411,7 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
           <summary className="muted" style={{ fontSize: 11.5, cursor: 'pointer' }}>Details</summary>
           <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0', lineHeight: 1.5 }}>
             Your Home signs {capabilityWords(reply.capability)} as <AgentName address={d.delegator} /> for this request only, expiring in {d.expiresInMinutes} minutes.
-            {friendAct === 'add' ? ' The same signature lets them read your contact profile.' : ' It revokes the grant you gave them, on chain.'} You can undo it at any time.
+            {friendAct === 'add' ? ' The same signature lets them read your profile.' : ' It revokes the grant you gave them, on chain.'} You can undo it at any time.
           </p>
         </details>
       </div>

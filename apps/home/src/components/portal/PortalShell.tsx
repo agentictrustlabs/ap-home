@@ -61,7 +61,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   const [focused, setFocused] = useState(false);
   useEffect(() => {
     const q = window.location.search;
-    setFocused(pathname === '/contacts' && /[?&]from=/.test(q) && /[?&](add|remove)=/.test(q));
+    setFocused((pathname === '/friends' || pathname === '/contacts') && /[?&]from=/.test(q) && /[?&](add|remove)=/.test(q));
   }, [pathname]);
   const searchParams = useSearchParams();
   // Spec 397 §6 — `/you?run=<runRef>`: the run an assistant parked for this person's signature. Read HERE, by the shell
@@ -140,7 +140,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     if (agentAddress && a.toLowerCase() === agentAddress.toLowerCase()) return agentName ? nameLabel(agentName) : 'you';
     return undefined;
   };
-  // AN APP'S ONE QUESTION (`/contacts?add=…&from=<app>`): the window shows that act alone — no topbar, sidebar or
+  // AN APP'S ONE QUESTION (`/friends?add=…&from=<app>`): the window shows that act alone — no topbar, sidebar or
   // footer. The page itself still runs (it names the act), out of sight.
   if (focused)
     return (
@@ -162,7 +162,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
             <div className="ask-flyout-body">
               <p style={{ fontSize: 15 }}>Your Home isn’t ready to do this here yet.</p>
               <p className="muted" style={{ fontSize: 13 }}>Open it in full to finish setting up, then try again.</p>
-              <a className="btn" href={pathname ?? '/contacts'} target="_blank" rel="noreferrer">Open my Home</a>{' '}
+              <a className="btn" href={pathname ?? '/friends'} target="_blank" rel="noreferrer">Open my Home</a>{' '}
               <button type="button" className="btn ghost" onClick={() => window.close()}>Close</button>
             </div>
           </div>

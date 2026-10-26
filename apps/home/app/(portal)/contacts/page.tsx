@@ -1,17 +1,11 @@
-'use client';
-// Contacts (spec 401) — membership on the person agent: the agents you let in, with the grant you gave each.
-import { SectionShell } from '../../../src/components/portal/SectionShell';
-import { ContactsPanel } from '../../../src/components/portal/ContactsPanel';
-import { RuntimePairingPanel } from '../../../src/components/portal/RuntimePairingPanel';
+// "Contacts" is "Friends" now. next.config redirects `/contacts` before this renders; this page is the
+// fallback for a client-side navigation, and it keeps the query (an app's `?add=…&from=…` request).
+import { redirect } from 'next/navigation';
 
-export default function ContactsPage() {
-  return (
-    <SectionShell
-      title="Contacts"
-      description="The people and services you have let in — a friend, a coach, your own runtime — each with the grant you gave them. Yours alone; nothing here is published."
-    >
-      <ContactsPanel />
-      <RuntimePairingPanel />
-    </SectionShell>
-  );
+export default async function ContactsRedirect({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const sp = await searchParams;
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(sp)) for (const x of Array.isArray(v) ? v : v === undefined ? [] : [v]) q.append(k, x);
+  const qs = q.toString();
+  redirect(qs ? `/friends?${qs}` : '/friends');
 }

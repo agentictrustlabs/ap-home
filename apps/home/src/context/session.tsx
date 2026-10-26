@@ -6,7 +6,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { AUD, cacheConnectionCustodian, fetchProfile, type BasicProfile, declareEstate } from '../connect-client';
-import { loadImpactProfile } from '../profile-store';
+import { loadImpactProfile, isProfilePhoto } from '../profile-store';
+import { setPersonAvatar } from '../lib/avatar-store';
 import { exchangeCode } from '../server-client';
 import { nameLabel, parseAgentSubdomain } from '../lib/domain';
 import { setSsoCookie, readSsoCookie, clearSsoCookie } from '../lib/sso-cookie';
@@ -189,6 +190,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const c = stored.contact ?? {};
       const full = [c.firstName, c.lastName].map((s) => (s ?? '').trim()).filter(Boolean).join(' ');
       setPersonName(full || null);
+      // The photo rides the same read: the vault holds it, the page's avatars draw from this cached copy — so one
+      // set or removed on another device shows here. A failed read (below) leaves the cache as it was.
+      setPersonAvatar(addr, isProfilePhoto(c.photo) ? c.photo : null);
     } catch {
       setPersonName(null);
     }
