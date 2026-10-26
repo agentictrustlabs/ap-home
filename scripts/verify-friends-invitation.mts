@@ -24,10 +24,12 @@ const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1
 type Reply = { kind?: string; error?: string; text?: string; runRef?: string; resumeToken?: string; requirement?: MandateRequirementV1; delegator?: Address; delegate?: Address; alsoApprove?: Array<{ digest: Hex }>; prompt?: { kind?: string; digest?: Hex; stepRef?: string; signer?: string; payload?: unknown }; result?: unknown; results?: Array<{ toolId: string; result: unknown }> };
 type Person = Awaited<ReturnType<typeof personaCustodian>>;
 
-const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
+// The runtime, through the Home's proxy — or straight (VIA_RUNTIME=1), for an estate whose proxy times out on-chain steps.
+const RT = process.env.VIA_RUNTIME === '1' ? fx.a2a : `${HOME}/a2a`;
+const csrfRes = await fetch(`${RT}/auth/csrf`, { headers: { origin: HOME } });
 const csrf = (await j(csrfRes)) as { token?: string };
 const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0] ?? '', 'x-csrf-token': csrf.token ?? '' };
-const post = async (who: Person, path: string, body: unknown) => j(await fetch(`${HOME}/a2a${path}`, { method: 'POST', headers: H, body: JSON.stringify({ session: who.bearer, ...(body as object) }) }));
+const post = async (who: Person, path: string, body: unknown) => j(await fetch(`${RT}${path}`, { method: 'POST', headers: H, body: JSON.stringify({ session: who.bearer, ...(body as object) }) }));
 /** A call under the person's own bearer — the Home's routes and the runtime's session-gated ones. */
 const asPerson = async (who: Person, url: string, body: unknown) => j(await fetch(url, { method: 'POST', headers: { ...H, authorization: `Bearer ${who.bearer}` }, body: JSON.stringify(body) }));
 
@@ -84,13 +86,13 @@ const token = sent.token!; const expiresAt = Date.parse(sent.expiresAt!);
 console.log(`  invitation made (${email})`);
 
 // 2. her half, signed now: the grant to her own agent
-const prepared = (await asPerson(her, `${HOME}/a2a/friend-invitation/prepare`, { token, expiresAt })) as { ok?: boolean; digest?: Hex; grant?: { delegator: string; delegate: string }; error?: string };
+const prepared = (await asPerson(her, `${RT}/friend-invitation/prepare`, { token, expiresAt })) as { ok?: boolean; digest?: Hex; grant?: { delegator: string; delegate: string }; error?: string };
 if (!prepared.ok || !prepared.digest) fail(`her half could not be prepared: ${JSON.stringify(prepared).slice(0, 300)}`);
 if (prepared.grant?.delegator.toLowerCase() !== sheSa) fail('the prepared grant is not hers');
-const forged = (await asPerson(her, `${HOME}/a2a/friend-invitation/offer`, { token, expiresAt, signature: await him.signDigest(prepared.digest!) })) as { ok?: boolean; error?: string };
+const forged = (await asPerson(her, `${RT}/friend-invitation/offer`, { token, expiresAt, signature: await him.signDigest(prepared.digest!) })) as { ok?: boolean; error?: string };
 console.log(`  twin · his signature on her half → ${forged.ok ? 'KEPT' : `refused: ${forged.error}`}`);
 if (forged.ok) fail('a signature that is not hers was kept as her half');
-const kept = (await asPerson(her, `${HOME}/a2a/friend-invitation/offer`, { token, expiresAt, signature: await her.signDigest(prepared.digest!) })) as { ok?: boolean; status?: string; error?: string };
+const kept = (await asPerson(her, `${RT}/friend-invitation/offer`, { token, expiresAt, signature: await her.signDigest(prepared.digest!) })) as { ok?: boolean; status?: string; error?: string };
 console.log(`  her half kept → ${kept.ok ? kept.status : `refused: ${kept.error}`}`);
 if (!kept.ok || kept.status !== 'pending') fail(`her half was not kept: ${JSON.stringify(kept).slice(0, 300)}`);
 
@@ -105,8 +107,9 @@ if (!has((await friendsOf(him)).friends, sheSa)) fail('he does not list her as a
 // twin: the same invitation again completes nothing a second time
 const again = await act(him, `accept ${fx.people.steward}'s invitation`, 'person.friend.add', { friend: sheSa, invitation: token });
 const gr = resultOf(again, 'person.friend.add') as { invitation?: { redeemed?: boolean; reason?: string } };
-console.log(`  twin · accepted again → redeemed=${gr.invitation?.redeemed} (${gr.invitation?.reason})`);
-if (gr.invitation?.redeemed !== false) fail('the invitation was redeemed a second time');
+console.log(`  twin · accepted again → ${again.kind}: redeemed=${gr.invitation?.redeemed} (${gr.invitation?.reason})`);
+if (!ok(again)) fail(`accepting again did not answer: ${JSON.stringify(again).slice(0, 400)}`);
+if (gr.invitation?.redeemed !== false) fail(`the invitation was redeemed a second time: ${JSON.stringify(gr).slice(0, 400)}`);
 
 // 4. she removes him: her ROOT grant revoked on chain; he sees ENDED
 const removed = await act(her, `remove ${fx.people.member} as a friend`, 'person.friend.remove', { friend: heSa });
