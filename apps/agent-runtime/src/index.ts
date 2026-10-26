@@ -178,6 +178,7 @@ const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stat
 import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY, CAPABILITY_WORDS, type PlannerTraceV1 } from './harness-run.js';
 import { beatEntry, friendsPresence, livePresence, presencePort } from './presence.js';
 import { expectedDeliversOfGold, harnessEnforcers, standingAbsentKey } from './harness-run.js';
+import { prepareInvitationOffer, storeInvitationOffer } from './friend-invitations.js';
 import { judgeOutcomePerClass } from '@agenticprimitives/orchestration';
 import { stateCheckOf, recordTypeOfClass, fieldsOfShape, type DomainShapeV1 } from './state-check.js';
 import { workersAiTranscriber, repairTranscript, hearingVocabulary, spokenFor } from './voice.js';
@@ -11679,6 +11680,34 @@ app.get('/presence/friends', async (c) => {
   const rows = await friendsPresence(cdeps, port, who.sa, now);
   const me = livePresence(await port.read(who.sa), now);
   return c.json({ ok: true, me, friends: rows, here: rows.filter((r) => r.presence.length).length, at: new Date(now).toISOString() });
+});
+
+/**
+ * FRIENDSHIP BY INVITATION (friend-invitations.ts) — the inviter signs their half when the email goes out, at their
+ * Home: `prepare` answers the grant to sign (fixed by the token and the invitation's expiry), `offer` checks the
+ * signature against their account and keeps it in their own vault beside the invitation. Nothing else is done here;
+ * the half is completed when the invitee accepts with the token (person.friend.add { invitation }).
+ */
+app.post('/friend-invitation/:step', async (c) => {
+  const step = c.req.param('step');
+  if (step !== 'prepare' && step !== 'offer') return c.json({ ok: false, error: 'not found' }, 404);
+  const who = await presenceCaller(c);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const body = (await c.req.json().catch(() => ({}))) as { token?: unknown; expiresAt?: unknown; signature?: unknown; type?: unknown };
+  const fdeps = { env: c.env, enforcers: harnessEnforcers(c.env as never), vaultServerId: vaultServerId(c.env as never) };
+  const token = String(body.token ?? '');
+  const expiresAt = Number(body.expiresAt);
+  if (step === 'prepare') {
+    const out = prepareInvitationOffer(fdeps, who.sa, token, expiresAt);
+    return c.json(out, out.ok ? 200 : 400);
+  }
+  const d = harnessDeps(c.env, buildAuditSink(c.env));
+  const out = await storeInvitationOffer({
+    ...fdeps,
+    ...(d.writeSubjectRecord ? { writeSubjectRecord: d.writeSubjectRecord } : {}),
+    ...(d.readContract ? { readContract: d.readContract as never } : {}),
+  }, who.sa, { token, expiresAt, signature: String(body.signature ?? '') as Hex, friendType: body.type });
+  return c.json(out.ok ? { ok: true, status: out.record.status, expiresAt: out.record.expiresAt } : out, out.ok ? 200 : 400);
 });
 
 app.post('/email/send', async (c) => {

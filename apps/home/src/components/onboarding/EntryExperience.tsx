@@ -829,6 +829,8 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
         {appRequest
           ? appRequest.act === 'profile'
             ? 'Sign in the way you usually do to save your profile change. You will see it before anything is saved.'
+            : appRequest.act === 'invitation'
+            ? 'Sign in the way you usually do to finish your friend invitation. You will see what it does before you say yes.'
             : `Sign in the way you usually do to ${appRequest.act} ${appRequest.name ?? 'your friend'}${appRequest.act === 'add' ? ' as a friend' : ''}. Then this window closes by itself.`
           : enroll
           ? 'Sign in, then you’ll return.'

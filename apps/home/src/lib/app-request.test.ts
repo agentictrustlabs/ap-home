@@ -16,5 +16,7 @@ describe('an app\'s one request', () => {
     // a profile change an app proposed is one too — signing in comes back to it
     expect(appRequestOf({ pathname: '/profile-update', search: '?p=abc&from=seed-reader' })).toEqual({ act: 'profile', name: null, from: 'seed-reader' });
     expect(appRequestOf({ pathname: '/profile-update', search: '?from=seed-reader' })).toBeNull();
+    expect(appRequestOf({ pathname: '/friend-invitation', search: '?t=abc&from=seed-reader' })).toEqual({ act: 'invitation', name: null, from: 'seed-reader' });
+    expect(appRequestOf({ pathname: '/friend-invitation', search: '?from=seed-reader' })).toBeNull();
   });
 });

@@ -623,6 +623,16 @@
       "timeoutSec": 420
     },
     {
+      "id": "verify-friends-invitation",
+      "script": "scripts/verify-friends-invitation.mts",
+      "spec": "401 C1",
+      "proves": "an email invitation makes a two-way friendship in the invitee's one act: the inviter signs her half when she sends (a grant to her own agent, kept beside the invitation), the invitee accepts with the token, and both list each other as friends; her removal revokes her root grant on chain and he sees ENDED",
+      "twin": "a signature that is not the inviter's is refused and nothing kept; the same invitation accepted again completes nothing a second time",
+      "required": false,
+      "paced": false,
+      "timeoutSec": 420
+    },
+    {
       "id": "verify-security-asks",
       "script": "scripts/verify-security-asks.mts",
       "spec": "422 §9.1 (W1)",
