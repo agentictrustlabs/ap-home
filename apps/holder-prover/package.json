@@ -8,8 +8,8 @@
     "start": "node server.mjs"
   },
   "dependencies": {
-    "@agenticprimitives/delegation": "1.0.0-alpha.45",
-    "@agenticprimitives/key-custody": "1.0.0-alpha.45",
+    "@agenticprimitives/delegation": "1.0.0-alpha.46",
+    "@agenticprimitives/key-custody": "1.0.0-alpha.46",
     "@agenticprimitives/privacy-credentials": "0.0.0-alpha.21",
     "@agenticprimitives/privacy-credentials-openac": "0.0.0-alpha.10",
     "viem": "2.52.2",
