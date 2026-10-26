@@ -110,6 +110,8 @@ describe('/connect/profile-proposal', () => {
     expect(proposalFields({ photo: 'https://evil.example/x.png' })).toEqual({ error: expect.stringMatching(/JPEG, PNG or WebP/) });
     expect(proposalFields({ firstName: 3 })).toEqual({ error: 'firstName must be text' });
     expect(proposalFields({ photo: null })).toEqual({ photo: null });
+    expect(proposalFields({ about: ' a line ' })).toEqual({ about: 'a line' });
+    expect(proposalFields({ about: 'x'.repeat(400) })).toEqual({ about: 'x'.repeat(300) });
     expect(proposalFields({ firstName: 'x'.repeat(200) })).toEqual({ firstName: 'x'.repeat(80) });
   });
 

@@ -60,6 +60,9 @@ export interface ImpactContactProfile {
    *  Held here, in the vault, so it follows the person to every device; the browser keeps only a cache of it
    *  (`lib/avatar-store.ts`). Not one of the shareable fields: no app receives it through a profile grant. */
   photo?: string;
+  /** A line about the person, in their words (up to 300 characters) — what an app that shows their profile, such as
+   *  the Seed Bible reader, shows under their name. Held with the rest of the profile so it is the same everywhere. */
+  about?: string;
 }
 
 /** Where a `signed-release` document's commitment came from: the publisher's signed release, read over A2A.
@@ -99,8 +102,8 @@ export interface ImpactStoredProfile {
   attestations?: { wea?: StoredAttestation } & Record<string, StoredAttestation | undefined>;
 }
 
-export type ImpactContactScalarKey = Exclude<keyof ImpactContactProfile, 'location' | 'photo'>;
-export type ImpactProfileFieldKey = Exclude<keyof ImpactContactProfile, 'photo'>;
+export type ImpactContactScalarKey = Exclude<keyof ImpactContactProfile, 'location' | 'photo' | 'about'>;
+export type ImpactProfileFieldKey = Exclude<keyof ImpactContactProfile, 'photo' | 'about'>;
 
 export const SHAREABLE_PROFILE_KEYS: readonly ImpactProfileFieldKey[] = [
   'firstName', 'lastName', 'email', 'phone', 'location', 'country', 'city',
@@ -326,3 +329,6 @@ export async function seedImpactProfileFields(addr: Address, fields: Partial<Imp
   }
   console.warn('[profile-seed] vault key never bound — connection data not seeded (edit it on /profile)');
 }
+
+/** The longest line about a person the profile keeps. */
+export const MAX_ABOUT_CHARS = 300;

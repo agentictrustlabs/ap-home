@@ -8,7 +8,7 @@ import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../src/context/session';
 import { loadImpactProfile, saveImpactProfile, isProfilePhoto, type ImpactContactProfile } from '../../../src/profile-store';
 
-interface Fields { firstName?: string; lastName?: string; photo?: string | null }
+interface Fields { firstName?: string; lastName?: string; about?: string; photo?: string | null }
 
 const fullName = (c: { firstName?: string; lastName?: string }) =>
   [c.firstName, c.lastName].map((s) => (s ?? '').trim()).filter(Boolean).join(' ');
@@ -52,6 +52,10 @@ export default function ProfileUpdatePage() {
       const contact: ImpactContactProfile = { ...(cur.contact ?? {}) };
       if (fields.firstName !== undefined) contact.firstName = fields.firstName;
       if (fields.lastName !== undefined) contact.lastName = fields.lastName;
+      if (fields.about !== undefined) {
+        if (fields.about.trim()) contact.about = fields.about.trim();
+        else delete contact.about;
+      }
       if (fields.photo === null) delete contact.photo;
       else if (fields.photo !== undefined && isProfilePhoto(fields.photo)) contact.photo = fields.photo;
       await saveImpactProfile(agentAddress as Address, { ...cur, contact });
@@ -91,6 +95,13 @@ export default function ProfileUpdatePage() {
               <div style={{ fontSize: 13, opacity: 0.7 }}>Name</div>
               <div style={{ textDecoration: 'line-through', opacity: 0.6 }}>{nameNow || 'none'}</div>
               <div style={{ fontWeight: 600 }}>{nameNew || 'none'}</div>
+            </div>
+          )}
+          {fields.about !== undefined && (
+            <div style={box}>
+              <div style={{ fontSize: 13, opacity: 0.7 }}>About you</div>
+              <div style={{ textDecoration: 'line-through', opacity: 0.6 }}>{current?.about || 'none'}</div>
+              <div style={{ fontWeight: 600 }}>{fields.about || 'none'}</div>
             </div>
           )}
           {photoNew !== undefined && (

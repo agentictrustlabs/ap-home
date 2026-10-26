@@ -1,6 +1,6 @@
 // A PROFILE CHANGE PROPOSED BY AN APP, SAVED BY THE PERSON AT THEIR HOME.
 //
-//   POST /connect/profile-proposal   { firstName?, lastName?, photo? }   bearer: the person (an app's id_token or a
+//   POST /connect/profile-proposal   { firstName?, lastName?, about?, photo? }   bearer: the person (an app's id_token or a
 //                                    Home session) → { ok, token, expiresAt }
 //   GET  /connect/profile-proposal?token=…                               bearer: the SAME person's Home session
 //                                    → { ok, client, fields, expiresAt }
@@ -26,7 +26,7 @@ const KEY = (token: string) => `profile-proposal:${token}`;
 export interface ProfileProposal {
   person: string;
   client: string | null;
-  fields: { firstName?: string; lastName?: string; photo?: string | null };
+  fields: { firstName?: string; lastName?: string; about?: string; photo?: string | null };
   expiresAt: number;
 }
 
@@ -39,6 +39,10 @@ export function proposalFields(body: unknown): ProfileProposal['fields'] | { err
     if (b[k] === undefined) continue;
     if (typeof b[k] !== 'string') return { error: `${k} must be text` };
     out[k] = (b[k] as string).trim().slice(0, 80);
+  }
+  if (b.about !== undefined) {
+    if (typeof b.about !== 'string') return { error: 'about must be text' };
+    out.about = b.about.trim().slice(0, 300);
   }
   if (b.photo !== undefined) {
     if (b.photo === null) out.photo = null;

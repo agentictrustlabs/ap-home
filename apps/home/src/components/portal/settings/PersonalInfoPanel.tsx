@@ -15,6 +15,7 @@ import {
   type ImpactContactProfile,
   type ImpactContactScalarKey,
   type ImpactProfileFieldKey,
+  MAX_ABOUT_CHARS,
 } from '../../../profile-store';
 import { useSession } from '../../../context/session';
 import { profileThroughHarness, type ProfileFields } from '../../../home/profile-harness';
@@ -231,6 +232,29 @@ export function PersonalInfoPanel({
             setContact((c) => { const n = { ...c }; if (photo) n.photo = photo; else delete n.photo; return n; });
           }}
         />
+      )}
+
+      {/* A line about you — shown under your name by apps that show your profile (the Seed Bible reader). Your own
+          profile only, like the photo. */}
+      {!requiredKeys && (
+        <div className="settings-field" data-testid="profile-about">
+          <label htmlFor="profile-about">About you</label>
+          <textarea
+            id="profile-about"
+            rows={3}
+            maxLength={MAX_ABOUT_CHARS}
+            value={contact.about ?? ''}
+            placeholder="A line about you"
+            onChange={(e) => {
+              const v = e.currentTarget.value;
+              setContact((c) => { const n = { ...c }; if (v.trim()) n.about = v; else delete n.about; return n; });
+              setSavedNotice(null);
+            }}
+          />
+          <div className="settings-field__help">
+            {(contact.about ?? '').length}/{MAX_ABOUT_CHARS} · Shown under your name by apps that show your profile.
+          </div>
+        </div>
       )}
 
       {PROFILE_FIELDS.filter((f) => f.key === 'firstName' || f.key === 'lastName' || f.key === 'email' || f.key === 'phone').map((f) => (
