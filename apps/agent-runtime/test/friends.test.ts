@@ -94,3 +94,37 @@ describe('the other half, already signed', () => {
   });
 });
 
+
+describe('two-way: their half decides (owner, 2026-10-26)', () => {
+  const removedNamingAlice = (removedAt: number): ContactRecordV1 => ({ ...contact(ALICE, 'friend', 'removed'), removedAt });
+  it('a friend who removed me is ENDED, not a friend — shown so it is never mistaken for one', async () => {
+    const d = { ...deps(), readSubjectRecord: async (s: string, t: string) => (s === ALICE ? store.get(t) ?? null : s === BOB && t === contactRecordType(ALICE) ? removedNamingAlice(1_800_000_000_000) : null) };
+    const out = (await friendListInvoker(d, ALICE)('person.friend.list', {}, ctx())) as { friends: Array<{ agent: string }>; ended: Array<{ agent: string; name: string | null; type: string; endedAt: string | null }>; note: string };
+    expect(out.friends.map((f) => f.agent)).not.toContain(BOB);
+    expect(out.ended).toEqual([{ agent: BOB, name: 'bob.me', type: 'friend', endedAt: new Date(1_800_000_000_000).toISOString() }]);
+    expect(out.note).toMatch(/removed you/);
+  });
+  it('a request they withdrew (removed me since) is no longer a request', async () => {
+    const FAY = '0x00000000000000000000000000000000000000f1';
+    const d = { ...deps(), readSubjectRecord: async (s: string, t: string) => (s === ALICE ? store.get(t) ?? null : s === FAY && t === contactRecordType(ALICE) ? removedNamingAlice(1_800_000_000_000) : null) };
+    const out = (await friendListInvoker(d, ALICE)('person.friend.list', {}, ctx())) as { requests: Array<{ agent: string }> };
+    expect(out.requests).toEqual([]);
+  });
+  it('every friend carries the type I gave them; a coach is a friend too, a runtime never is', async () => {
+    const local = new Map(store);
+    local.set(contactRecordType(DAN), contact(DAN, 'coach', 'contact', true));
+    const d = { ...deps(), readSubjectRecord: async (s: string, t: string) => (s === ALICE ? local.get(t) ?? null : null), survey: async () => [...local.keys()].map((recordType) => ({ recordType })), readRecords: async (_s: string, keys: string[]) => Object.fromEntries(keys.map((k) => [k, local.get(k)])) };
+    const out = (await friendListInvoker(d, ALICE)('person.friend.list', {}, ctx())) as { friends: Array<{ agent: string; type: string }> };
+    expect(out.friends.find((f) => f.agent === DAN)?.type).toBe('coach');
+    expect(out.friends.find((f) => f.agent === CARA)?.type).toBe('family');
+    expect(out.friends.map((f) => f.agent)).not.toContain(GOOSE);
+  });
+  it('someone I removed who asks again AFTER is a request again', async () => {
+    const local = new Map(store);
+    local.set(contactRecordType(EVE), { ...contact(EVE, 'friend', 'removed'), removedAt: Date.parse('2026-10-01T00:00:00.000Z') });
+    local.set('inbox.data', { contactNotices: [{ from: EVE, at: '2026-10-24T00:00:00.000Z', grantDigest: '0x' + '3'.repeat(64) }] });
+    const d = { ...deps(), readSubjectRecord: async (s: string, t: string) => (s === ALICE ? local.get(t) ?? null : null), survey: async () => [...local.keys()].map((recordType) => ({ recordType })), readRecords: async (_s: string, keys: string[]) => Object.fromEntries(keys.map((k) => [k, local.get(k)])) };
+    const out = (await friendListInvoker(d, ALICE)('person.friend.list', {}, ctx())) as { requests: Array<{ agent: string }> };
+    expect(out.requests.map((r) => r.agent)).toEqual([EVE]);
+  });
+});

@@ -14,14 +14,15 @@ import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { getServer, ownIssuer, json, type FnContext } from '../_lib/server-broker';
 import { signBridgeCall } from '../_lib/bridge-hmac';
 
-export type ConnectorName = 'calendar' | 'gmail' | 'drive' | 'contacts';
-export const CONNECTORS: Record<ConnectorName, { provider: 'google-calendar' | 'google-gmail' | 'google-drive' | 'google-contacts'; read: string[]; write?: string[] }> = {
+// No address-book connector (owner, 2026-10-26): friends are two-way, self-sovereign relationships — a Google Contacts
+// book is the CRM idea this Home does not carry.
+export type ConnectorName = 'calendar' | 'gmail' | 'drive';
+export const CONNECTORS: Record<ConnectorName, { provider: 'google-calendar' | 'google-gmail' | 'google-drive'; read: string[]; write?: string[] }> = {
   calendar: { provider: 'google-calendar', read: ['https://www.googleapis.com/auth/calendar.readonly'], write: ['https://www.googleapis.com/auth/calendar.events'] },
   gmail: { provider: 'google-gmail', read: ['https://www.googleapis.com/auth/gmail.readonly'], write: ['https://www.googleapis.com/auth/gmail.compose'] },
   drive: { provider: 'google-drive', read: ['https://www.googleapis.com/auth/drive.readonly'] },
-  contacts: { provider: 'google-contacts', read: ['https://www.googleapis.com/auth/contacts.readonly'] },
 };
-export const isConnectorName = (n: string): n is ConnectorName => n === 'calendar' || n === 'gmail' || n === 'drive' || n === 'contacts';
+export const isConnectorName = (n: string): n is ConnectorName => n === 'calendar' || n === 'gmail' || n === 'drive';
 // kept for the calendar's first callers
 export const CALENDAR_SCOPE_READ = CONNECTORS.calendar.read[0]!;
 export const CALENDAR_SCOPE_EVENTS = CONNECTORS.calendar.write![0]!;

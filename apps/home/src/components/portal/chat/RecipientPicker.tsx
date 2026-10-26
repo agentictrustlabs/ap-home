@@ -13,7 +13,7 @@ import { playbookBehind, playbookBehindWords } from '../../../home/playbook-behi
 import { agentClassOf } from '../../../lib/agent-class';
 import { useManagedAgents } from '../ManagedAgents';
 import { useSession } from '../../../context/session';
-import { readContactsThroughHarness } from '../../../home/contacts-harness';
+import { readFriendsThroughHarness } from '../../../home/friends-harness';
 import { AvatarUpload } from './AvatarUpload';
 import { personAvatarKey } from '../../../lib/avatar-store';
 import { useAvatar } from './use-avatar';
@@ -92,7 +92,7 @@ export function RecipientPicker({
    *  member who chose no join name, instead of showing their address. */
   names?: Readonly<Record<string, string>>;
 }) {
-  const [selected, setSelected] = useState<string>('contacts');
+  const [selected, setSelected] = useState<string>('friends');
   const [rows, setRows] = useState<PickedRecipient[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -120,9 +120,9 @@ export function RecipientPicker({
     }
     const byLabel = (x: ScopeEntry, y: ScopeEntry) => x.label.localeCompare(y.label, undefined, { sensitivity: 'base' });
     return [
-      // Spec 401 — CONTACTS FIRST: the people and agents the person let in, from their own vault; the derived scopes
+      // Spec 401 — FRIENDS FIRST: the people the person is friends with (both said yes), from their own vault; the derived scopes
       // (names, organizations, workspaces) follow.
-      { id: 'contacts', scope: 'contacts', label: 'Friends', sub: 'people and services you let in', Icon: GlobeIcon },
+      { id: 'friends', scope: 'friends', label: 'Friends', sub: 'people you are friends with', Icon: GlobeIcon },
       { id: 'names', scope: 'names', label: 'People', sub: 'anyone with a name', Icon: GlobeIcon },
       ...orgs.sort(byLabel),
       ...(services.length ? [{ id: 'services', scope: 'services' as const, label: 'Services', sub: `${services.length} you steward`, Icon: WorkspaceIcon }] : []),
@@ -144,8 +144,8 @@ export function RecipientPicker({
     const t = window.setTimeout(() => {
       const load: Promise<PickedRecipient[]> = active.scope === 'services'
         ? Promise.resolve(agents.filter((a) => a.kind === 'service').map((a) => ({ address: a.agent.toLowerCase(), title: a.name || `${a.agent.slice(0, 6)}…${a.agent.slice(-4)}`, subtitle: 'service', ...(a.name ? { name: a.name } : {}), scope: 'services' as const })))
-        : active.scope === 'contacts'
-        ? (agentAddress ? readContactsThroughHarness({ person: agentAddress as `0x${string}`, session: { token } }).then((r) => (r.ok ? r.contacts.map((c) => ({ address: c.contact.toLowerCase(), title: c.name ?? `${c.contact.slice(0, 6)}…${c.contact.slice(-4)}`, subtitle: c.role, ...(c.name ? { name: c.name } : {}), scope: 'contacts' as const })) : Promise.reject(new Error(r.error)))) : Promise.resolve([]))
+        : active.scope === 'friends'
+        ? (agentAddress ? readFriendsThroughHarness({ person: agentAddress as `0x${string}`, session: { token } }).then((r) => (r.ok ? r.friends.map((f) => ({ address: f.agent.toLowerCase(), title: f.name ?? `${f.agent.slice(0, 6)}…${f.agent.slice(-4)}`, subtitle: f.type, ...(f.name ? { name: f.name } : {}), scope: 'friends' as const })) : Promise.reject(new Error(r.error)))) : Promise.resolve([]))
         : active.scope === 'names'
         ? listNamedAgents(namesQuery.length >= 2 ? namesQuery : '')
         : fetchRoster(token, active.id).then((roster) =>
@@ -181,12 +181,12 @@ export function RecipientPicker({
   const first = recentRows[0] ?? listed[0];
 
   const groups: { key: string; title: string; items: ScopeEntry[] }[] = [
-    { key: 'contacts', title: '', items: entries.filter((e) => e.scope === 'contacts') },
+    { key: 'friends', title: '', items: entries.filter((e) => e.scope === 'friends') },
     { key: 'names', title: '', items: entries.filter((e) => e.scope === 'names') },
     { key: 'orgs', title: 'Organizations', items: entries.filter((e) => e.scope === 'organization') },
     { key: 'services', title: '', items: entries.filter((e) => e.scope === 'services') },
   ];
-  const paneTitle = active.scope === 'contacts' ? 'Your friends' : active.scope === 'names' ? 'People with a name' : active.scope === 'services' ? 'Services you steward' : `Members of ${active.label}`;
+  const paneTitle = active.scope === 'friends' ? 'Your friends' : active.scope === 'names' ? 'People with a name' : active.scope === 'services' ? 'Services you steward' : `Members of ${active.label}`;
 
   return (
     <div className="chat-picker" data-testid="dm-picker">
@@ -197,7 +197,7 @@ export function RecipientPicker({
           autoFocus
           data-testid="dm-compose-to"
           className="chat-compose-to__input"
-          placeholder={active.scope === 'names' ? 'Search by name…' : active.scope === 'contacts' ? 'Search your friends…' : `Search ${active.label}…`}
+          placeholder={active.scope === 'names' ? 'Search by name…' : active.scope === 'friends' ? 'Search your friends…' : `Search ${active.label}…`}
           value={query}
           onChange={(e) => onQuery(e.target.value)}
           onKeyDown={(e) => {

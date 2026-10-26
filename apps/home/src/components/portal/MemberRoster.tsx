@@ -115,8 +115,8 @@ export function MemberRoster({ agent, title = 'Members' }: { agent: string; titl
           <FilterChip active={kind === 'agent'} count={members ? agents : undefined} onClick={() => setKind('agent')}>Services</FilterChip>
         </div>
         {/* Spec 400 W1b — the Members-panel shortcut: pair your own runtime (Claude Code, goose) as a member of this
-            workspace. The ceremony lives on your Friends → Your runtimes; this is the door from where the roster is. */}
-        <LinkButton size="sm" href="/friends#runtimes" title="Pair your own Claude Code or goose as a member — a code from your Home, your signatures">Add a runtime</LinkButton>
+            workspace. The ceremony lives on Developer tools → Runtimes; this is the door from where the roster is. */}
+        <LinkButton size="sm" href="/developer/runtimes" title="Pair your own Claude Code or goose as a member — a code from your Home, your signatures">Add a runtime</LinkButton>
       </div>
       <Panel title="Roster" icon={<InboxIcon />} count={shown.length} state={state} rows={5} lead testId="roster"
         empty={{ title: needle || kind !== 'all' ? 'No member matches' : 'No members yet', hint: needle || kind !== 'all' ? 'Clear the search or the filter.' : 'Invite someone under Settings → Membership; they appear here once they accept.' }}>

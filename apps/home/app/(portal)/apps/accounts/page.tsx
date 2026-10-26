@@ -13,7 +13,6 @@ export default function ConnectedAccountsPage() {
       <ConnectorCard name="calendar" returnTo="/apps/accounts" />
       <ConnectorCard name="gmail" returnTo="/apps/accounts" />
       <ConnectorCard name="drive" returnTo="/apps/accounts" />
-      <ConnectorCard name="contacts" returnTo="/apps/accounts" />
       <YouVersionData />
     </SectionShell>
   );

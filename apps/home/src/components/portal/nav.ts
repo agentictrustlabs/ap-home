@@ -301,6 +301,7 @@ export function developerPane(): SettingsGroup[] {
     { heading: 'Developer tools', items: [
       { id: 'dev-overview', label: 'Overview', href: '/developer', Icon: CodeIcon, status: 'live' },
       { id: 'dev-apps', label: 'Your apps', href: '/developer/apps', Icon: GlobeIcon, status: 'live' },
+      { id: 'dev-runtimes', label: 'Runtimes', href: '/developer/runtimes', Icon: BotIcon, status: 'live' },
     ] },
     { heading: 'Evals', items: [
       { id: 'dev-evals-overview', label: 'What evals are', href: '/developer/evals', Icon: DatabaseIcon, status: 'live' },

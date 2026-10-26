@@ -367,9 +367,9 @@ describe('owner 2026-10-01 — the Developer tools pane', () => {
     expect(buildUserMenu(whitelabel).map((i) => i.label)).not.toContain('Your apps');
     expect(paneGroups('developer', ORG_SCOPE, 'member')).toEqual(developerPane());
   });
-  it('one page per thing: apps, the five evals surfaces, the kit — every resident row under /developer, none a placeholder', () => {
+  it('one page per thing: apps, runtimes (moved off Friends, owner 2026-10-26), the five evals surfaces, the kit — every resident row under /developer, none a placeholder', () => {
     const items = developerPane().flatMap((g) => g.items);
-    expect(items.map((i) => i.id)).toEqual(['dev-overview', 'dev-apps', 'dev-evals-overview', 'dev-evals-skills', 'dev-evals-acts', 'dev-evals-techniques', 'dev-evals-gates', 'dev-evals-run', 'dev-registry']);
+    expect(items.map((i) => i.id)).toEqual(['dev-overview', 'dev-apps', 'dev-runtimes', 'dev-evals-overview', 'dev-evals-skills', 'dev-evals-acts', 'dev-evals-techniques', 'dev-evals-gates', 'dev-evals-run', 'dev-registry']);
     for (const i of items) { expect(i.status).toBe('live'); expect(i.disabledReason).toBeUndefined(); if (!i.crossLink) expect(i.href.startsWith('/developer')).toBe(true); }
     expect(developerPane().map((g) => g.heading)).toEqual(['Developer tools', 'Evals', 'The kit']);
   });

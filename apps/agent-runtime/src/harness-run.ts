@@ -59,7 +59,6 @@ import { WORK_SEARCH_TOOL, workSearchInvoker } from './work-search-tool.js';
 import { GITHUB_TOOLS, GITHUB_ACTS, githubInvoker } from './connectors/github-tools.js';
 import { CALENDAR_TOOLS, CALENDAR_ACTS, calendarInvoker } from './connectors/calendar-tools.js';
 import { MAIL_DRIVE_TOOLS, MAIL_DRIVE_ACTS, mailDriveInvoker } from './connectors/mail-drive-tools.js';
-import { CONTACTS_GOOGLE_TOOLS, contactsGoogleInvoker } from './connectors/contacts-google-tools.js';
 import { connectorStatus } from './connectors/google-token.js';
 import { MEMORY_TOOLS, MEMORY_ACTS, MEMORY_LIST_TOOL, MEMORY_REMEMBER, memoryFactsInvoker, memoryProposalFor, connectorMemoryProposal } from './memory-facts-tools.js';
 import { ROUTINE_TOOLS, ROUTINE_ACTS, ROUTINE_LIST, routineInvoker, compiledRoutine } from './routine-tools.js';
@@ -2461,7 +2460,6 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (WEB_SEARCH_TOOLS.some((t) => t.id === toolId)) return webSearchInvoker(env as never)(toolId, args, ctx);
     if (PREFERENCES_TOOLS.some((t) => t.id === toolId)) return preferencesInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee)(toolId, args, ctx);
     if (MAIL_DRIVE_TOOLS.some((t) => t.id === toolId)) return mailDriveInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
-    if (CONTACTS_GOOGLE_TOOLS.some((t) => t.id === toolId)) return contactsGoogleInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, person)(toolId, args, ctx);
     if (CALENDAR_TOOLS.some((t) => t.id === toolId)) return calendarInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (LIBRARY_TOOLS.some((t) => t.id === toolId)) { if (!deps.readSubjectRecord) throw new Error('the private tier is not configured'); return libraryInvoker({ readSubjectRecord: deps.readSubjectRecord, ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}), ...(deps.signAsAgent ? { signAsOwner: deps.signAsAgent } : {}), ...(deps.announceShelf ? { announce: deps.announceShelf } : {}), ...(deps.holdCatalog ? { holdCatalog: deps.holdCatalog } : {}), stewardOf: (who, owner) => stewardshipOver({ readSubjectRecord: deps.readSubjectRecord!, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}) }, who, owner) }, addressee, person)(toolId, args, ctx); }
     if (isMcpTool(toolId) || toolId === MCP_CONNECTORS_LIST) return mcpConnectorInvoker({ env: env as never, readConnectors: (h) => mcpConnectorsOf(deps, h), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
@@ -5911,9 +5909,6 @@ step is then handed to that agent under authority the person grants; leave it ou
     // no act); a playbook that pins `person.friend.list` itself carries its contract.
     ...(playbook?.tools?.[FRIEND_LIST_TOOL.id] ? [mergeContractTool(FRIEND_LIST_TOOL, playbook.tools[FRIEND_LIST_TOOL.id])] : playbook?.tools?.[CONTACT_LIST_TOOL.id] ? [FRIEND_LIST_TOOL] : []),
     ...(playbook?.tools?.[PRESENCE_LIST_TOOL.id] ? [mergeContractTool(PRESENCE_LIST_TOOL, playbook.tools[PRESENCE_LIST_TOOL.id])] : playbook?.tools?.[CONTACT_LIST_TOOL.id] ? [PRESENCE_LIST_TOOL] : []),
-    // Google Contacts ride the friends invite: a playbook that offers contacts offers the address-book read
-    // (an observation for inviting; never stored as a friend).
-    ...CONTACTS_GOOGLE_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [unlessConnected(mergeContractTool(t, playbook.tools[t.id]!))] : playbook?.tools?.[CONTACT_LIST_TOOL.id] || playbook?.tools?.[FRIEND_LIST_TOOL.id] ? [unlessConnected(t)] : [])),
     ...(playbook?.tools?.[CONTACT_REMOVE_TOOL.id] ? [mergeContractTool(CONTACT_REMOVE_TOOL, playbook.tools[CONTACT_REMOVE_TOOL.id])] : []),
     // Spec 380 — one member of an organization, asked through their own agent (fan-out over the roster).
     MEMBER_CONSULT_TOOL,

@@ -1,17 +1,15 @@
 'use client';
-// Friends (spec 401; the runtime's word is "contacts") — membership on the person agent: the agents you let in, with the grant you gave each.
+// Friends (spec 401) — two-way relationships: you add someone, they accept, and you are friends.
 import { SectionShell } from '../../../src/components/portal/SectionShell';
-import { ContactsPanel } from '../../../src/components/portal/ContactsPanel';
-import { RuntimePairingPanel } from '../../../src/components/portal/RuntimePairingPanel';
+import { FriendsPanel } from '../../../src/components/portal/FriendsPanel';
 
 export default function FriendsPage() {
   return (
     <SectionShell
       title="Friends"
-      description="The people and services you have let in — a friend, a coach, your own runtime — each with the grant you gave them. Yours alone; nothing here is published."
+      description="People you’re connected with. You become friends when you both say yes."
     >
-      <ContactsPanel />
-      <RuntimePairingPanel />
+      <FriendsPanel />
     </SectionShell>
   );
 }
