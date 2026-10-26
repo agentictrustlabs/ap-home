@@ -150,7 +150,7 @@ describe('step 2 — a stored playbook\'s older ids read as the friend capabilit
       archetypeId: 'person-steward', archetypeVersion: '1', digest: '0x', instructions: '',
       capabilityIds: new Set(['person.contact.invite', 'person.contact.remove', 'person.contact.list', 'person.friend.list', 'messaging.direct.send']),
       tools: {
-        'person.contact.invite': { id: 'person.contact.invite', description: 'add', capability: { id: 'person.contact.invite', action: 'invite', resourceArg: 'contact', authorityArg: 'person' } },
+        'person.contact.invite': { id: 'person.contact.invite', description: 'add', inputSchema: { type: 'object', properties: { contact: { type: 'string' } }, required: ['contact'] }, carries: { role: ['x'] }, capability: { id: 'person.contact.invite', action: 'invite', resourceArg: 'contact', authorityArg: 'person' } },
         'person.contact.list': { id: 'person.contact.list', description: 'old list' },
         'person.friend.list': { id: 'person.friend.list', description: 'friends' },
       },
@@ -158,7 +158,11 @@ describe('step 2 — a stored playbook\'s older ids read as the friend capabilit
       declaredEffects: { 'person.contact.remove': [] },
     } as never) as unknown as { capabilityIds: Set<string>; tools: Record<string, { id: string; description: string; capability?: { id: string; resourceArg?: string } }>; specialists: Array<{ capability: string }>; declaredEffects: Record<string, unknown> };
     expect([...pb.capabilityIds].sort()).toEqual(['messaging.direct.send', 'person.friend.add', 'person.friend.list', 'person.friend.remove']);
-    expect(pb.tools['person.friend.add']).toMatchObject({ id: 'person.friend.add', capability: { id: 'person.friend.add', resourceArg: 'friend' } });
+    // an aliased contract keeps its WORDS only: nothing in it that names the old arguments survives (live, 2026-10-26:
+    // the Ask asked the person for a "contact" because the old contract's schema required one)
+    expect(pb.tools['person.friend.add']).toMatchObject({ id: 'person.friend.add', description: 'add' });
+    expect(pb.tools['person.friend.add']?.capability).toBeUndefined();
+    expect((pb.tools['person.friend.add'] as Record<string, unknown>).inputSchema).toBeUndefined();
     expect(pb.tools['person.friend.list']?.description).toBe('friends'); // the current id wins over an aliased one
     expect(Object.keys(pb.tools).some((k) => k.includes('contact'))).toBe(false);
     expect(pb.specialists[0]!.capability).toBe('person.friend.add');
@@ -169,5 +173,17 @@ describe('step 2 — a stored playbook\'s older ids read as the friend capabilit
     expect(canonicalArgs('person.contact.invite', { contact: BOB, role: 'coach' })).toEqual({ friend: BOB, type: 'coach' });
     expect(canonicalArgs('person.friend.add', { friend: BOB })).toEqual({ friend: BOB });
     expect(canonicalCapabilityId('messaging.direct.send')).toBe('messaging.direct.send');
+  });
+});
+
+describe('step 2, end to end — what the Ask offers under an old playbook', () => {
+  it('person.friend.add asks for `friend`, never `contact`', async () => {
+    const { mergeContractTool } = await import('../src/harness-run.js');
+    const { FRIEND_ADD_TOOL } = await import('../src/friend-offers.js');
+    const pb = withCapabilityAliases({ archetypeId: 'p', archetypeVersion: '1', digest: '0x', instructions: '', capabilityIds: new Set(['person.contact.invite']),
+      tools: { 'person.contact.invite': { id: 'person.contact.invite', description: 'add a contact', inputSchema: { type: 'object', properties: { contact: { type: 'string' } }, required: ['contact'] } } } } as never) as unknown as { tools: Record<string, never> };
+    const offered = mergeContractTool(FRIEND_ADD_TOOL, pb.tools['person.friend.add']);
+    expect((offered.inputSchema as { required?: string[] }).required).toEqual(['friend']);
+    expect(Object.keys((offered.inputSchema as { properties: object }).properties)).not.toContain('contact');
   });
 });

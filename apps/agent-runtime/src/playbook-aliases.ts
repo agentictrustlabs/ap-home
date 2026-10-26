@@ -42,10 +42,14 @@ export function withCapabilityAliases<T extends Scope | null>(pb: T): T {
     const next: NonNullable<Scope['tools']> = {};
     for (const [id, t] of Object.entries(tools)) {
       const to = canonicalCapabilityId(id);
-      if (to !== id && tools[to]) continue;
-      const argMap = ARG_ALIASES[to] ?? {};
-      const cap = t.capability ? { ...t.capability, id: canonicalCapabilityId(t.capability.id), ...(t.capability.resourceArg && argMap[t.capability.resourceArg] ? { resourceArg: argMap[t.capability.resourceArg] } : {}) } : undefined;
-      next[to] = { ...t, id: to, ...(cap ? { capability: cap } : {}) };
+      if (to === id) { next[id] = t; continue; }
+      if (tools[to]) continue;
+      // AN ALIASED CONTRACT SPEAKS THE OLD ARGUMENTS: its input schema says `contact` is required, its carries and its
+      // interaction binding name `role`, its utterances fill them. Kept, the Ask asks the person for a "contact" the
+      // screen never sends (2026-10-26, live). So only its WORDS travel — description, verbs, answers — and everything
+      // that names an argument is dropped, leaving the running capability's own (current) declaration in force.
+      const { inputSchema: _s, carries: _c, utterances: _u, interaction: _i, capability: _cap, invoke: _inv, ...words } = t as typeof t & Record<string, unknown>;
+      next[to] = { ...words, id: to } as typeof t;
     }
     tools = next;
   }

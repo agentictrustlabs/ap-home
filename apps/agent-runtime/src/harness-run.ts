@@ -5144,6 +5144,11 @@ export async function runUnderMandate(envIn: HarnessEnv, deps: HarnessDeps, inpu
   // the run reaches for are carried the same way. The reply's composer is chosen by the caller, which applies the
   // same arm to the closure it passes in. Absent ⇒ the deployment's setting, which is every ordinary run.
   const env = withGatewayVariant(envIn, input.variant?.gateway) as HarnessEnv;
+  // Spec 401 §10 — a SUPPLIED plan (a screen's command, an app) naming a renamed capability runs as the capability it is
+  // now, under its current argument names; refused as "not offered" otherwise, before any invoker could translate it.
+  if (input.plan?.steps.some((st) => canonicalCapabilityId(st.toolId) !== st.toolId)) {
+    input = { ...input, plan: { ...input.plan, steps: input.plan.steps.map((st) => ({ ...st, toolId: canonicalCapabilityId(st.toolId), ...(st.args ? { args: canonicalArgs(st.toolId, st.args) } : {}) })) } };
+  }
   const resolved: ResolvedParties = new Map();
   const events: RunEvent[] = [];
   const chainId = Number(env.CHAIN_ID);
