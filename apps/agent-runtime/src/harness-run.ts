@@ -2420,6 +2420,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
         ...(deps.deliverFriendRequest ? { deliverFriendRequest: deps.deliverFriendRequest } : {}),
         ...(deps.executeAsServiceSa ? { executeAsServiceSa: deps.executeAsServiceSa } : {}),
         ...(deps.readContract ? { readContract: deps.readContract } : {}),
+        ...(deps.signAsHarness ? { signAsHarness: deps.signAsHarness } : {}),
         digestBindingArgsFor, stepDigests,
       };
       // Friends: the two-way view — both halves, and who is waiting on whom (friends.ts).

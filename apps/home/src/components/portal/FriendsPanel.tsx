@@ -21,7 +21,8 @@ import { playbookBehind, playbookBehindWords } from '../../home/playbook-behind'
 import { searchAgentsKb } from '../../lib/agent-search';
 import { kindOfName } from '@agenticprimitives/ontology/participant-vocabulary';
 import { whitelabel } from '../../whitelabel/config';
-import { activateInteractionsIfNeeded, resolveVia } from '../../home/onboarding';
+import { activateInteractionsIfNeeded, resolveVia, signHashFor } from '../../home/onboarding';
+import { signInvitationHalf } from '../../home/friend-invitation';
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '');
@@ -67,7 +68,7 @@ export function FriendsPanel() {
   const [emailOpen, setEmailOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteNote, setInviteNote] = useState('');
-  const [inviteState, setInviteState] = useState<{ busy: boolean; done?: string; error?: string }>({ busy: false });
+  const [inviteState, setInviteState] = useState<{ busy: boolean; done?: string; error?: string; half?: { token: string; expiresAt: number; state: 'ask' | 'signing' | 'done' } }>({ busy: false });
   // Where each friend is right now (the runtime's /presence/friends); this page beats so friends see "at their Home".
   const [presence, setPresence] = useState<Record<string, Array<{ app: string; label?: string; at: number }>>>({});
 
@@ -126,7 +127,9 @@ export function FriendsPanel() {
             .catch(() => null);
       if (!agent) return;
       const name = (new URLSearchParams(window.location.search).get('name') ?? '').trim() || add;
-      askCommand({ toolId: 'person.friend.add', args: { friend: agent, type: 'friend' }, message: `add ${name} as a friend`, ...(/^0x/i.test(name) ? {} : { labels: { [agent]: name } }) });
+      // Accepting an email invitation: its token lets the inviter's agent complete their half in the same act.
+      const invitation = (new URLSearchParams(window.location.search).get('invitation') ?? '').trim().toLowerCase();
+      askCommand({ toolId: 'person.friend.add', args: { friend: agent, type: 'friend', ...(/^[a-f0-9]{40,80}$/.test(invitation) ? { invitation } : {}) }, message: `add ${name} as a friend`, ...(/^0x/i.test(name) ? {} : { labels: { [agent]: name } }) });
     })();
   }, [session]);
   // …or whom to remove (`?remove=<address or name>`): the same act as the row's Remove — the flyout still asks first.
@@ -173,6 +176,18 @@ export function FriendsPanel() {
     const type = acceptType[agent] ?? 'friend';
     askCommand({ toolId: 'person.friend.add', args: { friend: agent, type }, message: type === 'friend' ? `add ${label(agent, name)} as a friend` : `add ${label(agent, name)} as a friend (${type})`, ...(name ? { labels: { [agent]: name } } : {}) });
   };
+  // Your half, signed now, so whoever accepts the invitation is your friend at once (src/home/friend-invitation.ts).
+  const signHalf = async () => {
+    const half = inviteState.half;
+    if (!session || !agentAddress || !half) return;
+    setInviteState((s) => ({ ...s, error: undefined, half: { ...half, state: 'signing' } }));
+    try {
+      const signHash = await signHashFor(resolveVia(profile?.credential, session.via), agentAddress as Address, { token: session.token });
+      const out = await signInvitationHalf({ session, token: half.token, expiresAt: half.expiresAt, signHash });
+      if (!out.ok) throw new Error(out.error);
+      setInviteState((s) => ({ ...s, half: { ...half, state: 'done' } }));
+    } catch (e) { setInviteState((s) => ({ ...s, error: e instanceof Error ? e.message : String(e), half: { ...half, state: 'ask' } })); }
+  };
   const remove = (agent: string, name: string | null, words: (who: string) => string) => {
     askCommand({ toolId: 'person.friend.remove', args: { friend: agent }, message: words(label(agent, name)), ...(name ? { labels: { [agent]: name } } : {}) });
   };
@@ -186,9 +201,13 @@ export function FriendsPanel() {
         method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
         body: JSON.stringify({ email, note: inviteNote.trim() || undefined, fromName: agentName ?? undefined }),
       });
-      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; delivery?: string };
+      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; delivery?: string; token?: string; expiresAt?: string };
       if (!r.ok || !d.ok) throw new Error(d.error ?? `could not send (${r.status})`);
-      setInviteState({ busy: false, done: d.delivery === 'sent' ? `Invitation sent to ${email}.` : `This Home doesn't send mail, so nothing went out to ${email}.` });
+      const expiresAt = d.expiresAt ? Date.parse(d.expiresAt) : NaN;
+      setInviteState({
+        busy: false, done: d.delivery === 'sent' ? `Invitation sent to ${email}.` : `This Home doesn't send mail, so nothing went out to ${email}.`,
+        ...(d.token && Number.isFinite(expiresAt) ? { half: { token: d.token, expiresAt, state: 'ask' as const } } : {}),
+      });
       setInviteEmail(''); setInviteNote('');
     } catch (e) { setInviteState({ busy: false, error: e instanceof Error ? e.message : String(e) }); }
   };
@@ -309,6 +328,13 @@ export function FriendsPanel() {
               </div>
               <Meta>The email comes from you. When they join, they can add you — then you’ll see their request here.</Meta>
               {inviteState.done && <Note>{inviteState.done}</Note>}
+              {inviteState.half && inviteState.half.state !== 'done' && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Meta>Be friends the moment they accept, with nothing more to do later?</Meta>
+                  <Button size="sm" variant="primary" onClick={() => void signHalf()} disabled={inviteState.half.state === 'signing'} data-testid="invite-half-yes">{inviteState.half.state === 'signing' ? 'Saving…' : 'Yes, be friends when they accept'}</Button>
+                </div>
+              )}
+              {inviteState.half?.state === 'done' && <Note>You will be friends when they accept.</Note>}
               {inviteState.error && <ErrorNote>{inviteState.error}</ErrorNote>}
             </div>
           )}

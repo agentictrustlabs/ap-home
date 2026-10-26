@@ -2873,6 +2873,14 @@ export class InteractionsDO {
               const digest = rec.grantDigest ?? hashDelegation({ ...wire, salt: BigInt(String(wire.salt)), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
               const member = k.startsWith('org.invite:agent:');
               if (member && rec.status === 'removed') continue;
+              // The inviter's half of an email invitation, waiting for whoever accepts: a grant to their own agent, listed
+              // while it can still be used; once redeemed the friendship's own `friend:<sa>` row stands for it.
+              if (k.startsWith('friend:invitation:')) {
+                const inv = v as { status?: string; offeredAt?: number; expiresAt?: number };
+                if (inv.status !== 'pending' || (inv.expiresAt ?? 0) < Date.now()) continue;
+                rows.push({ kind: 'friend', holder: String(wire.delegate).toLowerCase(), what: 'friendship by email invitation · waiting for them to accept', digest, ...(inv.offeredAt ? { issuedAt: new Date(inv.offeredAt).toISOString() } : {}), revoked: await revokedOf(digest), source: k, signed: signedOf(wire) });
+                continue;
+              }
               // A friendship offer (`friend:`, or a not-yet-moved legacy record) is the grant behind one half of a friendship;
               // a legacy record for a runtime or an assistant is a service's standing grant, listed for what it is.
               const offer = member ? null : asOffer(v);

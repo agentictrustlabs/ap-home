@@ -19,6 +19,7 @@ import { encodeFunctionData, keccak256, toBytes, type Address, type Hex } from '
 import { InputRequired, signatureFor, type ToolInvoker, type ToolSpec, type MandatePresentation, type SuppliedInputV1 } from '@agenticprimitives/orchestration';
 import { buildCaveat, buildVaultRecordScopeCaveat, encodeTimestampTerms, encodeValueTerms, decodeTimestampTerms, hashDelegation, intentDigest, ROOT_AUTHORITY, type Caveat, type Delegation } from '@agenticprimitives/delegation';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
+import { isInvitationToken, redeemInvitation, revocableGrantOf, type RedeemResult } from './friend-invitations.js';
 
 export const FRIEND_ADD_CAPABILITY = 'person.friend.add' as const;
 export const FRIEND_REMOVE_CAPABILITY = 'person.friend.remove' as const;
@@ -49,6 +50,7 @@ export const FRIEND_ADD_TOOL: ToolSpec = {
       friend: { type: 'string', description: 'Who to add, as the ask names them (a name, a typed name, or an address)' },
       type: { type: 'string', description: 'friend | family | coach | other (default friend)' },
       person: { type: 'string', description: 'Whose friends — the person asking (their own agent). Omit: it is always the asker.' },
+      invitation: { type: 'string', description: 'The token of the email invitation being accepted, when there is one — the inviter\'s half is completed with it. Filled by the screen, never by the planner.' },
     },
     required: ['friend'],
   },
@@ -146,6 +148,8 @@ export interface FriendDeps {
   readContract?: (args: { address: Address; abi: readonly unknown[]; functionName: string; args: readonly unknown[] }) => Promise<unknown>;
   /** The person's SA executes a call under their redeemed mandate (the revoke) — the same path access.grant.revoke uses. */
   executeAsServiceSa?: (serviceSa: Address, callData: Hex) => Promise<{ txHash: string }>;
+  /** The harness SA signs a raw delegation digest — how an invitation's grant is handed on (friend-invitations.ts). */
+  signAsHarness?: (digest: Hex) => Promise<Hex>;
   /** The mandate's digest-binding caveat argued for THIS step (the harness's own helper, injected). */
   digestBindingArgsFor: (caveat: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation?: 1 | 2 | 3 }) => Hex;
   /** Spec 408 §1.4/§2.3 — the digests a step presents at redemption. */
@@ -285,6 +289,9 @@ export function friendAddInvoker(deps: FriendDeps, presented: MandatePresentatio
     const type = asFriendType(args.type ?? args.role);
     if (!deps.writeSubjectRecord || !deps.readSubjectRecord) throw new Error('this agent cannot keep friends');
     const me = person.toLowerCase();
+    // ACCEPTING AN EMAIL INVITATION: the inviter signed their half when they sent it; it is completed once mine stands.
+    const redeem = async (): Promise<{ invitation: RedeemResult } | Record<string, never>> =>
+      isInvitationToken(args.invitation) ? { invitation: await redeemInvitation(deps, friend, person, args.invitation).catch((e: unknown) => ({ redeemed: false as const, reason: e instanceof Error ? e.message : String(e) })) } : {};
     await migrateLegacyOffers(deps, me); // an old record for this person moves before it is read as "already offered"
     const existing = await readOffer(deps, me, friend);
     if (existing?.status === 'standing') {
@@ -293,7 +300,9 @@ export function friendAddInvoker(deps: FriendDeps, presented: MandatePresentatio
         ? await deps.deliverFriendRequest({ sender: person, recipient: friend, grantDigest: existing.grantDigest }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
         : undefined;
       if (mayBePerson(kind)) await requestBack(deps, person, friend);
-      return { added: false, friend, type: existing.friendType, alreadyOffered: true, grantDigest: existing.grantDigest, ...(told ? { requested: told } : {}), note: 'you have already offered this person friendship — nothing changed' };
+      const invited = await redeem();
+      const nowFriends = 'invitation' in invited && invited.invitation.redeemed;
+      return { added: false, friend, type: existing.friendType, alreadyOffered: true, grantDigest: existing.grantDigest, ...(told ? { requested: told } : {}), ...invited, ...(nowFriends ? { friends: true } : {}), note: nowFriends ? 'you are friends now — the invitation completed their half' : 'you have already offered this person friendship — nothing changed' };
     }
     // the grant, signed by the person (folded into the mandate's prompt when the Home approved it in the same batch)
     const digest = intentDigest(ctx.intent);
@@ -315,6 +324,7 @@ export function friendAddInvoker(deps: FriendDeps, presented: MandatePresentatio
     if (!wrote.ok) throw new Error(/record_scope_denied|scope/i.test(wrote.error ?? '')
       ? 'your storage permission predates friends — turn your storage on again (one signature; nothing else changes), then add them again'
       : `your friendship offer could not be recorded: ${wrote.error ?? 'write refused'}`);
+    const invited = await redeem();
     const theirs = await readOffer(deps, friend, me);
     const nowFriends = theirs?.status === 'standing' || (await whoOfferedMe(deps, me)).has(friend);
     // WHAT FOLLOWS (spec 360): they are TOLD — a message carrying the reference the Home renders as "accept", and the
@@ -327,7 +337,7 @@ export function friendAddInvoker(deps: FriendDeps, presented: MandatePresentatio
       ? await deps.deliverFriendRequest({ sender: person, recipient: friend, grantDigest }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
       : undefined;
     if (mayBePerson(kind)) await requestBack(deps, person, friend);
-    return { added: true, friend, type, grantDigest, delegation, told, ...(requested ? { requested } : {}), friends: nowFriends, note: nowFriends ? 'you are friends now — they had already offered theirs' : 'friend request sent; you are friends once they accept' };
+    return { added: true, friend, type, grantDigest, delegation, told, ...(requested ? { requested } : {}), ...invited, friends: nowFriends, note: nowFriends ? 'you are friends now — they had already offered theirs' : 'friend request sent; you are friends once they accept' };
   };
 }
 
@@ -349,7 +359,7 @@ export function friendRemoveInvoker(deps: FriendDeps, presented: MandatePresenta
     const rec = await readOffer(deps, me, friend);
     if (rec?.status !== 'standing') return { removed: false, friend, note: 'you have no friendship offer to this person — nothing to remove' };
     if (!deps.executeAsServiceSa) throw new Error('this agent cannot revoke on chain here');
-    const g = rec.delegation;
+    const g = revocableGrantOf(rec); // through an invitation: the inviter's own root, which ends the chain
     const inner = encodeFunctionData({ abi: REVOKE_BY_OWNER_ABI, functionName: 'revokeDelegationByOwner', args: [{ delegator: g.delegator as Address, delegate: g.delegate as Address, authority: g.authority as Hex, caveats: g.caveats.map((c) => ({ enforcer: c.enforcer as Address, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex })), salt: BigInt(g.salt), signature: g.signature as Hex }] });
     const dm = deps.env.DELEGATION_MANAGER as Address;
     const serviceSa = (deps.env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
