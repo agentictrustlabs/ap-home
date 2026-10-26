@@ -41,16 +41,21 @@ export async function submitUntilRun<R>(input: {
   nonceNow: () => Promise<bigint>;
   opNonce: bigint;
   tries?: number;
-}): Promise<{ receipt: R; inner: Judged; ran: 'here' | 'elsewhere' | 'not-run'; attempts: number }> {
+}): Promise<{ receipt: R | null; inner: Judged; ran: 'here' | 'elsewhere' | 'not-run'; attempts: number; error?: string }> {
   const tries = input.tries ?? 3;
-  let receipt = await input.submit();
-  let inner = input.judge(receipt);
+  // A send that THROWS (the shared relayer's nonce taken under it: "nonce too low", a replaced transaction) is the
+  // same unknown as a receipt without our op — the nonce decides — never a bare 500 to the person.
+  let error: string | undefined;
+  const send = async (): Promise<{ receipt: R | null; inner: Judged }> => {
+    try { const r = await input.submit(); return { receipt: r, inner: input.judge(r) }; }
+    catch (e) { error = e instanceof Error ? e.message : String(e); return { receipt: null, inner: { ok: false, matched: false } }; }
+  };
+  let { receipt, inner } = await send();
   for (let attempt = 1; ; attempt++) {
     if (inner.ok || inner.matched !== false) return { receipt, inner, ran: 'here', attempts: attempt };
     const now = await input.nonceNow().catch(() => null);
     if (now !== null && now > input.opNonce) return { receipt, inner, ran: 'elsewhere', attempts: attempt };
-    if (attempt >= tries) return { receipt, inner, ran: 'not-run', attempts: attempt };
-    receipt = await input.submit();
-    inner = input.judge(receipt);
+    if (attempt >= tries) return { receipt, inner, ran: 'not-run', attempts: attempt, ...(error ? { error } : {}) };
+    ({ receipt, inner } = await send());
   }
 }

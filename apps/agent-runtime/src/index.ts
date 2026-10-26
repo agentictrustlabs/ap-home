@@ -4297,9 +4297,9 @@ app.post('/harness/authorize', async (c) => {
       nonceNow: async () => (await pubN.readContract({ address: c.env.ENTRY_POINT as Address, abi: ENTRY_POINT_NONCE_ABI, functionName: 'getNonce', args: [delegator, opNonce >> 64n] })) as bigint,
       opNonce,
     });
-    const receipt = sent.receipt as { transactionHash: Hex };
+    const receipt = (sent.receipt ?? { transactionHash: '0x' }) as { transactionHash: Hex };
     const inner = sent.inner as ReturnType<typeof detectInnerOpFailure>;
-    if (sent.ran === 'not-run') return c.json({ ok: false, error: `your approval did not reach the chain (sent ${sent.attempts} times; tx ${receipt.transactionHash}) — nothing was approved, so try again` }, 503);
+    if (sent.ran === 'not-run') return c.json({ ok: false, error: `your approval did not reach the chain (sent ${sent.attempts} times${sent.error ? `; ${sent.error.slice(0, 160)}` : `; tx ${receipt.transactionHash}`}) — nothing was approved, so try again` }, 503);
     if (sent.ran === 'elsewhere') return c.json({ ok: true, txHash: receipt.transactionHash, ranElsewhere: true });
     /**
      * A RECEIPT WITH NOBODY'S EVENT IN IT IS NOT A REVERT (2026-09-17). A shared bundler batches, and the
@@ -7056,9 +7056,9 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
         nonceNow: async () => (await pubN.readContract({ address: env.ENTRY_POINT as Address, abi: ENTRY_POINT_NONCE_ABI, functionName: 'getNonce', args: [sender, opNonce >> 64n] })) as bigint,
         opNonce,
       });
-      const receipt = sent.receipt as { transactionHash: Hex };
+      const receipt = (sent.receipt ?? { transactionHash: '0x' }) as { transactionHash: Hex };
       if (sent.ran === 'elsewhere') return { txHash: receipt.transactionHash as Hex };
-      if (sent.ran === 'not-run') throw new Error(`the redemption did not reach the chain (sent ${sent.attempts} times; tx ${receipt.transactionHash}) — nothing changed`);
+      if (sent.ran === 'not-run') throw new Error(`the redemption did not reach the chain (sent ${sent.attempts} times${sent.error ? `; ${sent.error.slice(0, 160)}` : `; tx ${receipt.transactionHash}`}) — nothing changed`);
       const inner = sent.inner as ReturnType<typeof detectInnerOpFailure>;
       // An inner revert is a FAILED step, thrown so the loop records it — never a silent success with a tx hash.
       if (!inner.ok) throw new Error(`redemption reverted on chain: ${inner.revertReason ?? 'inner userOp reverted'} (tx ${receipt.transactionHash})`);

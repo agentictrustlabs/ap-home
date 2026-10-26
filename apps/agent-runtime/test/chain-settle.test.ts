@@ -57,3 +57,15 @@ describe('a userOp that is not in its receipt', () => {
     expect(out.ran).toBe('here'); expect(sends).toBe(1);
   });
 });
+
+describe('a send that throws', () => {
+  it('is judged by the nonce like a missing op: sent again, then ours', async () => {
+    let sends = 0;
+    const out = await submitUntilRun({ submit: async () => { if (++sends === 1) throw new Error('nonce too low'); return sends; }, judge: () => ({ ok: true }), nonceNow: async () => 7n, opNonce: 7n });
+    expect(out.ran).toBe('here'); expect(sends).toBe(2);
+  });
+  it('that keeps throwing is said as not run, with the reason — never thrown on as a bare error', async () => {
+    const out = await submitUntilRun({ submit: async () => { throw new Error('nonce too low'); }, judge: () => ({ ok: true }), nonceNow: async () => 7n, opNonce: 7n, tries: 2 });
+    expect(out).toMatchObject({ ran: 'not-run', attempts: 2, error: 'nonce too low' });
+  });
+});
