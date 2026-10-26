@@ -49,8 +49,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     jsonCorsBase(body, req, status, dynamicOrigin);
 
   // One lifetime for this request: the minted token, and any KV binding that must not outlive it.
-  const ttl = idTokenTtl(env);
   const body = (await request.json().catch(() => ({}))) as TokenBody;
+  const ttl = idTokenTtl(env, body.client_id);
 
   // ── Delegation grant — silent re-auth (spec 230 / ADR-0019; SEC-002 closure) ──
   // A relying site that already HOLDS a live, in-window delegation gets a fresh id_token

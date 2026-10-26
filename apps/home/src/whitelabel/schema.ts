@@ -39,6 +39,9 @@ export interface RelyingApp {
    *  Read ONLY by construction (`issueReadGrant`); a write is never on this rail. Absent means none, which is what
    *  every client gets today. Turns something ON — review it hardest. */
   read_grant?: { resources: readonly string[] };
+  /** OPTIONAL — how long this app's sign-in (its id_token) lasts, in seconds, in place of the deployment's
+   *  ID_TOKEN_TTL_SECONDS; bounded by the same floor and 30-day ceiling. For an app people keep open for days. */
+  session_ttl_seconds?: number;
   /** OPTIONAL — spec 345. A `delegator = delegate = personSA` grant scoped to the person's OWN
    *  vault record family, minted in the SAME plain sign-in ceremony every relying app already
    *  runs (`givePermission` / template `site-login`) — no org, no team, no stewardship, no

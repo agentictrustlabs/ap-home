@@ -29,6 +29,7 @@ import { buildActAsMeSet, signActAsMeSet, PAYMENT_CAPABILITY, type ActChoice } f
 import type { Address, CredentialPrincipal, Hex } from '@agenticprimitives/types';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
+import { clientSessionTtl } from '../_lib/session-ttl';
 import { demoCustodianAddress, demoPersonaFor, listDemoPersonas, signDigestAsDemoPersona } from '../_lib/demo-custody';
 import { issueAskAsMeDelegation, issueSiteDelegation, toWire } from '../../src/lib/delegation';
 import { issueReadGrant } from '../../src/lib/read-grant-build';
@@ -185,7 +186,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // The identity half. Binding the digest to this client keeps silent re-auth (/token
   // grant_type=delegation) working for the demo session exactly as it does for a real one — and
   // keeps it FAILING for any other client, so a demo delegation can't be replayed sideways.
-  const idToken = await mintIdToken({ iss, sub, aud: clientId, agentName: actingName, ttlSeconds: ID_TOKEN_TTL }, signer);
+  const idTtl = clientSessionTtl(clientId) ?? ID_TOKEN_TTL;
+  const idToken = await mintIdToken({ iss, sub, aud: clientId, agentName: actingName, ttlSeconds: idTtl }, signer);
   await env.AUTH_CODES.put(
     `oidc-deleg:${digest.toLowerCase()}`,
     JSON.stringify({ client_id: clientId, agent_name: actingName }),
@@ -229,7 +231,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     agent_name: actingName ?? null,
     blurb: persona.blurb ?? '',
     id_token: idToken,
-    expires_in: ID_TOKEN_TTL,
+    expires_in: idTtl,
     delegation: toWire(delegation),
     ...(actSet ? { delegations: actSet } : {}),
     homeSession,

@@ -709,6 +709,8 @@ const faithImpact: WhiteLabelConfig = {
       // revocable grant for the vault profile alone, minted in the same sign-in. A change made in the reader is
       // proposed (/connect/profile-proposal) and saved by the person at their Home — the app never writes it.
       read_grant: { resources: ['vault:impact-profile'] },
+      // People keep the reader open for days; a one-hour sign-in signed them out mid-read. Seven days, this app only.
+      session_ttl_seconds: 7 * 24 * 60 * 60,
     },
     // specs 266/267 — "Bible Explorer" relying app: the Verifiable Content Substrate +
     // scripture vertical demo (demo-bible-ontology Worker). Connects via Global.Church

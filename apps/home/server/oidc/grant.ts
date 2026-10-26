@@ -71,8 +71,6 @@ interface GrantBody {
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
-  // One lifetime for this request: the minted token, and any KV binding that must not outlive it.
-  const ttl = idTokenTtl(env);
   // SEC-001 (origin check): /oidc/grant is reachable ONLY from the home SPA. A
   // non-browser caller, or a cross-origin browser caller, is rejected here.
   const iss = resolveOrigin(request, env);
@@ -92,6 +90,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   await env.AUTH_CODES.delete(grantKey);
   if (!raw) return json({ error: 'invalid or already-used grant_id' }, 400);
   const grant = JSON.parse(raw) as StoredEnrollmentGrant;
+  // One lifetime for this request: the minted token, and any KV binding that must not outlive it.
+  const ttl = idTokenTtl(env, grant.client_id);
 
   // Delegate binding: the supplied delegation's `delegate` MUST equal the delegate
   // recorded at /authorize-grant time (which came from the OIDC client registry, NOT
