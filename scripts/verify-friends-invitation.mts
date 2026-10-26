@@ -108,7 +108,11 @@ const accepted = await act(him, `accept ${fx.people.steward}'s invitation`, 'per
 const ar = resultOf(accepted, 'person.friend.add') as { added?: boolean; friends?: boolean; invitation?: { redeemed?: boolean; reason?: string } };
 console.log(`  ${fx.people.member} accepts → ${accepted.kind}: friends=${ar.friends} invitation=${JSON.stringify(ar.invitation)}`);
 if (!ok(accepted) || ar.friends !== true || ar.invitation?.redeemed !== true) fail(`accepting the invitation did not make them friends: ${JSON.stringify(accepted).slice(0, 500)}`);
-if (!has((await friendsOf(her)).friends, heSa)) fail('she does not list him as a friend');
+const herView = await friendsOf(her);
+if (!has(herView.friends, heSa)) fail('she does not list him as a friend');
+// a friend is known by their own profile's name (their grant: vault:profile.contact) — said, so a nameless agent shows
+const hisRow = (herView.friends ?? []).find((f) => f.agent.toLowerCase() === heSa) as { name?: string | null; profileName?: string; photo?: string } | undefined;
+console.log(`  she sees him as: name=${hisRow?.name ?? '—'} profileName=${hisRow?.profileName ?? '—'} photo=${hisRow?.photo ? 'yes' : 'no'}`);
 if (!has((await friendsOf(him)).friends, sheSa)) fail('he does not list her as a friend');
 
 // twin: the same invitation again completes nothing a second time
