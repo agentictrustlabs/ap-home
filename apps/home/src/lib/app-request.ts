@@ -2,7 +2,8 @@
 // Home shows only that act; if the person must sign in first, the sign-in says what it is for and brings them back
 // here afterwards (Google returns to `/`, so the request is remembered across that trip).
 export interface AppRequest {
-  act: 'add' | 'remove';
+  /** A friend act, or a profile change the app proposed (`/profile-update?p=…&from=<app>`). */
+  act: 'add' | 'remove' | 'profile';
   /** How the app named the friend, when it did. */
   name: string | null;
   from: string;
@@ -13,6 +14,7 @@ const RETURN_KEY = 'ap-app-request-return';
 export function appRequestOf(loc: Pick<Location, 'pathname' | 'search'> = window.location): AppRequest | null {
   const q = new URLSearchParams(loc.search);
   const from = q.get('from');
+  if (loc.pathname === '/profile-update') return from && q.get('p') ? { act: 'profile', name: null, from } : null;
   const act = q.get('add') ? 'add' : q.get('remove') ? 'remove' : null;
   if ((loc.pathname !== '/friends' && loc.pathname !== '/contacts') || !from || !act) return null;
   return { act, name: q.get('name')?.trim() || null, from };
@@ -30,7 +32,7 @@ export function takeAppRequestReturn(): string | null {
   try {
     const to = sessionStorage.getItem(RETURN_KEY);
     sessionStorage.removeItem(RETURN_KEY);
-    return to && (to.startsWith('/friends?') || to.startsWith('/contacts?')) ? to : null;
+    return to && (to.startsWith('/friends?') || to.startsWith('/contacts?') || to.startsWith('/profile-update?')) ? to : null;
   } catch {
     return null;
   }

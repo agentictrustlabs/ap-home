@@ -827,7 +827,9 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
       <h1 className="onboarding-h1">{appRequest ? 'Confirm it’s you' : enroll && appName ? `Continue to ${appName}` : whitelabel.copy.arrivalTitle}</h1>
       <p className="onboarding-sub">
         {appRequest
-          ? `Sign in the way you usually do to ${appRequest.act} ${appRequest.name ?? 'your friend'}${appRequest.act === 'add' ? ' as a friend' : ''}. Then this window closes by itself.`
+          ? appRequest.act === 'profile'
+            ? 'Sign in the way you usually do to save your profile change. You will see it before anything is saved.'
+            : `Sign in the way you usually do to ${appRequest.act} ${appRequest.name ?? 'your friend'}${appRequest.act === 'add' ? ' as a friend' : ''}. Then this window closes by itself.`
           : enroll
           ? 'Sign in, then you’ll return.'
           : `Sign in or get started. Your ${whitelabel.brand.name} name is how others find your agent — not something you need to remember to get back in.`}
