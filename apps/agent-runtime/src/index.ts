@@ -181,7 +181,8 @@ import { judgeOutcomePerClass } from '@agenticprimitives/orchestration';
 import { stateCheckOf, recordTypeOfClass, fieldsOfShape, type DomainShapeV1 } from './state-check.js';
 import { workersAiTranscriber, repairTranscript, hearingVocabulary, spokenFor } from './voice.js';
 import { DECISION_POINTS } from '@agenticprimitives/ontology';
-import { loadPlaybook, billed, chargeBill, memoRead, forgetMemo, projectRunState, draftRecipe, findingsOf } from '@agenticprimitives/harness';
+import { billed, chargeBill, memoRead, forgetMemo, projectRunState, draftRecipe, findingsOf } from '@agenticprimitives/harness';
+import { loadPlaybook } from './playbook-aliases.js';
 import { cardRoomActOf, cardRoomTurn, verifyStudyGrant, type CardRoomAct, type StudyAccess } from './card-room.js';
 import { enforcersFromEnv } from './org-wire.js';
 import { runUnderMandate, subjectRecordReader, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
@@ -6669,9 +6670,9 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       if (res.ok && out.ok !== false) return { ok: true as const, ...(out.messageId ? { messageId: out.messageId } : {}) };
       return { ok: false as const, error: out.error ?? `the post could not be made (${res.status})` };
     },
-    deliverContactNotice: async ({ sender, recipient, grantDigest }) => {
-      const out = (await callInteractionsInternal(env, recipient, 'internal.contact.notice', { from: sender.toLowerCase(), grantDigest }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))) as { ok?: boolean; error?: string };
-      return out.ok ? { ok: true } : { ok: false, error: out.error ?? 'the notice was not delivered' };
+    deliverFriendRequest: async ({ sender, recipient, grantDigest }) => {
+      const out = (await callInteractionsInternal(env, recipient, 'internal.friend.request', { from: sender.toLowerCase(), grantDigest }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))) as { ok?: boolean; error?: string };
+      return out.ok ? { ok: true } : { ok: false, error: out.error ?? 'the friend request was not delivered' };
     },
     sendDirectMessage: async ({ sender, recipient, bodyText, session, contextRefs, stewardship, asSelf, operationId }) => {
       const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(sender.toLowerCase()));
@@ -11634,7 +11635,7 @@ app.get('/discovery/agent', async (c) => {
  * PRESENCE (presence.ts) — where a person is right now, for their mutual friends. A person's device beats under
  * their own token: a Home session (the Home itself, app `home`) or a relying app's id_token (the app is its verified
  * `aud`). Nothing here is a record or an act; the beat lapses on its own. The read returns the person's mutual
- * friends (friends.ts — the person's own contacts and inbox decide who is a friend) with each one's live entries.
+ * friends (friends.ts — both halves of each friendship decide who is a friend) with each one's live entries.
  */
 async function presenceCaller(c: { req: { header: (n: string) => string | undefined }; env: Env }): Promise<{ ok: true; sa: Address; app: string } | { ok: false; status: number; error: string }> {
   const bearer = c.req.header('authorization')?.replace(/^Bearer /, '') ?? '';

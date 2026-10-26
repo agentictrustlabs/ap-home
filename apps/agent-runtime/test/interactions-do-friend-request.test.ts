@@ -1,4 +1,4 @@
-// A FRIEND NOTICE IN THE PERSON'S OWN INBOX RECORD (spec 401): `internal.contact.notice` keeps who added them and the
+// A FRIEND REQUEST IN THE PERSON'S OWN INBOX RECORD (spec 401 §10): `internal.friend.request` keeps who added them and the
 // grant that did — one per sender, the newest — beside the envelopes, never as one; it needs no messaging wire. A
 // whole-doc inbox write from the messaging library, which does not know the notices, does not drop them.
 import { describe, it, expect } from 'vitest';
@@ -39,18 +39,18 @@ describe('a friend notice', () => {
   it('lands in the inbox record beside the envelopes, one per sender', async () => {
     const w = world();
     w.records.set('inbox.data', { version: 1, envelopes: [{ id: 'm1' }] });
-    expect((await w.op('internal.contact.notice', { from: RUTH, grantDigest: DIGEST })).ok).toBe(true);
-    expect((await w.op('internal.contact.notice', { from: RUTH, grantDigest: DIGEST })).ok).toBe(true);
-    const doc = w.records.get('inbox.data') as { envelopes: unknown[]; contactNotices: Array<{ from: string; grantDigest: string }> };
+    expect((await w.op('internal.friend.request', { from: RUTH, grantDigest: DIGEST })).ok).toBe(true);
+    expect((await w.op('internal.friend.request', { from: RUTH, grantDigest: DIGEST })).ok).toBe(true);
+    const doc = w.records.get('inbox.data') as { envelopes: unknown[]; friendRequests: Array<{ from: string; grantDigest: string }> };
     expect(doc.envelopes).toEqual([{ id: 'm1' }]);
-    expect(doc.contactNotices.map((n) => [n.from, n.grantDigest])).toEqual([[RUTH, DIGEST]]);
+    expect(doc.friendRequests.map((n) => [n.from, n.grantDigest])).toEqual([[RUTH, DIGEST]]);
   });
 
   it('refuses a notice without a grant, from oneself, or from outside the Worker', async () => {
     const w = world();
-    expect((await w.op('internal.contact.notice', { from: RUTH })).ok).toBe(false);
-    expect((await w.op('internal.contact.notice', { from: PERSON, grantDigest: DIGEST })).ok).toBe(false);
-    const outside = await w.op('internal.contact.notice', { from: RUTH, grantDigest: DIGEST }, false);
+    expect((await w.op('internal.friend.request', { from: RUTH })).ok).toBe(false);
+    expect((await w.op('internal.friend.request', { from: PERSON, grantDigest: DIGEST })).ok).toBe(false);
+    const outside = await w.op('internal.friend.request', { from: RUTH, grantDigest: DIGEST }, false);
     expect(outside.ok).not.toBe(true);
     expect(w.records.get('inbox.data')).toBeUndefined();
   });

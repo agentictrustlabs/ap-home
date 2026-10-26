@@ -7,8 +7,8 @@
 // you, their half is gone: the friendship ENDS and this screen says so, and offers to remove yours too (your half is
 // your grant, so only your signature can take it back — it is never removed for you).
 //
-// This surface adds NO invoker of its own: it reads `person.friend.list` and hands `person.contact.invite` /
-// `person.contact.remove` (the capabilities' stored wire names) to the Ask as commands — the flyout asks, the person
+// This surface adds NO invoker of its own: it reads `person.friend.list` and hands `person.friend.add` /
+// `person.friend.remove` to the Ask as commands — the flyout asks, the person
 // signs there, and the receipt lands where every receipt lands.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
@@ -21,6 +21,7 @@ import { playbookBehind, playbookBehindWords } from '../../home/playbook-behind'
 import { searchAgentsKb } from '../../lib/agent-search';
 import { kindOfName } from '@agenticprimitives/ontology/participant-vocabulary';
 import { whitelabel } from '../../whitelabel/config';
+import { activateInteractionsIfNeeded, resolveVia } from '../../home/onboarding';
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '');
@@ -50,7 +51,8 @@ function TypeSelect({ value, onChange, label: aria }: { value: FriendType; onCha
 }
 
 export function FriendsPanel() {
-  const { session, agentAddress, agentName } = useSession();
+  const { session, agentAddress, agentName, profile } = useSession();
+  const [enabling, setEnabling] = useState<'idle' | 'busy' | 'failed'>('idle');
   const [view, setView] = useState<FriendsView | null>(null);
   const [err, setErr] = useState('');
   const [filter, setFilter] = useState<FriendType | 'all'>('all');
@@ -72,7 +74,7 @@ export function FriendsPanel() {
   const load = useCallback(async () => {
     if (!session || !agentAddress) return;
     const r = await readFriendsThroughHarness({ person: agentAddress as Address, session: { token: session.token } });
-    if (r.ok) { setView({ friends: r.friends, requests: r.requests, requested: r.requested, ended: r.ended }); setErr(''); }
+    if (r.ok) { setView({ friends: r.friends, requests: r.requests, requested: r.requested, ended: r.ended, ...(r.storageNeedsEnabling ? { storageNeedsEnabling: true } : {}) }); setErr(''); }
     else { const behind = playbookBehind(r.error); setErr(behind ? playbookBehindWords(behind.toolId) : r.error); }
   }, [session, agentAddress]);
   useEffect(() => { void load(); }, [load]);
@@ -124,7 +126,7 @@ export function FriendsPanel() {
             .catch(() => null);
       if (!agent) return;
       const name = (new URLSearchParams(window.location.search).get('name') ?? '').trim() || add;
-      askCommand({ toolId: 'person.contact.invite', args: { contact: agent, role: 'friend' }, message: `add ${name} as a friend`, ...(/^0x/i.test(name) ? {} : { labels: { [agent]: name } }) });
+      askCommand({ toolId: 'person.friend.add', args: { friend: agent, type: 'friend' }, message: `add ${name} as a friend`, ...(/^0x/i.test(name) ? {} : { labels: { [agent]: name } }) });
     })();
   }, [session]);
   // …or whom to remove (`?remove=<address or name>`): the same act as the row's Remove — the flyout still asks first.
@@ -135,7 +137,7 @@ export function FriendsPanel() {
     if (!ADDRESS.test(rm) && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(rm)) return;
     removeAsked.current = true;
     const name = (new URLSearchParams(window.location.search).get('name') ?? '').trim();
-    askCommand({ toolId: 'person.contact.remove', args: { contact: rm }, message: `remove ${name || rm} as a friend`, ...(name && ADDRESS.test(rm) ? { labels: { [rm.toLowerCase()]: name } } : {}) });
+    askCommand({ toolId: 'person.friend.remove', args: { friend: rm }, message: `remove ${name || rm} as a friend`, ...(name && ADDRESS.test(rm) ? { labels: { [rm.toLowerCase()]: name } } : {}) });
   }, [session]);
   // Opened by an app for one add or remove (`&from=<app>`): once it is done, say so and close, back to the app.
   const [closing, setClosing] = useState(false);
@@ -161,18 +163,18 @@ export function FriendsPanel() {
   }, [who]);
 
   const sendRequest = () => {
-    const contact = picked?.agent ?? who.trim();
-    if (!contact) return;
-    const name = picked?.label ?? contact;
-    askCommand({ toolId: 'person.contact.invite', args: { contact, role: addType }, message: addType === 'friend' ? `add ${name} as a friend` : `add ${name} as a friend (${addType})`, ...(picked && !/^0x/i.test(name) ? { labels: { [picked.agent.toLowerCase()]: name } } : {}) });
+    const friend = picked?.agent ?? who.trim();
+    if (!friend) return;
+    const name = picked?.label ?? friend;
+    askCommand({ toolId: 'person.friend.add', args: { friend, type: addType }, message: addType === 'friend' ? `add ${name} as a friend` : `add ${name} as a friend (${addType})`, ...(picked && !/^0x/i.test(name) ? { labels: { [picked.agent.toLowerCase()]: name } } : {}) });
     setWho(''); setPicked(null); setHits([]); setAddType('friend');
   };
   const accept = (agent: string, name: string | null) => {
     const type = acceptType[agent] ?? 'friend';
-    askCommand({ toolId: 'person.contact.invite', args: { contact: agent, role: type }, message: type === 'friend' ? `add ${label(agent, name)} as a friend` : `add ${label(agent, name)} as a friend (${type})`, ...(name ? { labels: { [agent]: name } } : {}) });
+    askCommand({ toolId: 'person.friend.add', args: { friend: agent, type }, message: type === 'friend' ? `add ${label(agent, name)} as a friend` : `add ${label(agent, name)} as a friend (${type})`, ...(name ? { labels: { [agent]: name } } : {}) });
   };
   const remove = (agent: string, name: string | null, words: (who: string) => string) => {
-    askCommand({ toolId: 'person.contact.remove', args: { contact: agent }, message: words(label(agent, name)), ...(name ? { labels: { [agent]: name } } : {}) });
+    askCommand({ toolId: 'person.friend.remove', args: { friend: agent }, message: words(label(agent, name)), ...(name ? { labels: { [agent]: name } } : {}) });
   };
   const sendInvite = async () => {
     if (!session) return;
@@ -210,6 +212,21 @@ export function FriendsPanel() {
     <>
       {closing && <Meta>Done — taking you back.</Meta>}
       {err && <ErrorNote>{err}</ErrorNote>}
+      {/* Spec 401 §10 — a storage grant signed before friendship records existed cannot write them: the older friend
+          records stay where they were (and still show) until the person re-enables storage once. Said, never hidden. */}
+      {view?.storageNeedsEnabling && (
+        <Note>
+          Your friends list needs a one-time update to your private storage.{' '}
+          <Button size="sm" variant="primary" disabled={enabling === 'busy'} onClick={() => {
+            if (!agentAddress) return;
+            setEnabling('busy');
+            void activateInteractionsIfNeeded(agentAddress as Address, resolveVia(profile?.credential, session?.via), session?.token ? { token: session.token } : undefined)
+              .then((r) => { setEnabling(r.ok ? 'idle' : 'failed'); if (r.ok) void load(); })
+              .catch(() => setEnabling('failed'));
+          }}>{enabling === 'busy' ? 'Updating…' : 'Update now'}</Button>
+          {enabling === 'failed' && <> That didn’t work — please try again.</>}
+        </Note>
+      )}
 
       {view && view.requests.length > 0 && (
         <Section title="Friend requests" count={view.requests.length} testId="friend-requests">

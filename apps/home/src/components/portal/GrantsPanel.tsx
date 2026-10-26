@@ -1,6 +1,6 @@
 'use client';
 // Spec 400 W2 (B4) — ONE SCREEN OF EVERY GRANT an agent issued: apps (Home MCP connections among them), members,
-// contacts, standing grants to runtimes, a coach's study grant — who holds it, what it permits, its digest, and the
+// friendships, standing grants to runtimes, a coach's study grant — who holds it, what it permits, its digest, and the
 // chain's word on whether it is revoked. The ACL a peer platform shows, made of our grants. Revoke here: the act is
 // `access.grant.revoke` by digest — the Ask runs it, the person (or the org's steward) signs, the chain refuses the
 // grant everywhere after.
@@ -12,7 +12,7 @@ import { AgentName } from '../shared/AgentName';
 import { askCommand } from '../../home/ask-command';
 import { auditGrantsThroughHarness, type GrantsAudit, type GrantRow } from '../../home/grants-harness';
 
-const KIND_WORDS: Record<string, string> = { app: 'app', member: 'member', contact: 'contact', runtime: 'runtime', coach: 'coach', plane: 'plane', 'account-at-company': 'account at a company' };
+const KIND_WORDS: Record<string, string> = { app: 'app', member: 'member', friend: 'friend', service: 'service', runtime: 'runtime', coach: 'coach', plane: 'plane', 'account-at-company': 'account at a company' };
 
 export function GrantsPanel({ subject }: { subject?: string }) {
   const { session, agentAddress } = useSession();

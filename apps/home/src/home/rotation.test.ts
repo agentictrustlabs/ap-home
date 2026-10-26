@@ -14,12 +14,12 @@ const SERVICE = '0x0a60000000000000000000000000000000000003' as Address;
 const askAsMe = { delegator: PERSON, delegate: HOME_MCP_KEY, authority: ROOT_AUTHORITY, caveats: [], salt: '7', signature: `0x${'ab'.repeat(65)}` as Hex };
 const askAsMeDigest = hashDelegation({ ...askAsMe, salt: 7n, caveats: [] }, CHAIN_ID, CONTRACTS.delegationManager);
 const PLANE_DIGEST = `0x${'11'.repeat(32)}` as Hex;
-const CONTACT_DIGEST = `0x${'22'.repeat(32)}` as Hex;
+const FRIEND_DIGEST = `0x${'22'.repeat(32)}` as Hex;
 const REVOKED_DIGEST = `0x${'33'.repeat(32)}` as Hex;
 
 const audit = { subject: PERSON, why: 'self', count: 2, total: 3, grants: [
   { kind: 'plane', holder: SERVICE, what: 'interactions grant', digest: PLANE_DIGEST, revoked: false, source: 'plane.interactions', signed: 'approved-digest' },
-  { kind: 'contact', holder: '0x0a60000000000000000000000000000000000004', holderName: 'bob', what: 'contact (friend)', digest: CONTACT_DIGEST, revoked: false, source: 'contact:x', signed: 'key' },
+  { kind: 'friend', holder: '0x0a60000000000000000000000000000000000004', holderName: 'bob', what: 'friendship (friend)', digest: FRIEND_DIGEST, revoked: false, source: 'friend:x', signed: 'key' },
   { kind: 'app', holder: 'old-app', what: 'reads', digest: REVOKED_DIGEST, revoked: true, source: 'read.grant', signed: 'approved-digest' },
 ] };
 
@@ -57,7 +57,7 @@ describe('reviewedList', () => {
     if (!r.ok) throw new Error('unreachable');
     const byDigest = Object.fromEntries(r.wires.map((w) => [w.digest.toLowerCase(), w]));
     expect(byDigest[PLANE_DIGEST]?.signed).toBe('approved-digest');
-    expect(byDigest[CONTACT_DIGEST]?.signed).toBe('key');
+    expect(byDigest[FRIEND_DIGEST]?.signed).toBe('key');
     expect(byDigest[REVOKED_DIGEST]).toBeUndefined();
     const app = byDigest[askAsMeDigest.toLowerCase()];
     expect(app?.signed).toBe('key');
@@ -72,7 +72,7 @@ describe('rotateThisDevicePasskey', () => {
     const { reviewedList, rotateThisDevicePasskey } = await import('./rotation');
     const list = await reviewedList({ person: PERSON, session: { token: 't' } });
     if (!list.ok) throw new Error('unreachable');
-    // Keep the plane wire and the app wire; strike the contact (agent-held, key-signed → told, not revocable here).
+    // Keep the plane wire and the app wire; strike the friendship (agent-held, key-signed → told, not revocable here).
     const keep = new Set([PLANE_DIGEST, askAsMeDigest.toLowerCase()]);
     const r = await rotateThisDevicePasskey({ person: PERSON, session: { token: 't' }, signHash: async () => '0x' as Hex, wires: list.wires, keep, label: 'new' });
     expect(r.ok).toBe(true);
@@ -80,7 +80,7 @@ describe('rotateThisDevicePasskey', () => {
     const input = rotateCalls[0] as { add: { kind: string }; retire: { kind: string; credentialIdDigest: Hex }; reapprove: Hex[]; revoke: unknown[] };
     expect(input.add.kind).toBe('passkey');
     expect(input.retire).toEqual({ kind: 'passkey', credentialIdDigest: `0x${'dd'.repeat(32)}` });
-    // The plane wire by digest, the re-issued app wire by its (unchanged) digest; the contact is struck, not re-approved.
+    // The plane wire by digest, the re-issued app wire by its (unchanged) digest; the friendship is struck, not re-approved.
     expect(input.reapprove.map((d) => d.toLowerCase()).sort()).toEqual([PLANE_DIGEST, askAsMeDigest.toLowerCase()].sort());
     expect(input.revoke).toEqual([]);
     expect(r.outcome.reapproved).toBe(1);
@@ -99,11 +99,11 @@ describe('rotateThisDevicePasskey', () => {
     const { reviewedList, rotateThisDevicePasskey } = await import('./rotation');
     const list = await reviewedList({ person: PERSON, session: { token: 't' } });
     if (!list.ok) throw new Error('unreachable');
-    const r = await rotateThisDevicePasskey({ person: PERSON, session: { token: 't' }, signHash: async () => '0x' as Hex, wires: list.wires, keep: new Set([PLANE_DIGEST, CONTACT_DIGEST]), label: 'new' });
+    const r = await rotateThisDevicePasskey({ person: PERSON, session: { token: 't' }, signHash: async () => '0x' as Hex, wires: list.wires, keep: new Set([PLANE_DIGEST, FRIEND_DIGEST]), label: 'new' });
     expect(r.ok).toBe(true);
     const input = rotateCalls[0] as { reapprove: Hex[]; revoke: unknown[] };
     expect(input.revoke).toEqual([askAsMe]);
-    // The kept contact is key-signed and only the agent holds its wire: re-approving its digest would do nothing,
+    // The kept friendship is key-signed and only the agent holds its wire: re-approving its digest would do nothing,
     // so it is not in the batch and the person is told to re-authorize it from its screen.
     expect(input.reapprove.map((d) => d.toLowerCase())).toEqual([PLANE_DIGEST]);
     if (r.ok) expect(r.outcome.warnings.some((w) => /bob/.test(w) && /re-authorize/.test(w))).toBe(true);

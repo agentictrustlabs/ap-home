@@ -98,7 +98,8 @@ function ContextChip({ r, names }: { r: { kind: string; id: string; label?: stri
       </a>
     );
   }
-  if (r.kind === 'contact' && /^0x[0-9a-fA-F]{40}$/.test(r.id)) {
+  // `friend-request` since 2026-10-26; `contact` is what a request message carried before.
+  if ((r.kind === 'friend-request' || r.kind === 'contact') && /^0x[0-9a-fA-F]{40}$/.test(r.id)) {
     // Spec 401 — "I've added you to my contacts": the chip adds them BACK (mutual), through the Ask as the person's
     // own act — their mandate, their grant. The sender's address is the chip's id; the name is the thread's.
     const who = names?.[r.id.toLowerCase()];
@@ -106,7 +107,7 @@ function ContextChip({ r, names }: { r: { kind: string; id: string; label?: stri
       <button type="button" className="badge"
         style={{ border: '1px solid var(--color-sage-500)', background: 'var(--color-sage-50)', color: 'var(--color-sage-700)', fontWeight: 600, cursor: 'pointer' }}
         title={`Add ${who ?? r.id} as a friend`}
-        onClick={() => askCommand({ toolId: 'person.contact.invite', args: { contact: r.id.toLowerCase(), role: 'friend' }, message: `add ${who ?? r.id} as a friend` })}>
+        onClick={() => askCommand({ toolId: 'person.friend.add', args: { friend: r.id.toLowerCase(), type: 'friend' }, message: `add ${who ?? r.id} as a friend` })}>
         {r.label ?? 'Add back'} →
       </button>
     );

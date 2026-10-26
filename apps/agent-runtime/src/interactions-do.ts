@@ -25,7 +25,8 @@ import { hashDelegation, decodeTimestampTerms, decodeVaultRecordScopeTerms, vaul
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
 import { governorOf, WORKSPACE_GOVERNOR_RECORD } from '@agenticprimitives/context';
 import { buildMountedGatewayDeps } from './gateway-mount.js';
-import { loadPlaybook, countedOp, countVaultCall } from '@agenticprimitives/harness';
+import { countedOp, countVaultCall } from '@agenticprimitives/harness';
+import { loadPlaybook } from './playbook-aliases.js';
 import { classifyDivergence, recordDivergence, shouldShadow, SHADOW_INTERVAL_MS, type Divergence } from '@agenticprimitives/fabric';
 import { gatewayStage, GATEWAY_ADOPTION } from './gateway-adoption.js';
 import { verifyDelegationWire, type DelegationWireLike } from '@agenticprimitives/a2a';
@@ -98,7 +99,7 @@ import { handleEndeavorOp, reduceEventLog, coordinationEventsResource, COORDINAT
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
 import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 import { vaultServerId } from './vault-server-id.js';
-import { CONTACT_NOTICES_CAP, type ContactNoticeV1 } from './contacts.js';
+import { FRIEND_REQUESTS_CAP, asOffer, type FriendRequestNoticeV1 } from './friend-offers.js';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }] as const;
 const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ name: 'revoked', type: 'bool' }] }] as const;
@@ -368,8 +369,16 @@ export const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.
 // 1-1 inbox residency (spec 322 W3f): the DELIVERY grant is WRITE-ONLY — every inbox.data READ and
 // dm-body READ rides the interactions grant THROUGH this DO (single writer, single reader path).
 const INBOX_RESOURCE = 'inbox.data';
-/** The object's copy of the inbox record's contact notices, put back when a whole-doc write leaves them out. */
-const CONTACT_NOTICES_KEY = 'contact-notices';
+/** The object's copy of the inbox record's friend requests, put back when a whole-doc write leaves them out. */
+const FRIEND_REQUESTS_KEY = 'friend-requests';
+/** Where the object kept its copy before 2026-10-26 — read once, folded into the new key. */
+const LEGACY_FRIEND_REQUESTS_KEY = 'contact-notices';
+/** One request per sender, the newest, capped. */
+function mergeFriendRequests(list: FriendRequestNoticeV1[]): FriendRequestNoticeV1[] {
+  const by = new Map<string, FriendRequestNoticeV1>();
+  for (const n of list) { const p = by.get(n.from); if (!p || String(p.at) < String(n.at)) by.set(n.from, n); }
+  return [...by.values()].sort((a, b) => String(a.at).localeCompare(String(b.at))).slice(-FRIEND_REQUESTS_CAP);
+}
 /** The token handed to the mounted gateway's cold path. The gateway is constructed around ONE grant, so
  *  there is no second delegation this could select and nothing for it to carry — it exists because
  *  `verifyToken(token)` is the gateway's cold-path shape, and naming it is better than passing `''`. */
@@ -416,7 +425,7 @@ const RESOLUTION_GRANTS_RESOURCE = 'resolution.grants';
 // Spec 401 — a CONTACT (`contact:<sa>`) is the person's own record of who they let in, written by their agent under
 // their own signed mandate (the act that mints the grant) into their own vault. Its own family: an organization's
 // invitation key stays a delivery-plane write (the fabric firewall), untouched by this door.
-const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:', 'run.artifact:', 'run.anchor:', 'run.measures:', 'build.run:', 'build.promotion:', 'connector.mcp:', 'agent.budget', 'confirmation.preferences', 'standing.instructions', 'memory.facts', 'routines.data', 'person.preferences', 'playbook.memory:', 'cardroom.', 'contact:', 'delegation.lineage:', 'relationships.credential:', 'relationships.revocation:', 'interaction.dispute:', 'run.dispute:', 'run.assessment:', 'content.catalog', 'content.artifact.',
+const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:', 'run.artifact:', 'run.anchor:', 'run.measures:', 'build.run:', 'build.promotion:', 'connector.mcp:', 'agent.budget', 'confirmation.preferences', 'standing.instructions', 'memory.facts', 'routines.data', 'person.preferences', 'playbook.memory:', 'cardroom.', 'friend:', 'contact:', 'delegation.lineage:', 'relationships.credential:', 'relationships.revocation:', 'interaction.dispute:', 'run.dispute:', 'run.assessment:', 'content.catalog', 'content.artifact.',
   // 2026-10-15 (skills W0/W3 — THE OUTCOME IS STATE) — a DOMAIN RECORD: the typed record an instruction skill's run produces
   // (`ap.domain-record.v1`, class → `<domain>.<kebab-class>` by the one record-type rule, `recordTypeOfClass`), written by
   // the org agent's DECLARED record effect into the ASKER's own vault, where the state check reads it back. The same shape
@@ -1261,6 +1270,17 @@ export class InteractionsDO {
       if (typeof later === 'function') later.call(this.state, say()); else await say();
       return json({ ok: true, member, role: fields.assignedRole, ...(fields.roleName ? { roleName: fields.roleName } : {}), previous: before.assignedRole ?? PLAIN_MEMBER, changed: (before.roleDefinitionId ?? '') !== (fields.roleDefinitionId ?? '') || (before.assignedRole ?? PLAIN_MEMBER) !== fields.assignedRole });
     });
+  }
+
+  /** The object's own copy of the friend requests — the legacy key folded in once (spec 401 §10). */
+  private async keptFriendRequests(): Promise<FriendRequestNoticeV1[]> {
+    const now = ((await this.state.storage.get(FRIEND_REQUESTS_KEY)) as FriendRequestNoticeV1[] | undefined) ?? [];
+    const old = ((await this.state.storage.get(LEGACY_FRIEND_REQUESTS_KEY)) as FriendRequestNoticeV1[] | undefined) ?? [];
+    if (!old.length) return now;
+    const merged = mergeFriendRequests([...old, ...now]);
+    await this.state.storage.put(FRIEND_REQUESTS_KEY, merged);
+    await this.state.storage.delete(LEGACY_FRIEND_REQUESTS_KEY);
+    return merged;
   }
 
   private async readDoc<T>(grant: IncomingDelegation, resource: string, empty: T): Promise<T> {
@@ -2243,7 +2263,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.coordination.lease' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.contact.notice' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.member.recorded' || op === 'internal.member.role' || op === 'internal.member.setRole' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.getMany' || op === 'content.put' || op === 'issuer.facet.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.coordination.lease' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.friend.request' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.member.recorded' || op === 'internal.member.role' || op === 'internal.member.setRole' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.getMany' || op === 'content.put' || op === 'issuer.facet.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -2383,14 +2403,20 @@ export class InteractionsDO {
         }
         if (op === 'inbox.put') {
           if (body.doc === undefined) return json({ error: 'doc required' }, 400);
-          // The contact notices ride in this record but are not the messaging library's: a whole-doc write that
-          // never knew them must not drop them, so the object's own copy (internal.contact.notice) goes back in.
+          // The friend requests ride in this record but are not the messaging library's: a whole-doc write that
+          // never knew them must not drop them, so the object's own copy (internal.friend.request) goes back in.
+          // (`contactNotices` is their name before 2026-10-26 — folded in and dropped on the way.)
           const putDoc = body.doc as Record<string, unknown> | null;
           if (putDoc && typeof putDoc === 'object') {
-            if (Array.isArray(putDoc.contactNotices)) await this.state.storage.put(CONTACT_NOTICES_KEY, putDoc.contactNotices);
-            else {
-              const kept = (await this.state.storage.get(CONTACT_NOTICES_KEY)) as ContactNoticeV1[] | undefined;
-              if (kept?.length) putDoc.contactNotices = kept;
+            const legacy = Array.isArray(putDoc.contactNotices) ? (putDoc.contactNotices as FriendRequestNoticeV1[]) : [];
+            delete putDoc.contactNotices;
+            if (Array.isArray(putDoc.friendRequests) || legacy.length) {
+              const merged = mergeFriendRequests([...legacy, ...((putDoc.friendRequests as FriendRequestNoticeV1[] | undefined) ?? [])]);
+              putDoc.friendRequests = merged;
+              await this.state.storage.put(FRIEND_REQUESTS_KEY, merged);
+            } else {
+              const kept = await this.keptFriendRequests();
+              if (kept.length) putDoc.friendRequests = kept;
             }
           }
           await this.writeDoc(g, INBOX_RESOURCE, body.doc);
@@ -2622,22 +2648,23 @@ export class InteractionsDO {
         //
         // IT GRANTS NOTHING. A `guardian` role here does not let anyone act for a dependent; that is a
         // delegation the dependent's custodian issues. No gate reads this record.
-        if (op === 'internal.contact.notice') {
-          // spec 401 — someone added this person as a contact: the notice beside their signed grant (contacts.ts).
+        if (op === 'internal.friend.request') {
+          // spec 401 §10 — someone offered this person friendship: the request beside their signed grant (friend-offers.ts).
           // In-Worker only (the marker above); it holds who and the grant's digest, never words — so it cannot carry a
           // message past the messaging wire. One per sender, the newest; a cap on the whole.
           const from = String(body.from ?? '').trim().toLowerCase();
           const grantDigest = String(body.grantDigest ?? '').trim();
           if (!/^0x[0-9a-f]{40}$/.test(from) || from === principal) return json({ ok: false, error: 'from must be another agent address' }, 400);
-          if (!/^0x[0-9a-fA-F]{64}$/.test(grantDigest)) return json({ ok: false, error: 'a contact notice names the grant it announces' }, 400);
+          if (!/^0x[0-9a-fA-F]{64}$/.test(grantDigest)) return json({ ok: false, error: 'a friend request names the grant it announces' }, 400);
           if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
           return this.serialize(async () => { // the inbox's single-writer merge (ARCH-H1)
             const doc = (await this.readDoc<Record<string, unknown>>(g, INBOX_RESOURCE, null as never)) ?? { version: 1, envelopes: [], events: [], draftCases: [], caseEvents: [], cards: {} };
-            const prior = Array.isArray(doc.contactNotices) ? (doc.contactNotices as ContactNoticeV1[]) : [];
-            const notices = [...prior.filter((n) => n.from !== from), { from, at: new Date().toISOString(), grantDigest }].slice(-CONTACT_NOTICES_CAP);
-            doc.contactNotices = notices;
+            const prior = mergeFriendRequests([...((doc.contactNotices as FriendRequestNoticeV1[] | undefined) ?? []), ...((doc.friendRequests as FriendRequestNoticeV1[] | undefined) ?? [])]);
+            const requests = [...prior.filter((n) => n.from !== from), { from, at: new Date().toISOString(), grantDigest }].slice(-FRIEND_REQUESTS_CAP);
+            delete doc.contactNotices;
+            doc.friendRequests = requests;
             await this.writeDoc(g, INBOX_RESOURCE, doc);
-            await this.state.storage.put(CONTACT_NOTICES_KEY, notices);
+            await this.state.storage.put(FRIEND_REQUESTS_KEY, requests);
             return json({ ok: true });
           });
         }
@@ -2837,7 +2864,7 @@ export class InteractionsDO {
               });
             }
           }
-          const keys = (survey.records ?? []).map((r) => r.record_type).filter((k) => k.startsWith('org.invite:agent:') || k.startsWith('contact:'));
+          const keys = (survey.records ?? []).map((r) => r.record_type).filter((k) => k.startsWith('org.invite:agent:') || k.startsWith('friend:') || k.startsWith('contact:'));
           if (keys.length) {
             const got = await this.mcpVaultTool(g, 'get_vault_records', { recordTypes: keys.slice(0, 200) }).then((r) => r.json()).catch(() => ({})) as { records?: Record<string, unknown> };
             for (const [k, v] of Object.entries(got.records ?? {})) {
@@ -2846,7 +2873,12 @@ export class InteractionsDO {
               const digest = rec.grantDigest ?? hashDelegation({ ...wire, salt: BigInt(String(wire.salt)), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
               const member = k.startsWith('org.invite:agent:');
               if (member && rec.status === 'removed') continue;
-              rows.push({ kind: member ? 'member' : 'contact', holder: (member ? k.slice('org.invite:agent:'.length) : String(rec.contact ?? wire.delegate)).toLowerCase(), what: member ? `member access${rec.role ? ` (${rec.role})` : ''}${rec.status ? ` · ${rec.status}` : ''}` : `contact (${rec.role ?? 'contact'})${rec.status === 'removed' ? ' · removed' : ''}`, digest, ...(rec.createdAt ? { issuedAt: new Date(rec.createdAt).toISOString() } : {}), revoked: rec.status === 'removed' ? true : await revokedOf(digest), source: k, signed: signedOf(wire) });
+              // A friendship offer (`friend:`, or a not-yet-moved legacy record) is the grant behind one half of a friendship;
+              // a legacy record for a runtime or an assistant is a service's standing grant, listed for what it is.
+              const offer = member ? null : asOffer(v);
+              const ended = member ? false : offer ? offer.status === 'withdrawn' : rec.status === 'removed';
+              const when = offer?.offeredAt ?? rec.createdAt;
+              rows.push({ kind: member ? 'member' : offer ? 'friend' : 'service', holder: (member ? k.slice('org.invite:agent:'.length) : String(offer?.offeredTo ?? rec.contact ?? wire.delegate)).toLowerCase(), what: member ? `member access${rec.role ? ` (${rec.role})` : ''}${rec.status ? ` · ${rec.status}` : ''}` : offer ? `friendship (${offer.friendType})${ended ? ' · removed' : ''}` : `standing grant to your ${rec.role ?? 'service'}${ended ? ' · removed' : ''}`, digest, ...(when ? { issuedAt: new Date(when).toISOString() } : {}), revoked: ended ? true : await revokedOf(digest), source: k, signed: signedOf(wire) });
             }
           }
           return json({ ok: true, grants: rows });
@@ -2894,7 +2926,7 @@ export class InteractionsDO {
             }
           }
           const survey = await this.mcpVaultTool(g, 'list_vault_record', {}).then((r) => r.json()).catch(() => ({})) as { records?: Array<{ record_type: string }> };
-          const keys = (survey.records ?? []).map((r) => r.record_type).filter((k) => k.startsWith('org.invite:agent:') || k.startsWith('contact:'));
+          const keys = (survey.records ?? []).map((r) => r.record_type).filter((k) => k.startsWith('org.invite:agent:') || k.startsWith('friend:') || k.startsWith('contact:'));
           if (keys.length) {
             const got = await this.mcpVaultTool(g, 'get_vault_records', { recordTypes: keys.slice(0, 200) }).then((r) => r.json()).catch(() => ({})) as { records?: Record<string, unknown> };
             for (const [k, v] of Object.entries(got.records ?? {})) {
@@ -5964,9 +5996,9 @@ export class InteractionsDO {
         // (`delegation.lineage:<hash>`, the head a delegate refreshes to) and a contact's re-issued wire (`contact:<sa>`).
         // Found live: the ceremony wrote lineage through this op and this gate refused it, so every re-issued wire was
         // "recorded" as a warning. Self-gated like the rest; the record is hers.
-        const ownRotationRecord = recordType.startsWith('delegation.lineage:') || recordType.startsWith('contact:');
+        const ownRotationRecord = recordType.startsWith('delegation.lineage:') || recordType.startsWith('friend:') || recordType.startsWith('contact:');
         if (op === 'record.put' && !CAPABILITY_RECORDS.has(recordType) && !recordType.startsWith('content.') && !ownStudyRecord && !ownRotationRecord) {
-          return json({ error: `recordType must be a capability record, a content.* record, the person's own cardroom.style / cardroom.read, or a rotation record (delegation.lineage:*, contact:*)` }, 400);
+          return json({ error: `recordType must be a capability record, a content.* record, the person's own cardroom.style / cardroom.read, or a rotation record (delegation.lineage:*, friend:*)` }, 400);
         }
         if (op === 'record.get') {
           const r = await this.vaultFor(recordGrant).read<unknown>({ owner: '', resource: recordType });

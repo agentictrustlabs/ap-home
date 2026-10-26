@@ -1387,8 +1387,8 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
   // A FRIEND, IN PLAIN WORDS. Adding or removing a friend is the act most people take here, often sent over from an app
   // by someone who has never heard of a mandate: the question is the friendship, the answer is yes or not now. What is
   // signed is unchanged (one prompt, this request only); the machine-readable account is one tap away under Details.
-  const friendAct = reply.capability === 'person.contact.invite' ? 'add' : reply.capability === 'person.contact.remove' ? 'remove' : null;
-  const friend = reply.parties?.find((p) => p.arg === 'contact');
+  const friendAct = reply.capability === 'person.friend.add' ? 'add' : reply.capability === 'person.friend.remove' ? 'remove' : null;
+  const friend = reply.parties?.find((p) => p.arg === 'friend');
   if (friendAct && friend) {
     const who = friend.label ?? chosen[friend.agent.toLowerCase()] ?? <AgentName address={friend.agent} />;
     return (

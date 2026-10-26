@@ -7,7 +7,7 @@
 import type { Address, Hex } from 'viem';
 import { offerDigest, type EngagementProbeV1, type EngagementResponseV1, type FulfillmentOfferV1, type EngagementResponseContentV1 } from '@agenticprimitives/intent-engagement';
 import { scopedActionTools, REQUIREMENT_TYPE_FOR } from './harness-run.js';
-import { loadPlaybook } from '@agenticprimitives/harness';
+import { loadPlaybook } from './playbook-aliases.js';
 
 export interface AnswerProbeDeps {
   /** The agent's on-chain kind: person | org | service (ADR-0046), or null when unreadable. */

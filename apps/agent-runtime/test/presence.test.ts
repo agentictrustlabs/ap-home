@@ -2,17 +2,17 @@
 // through the friends gate, and the Ask's "who is online" answers from the same.
 import { describe, it, expect } from 'vitest';
 import type { Address, Hex } from 'viem';
-import { contactRecordType, type ContactDeps, type ContactRecordV1 } from '../src/contacts.js';
+import { friendOfferRecordType, type FriendDeps, type FriendOfferRecordV1 } from '../src/friend-offers.js';
 import { beatEntry, friendsPresence, livePresence, presenceListInvoker, type PresenceEntry, type PresencePort } from '../src/presence.js';
 
 const ALICE = '0x00000000000000000000000000000000000000a1' as Address;
 const BOB = '0x00000000000000000000000000000000000000b1' as Address;
 const DAN = '0x00000000000000000000000000000000000000d2' as Address;
-const grant = { delegator: ALICE, delegate: BOB, authority: '0x', caveats: [], salt: '1', signature: '0x' } as unknown as ContactRecordV1['delegation'];
-const contact = (who: Address, mutual: boolean): ContactRecordV1 =>
-  ({ type: 'ap.contact.v1', contact: who, role: 'friend', delegation: grant, grantDigest: '0xg' as Hex, status: 'contact', createdAt: 1_700_000_000_000, mutual });
-const store = new Map<string, unknown>([[contactRecordType(BOB), contact(BOB, true)], [contactRecordType(DAN), contact(DAN, false)]]);
-const deps = (): ContactDeps => ({
+const grant = { delegator: ALICE, delegate: BOB, authority: '0x', caveats: [], salt: '1', signature: '0x' } as unknown as FriendOfferRecordV1['delegation'];
+const contact = (who: Address, mutual: boolean): FriendOfferRecordV1 =>
+  ({ type: 'ap.friend-offer.v1', offeredTo: who, friendType: 'friend', delegation: grant, grantDigest: '0xg' as Hex, status: 'standing', offeredAt: 1_700_000_000_000, ...(mutual ? { mutual: true as const } : {}) });
+const store = new Map<string, unknown>([[friendOfferRecordType(BOB), contact(BOB, true)], [friendOfferRecordType(DAN), contact(DAN, false)]]);
+const deps = (): FriendDeps => ({
   env: { CHAIN_ID: '34348', DELEGATION_MANAGER: '0x00000000000000000000000000000000000000dd' },
   enforcers: { timestamp: '0x00000000000000000000000000000000000000e1', value: '0x00000000000000000000000000000000000000e2', digestBinding: '0x00000000000000000000000000000000000000e3' },
   vaultServerId: 'demo-mcp',
@@ -42,7 +42,7 @@ describe('presence', () => {
     const live = livePresence([{ app: 'a', at: now - 100, until: now + 10 }, { app: 'b', at: now - 50, until: now + 10 }, { app: 'old', at: now - 500, until: now - 1 }], now);
     expect(live.map((x) => x.app)).toEqual(['b', 'a']);
   });
-  it('friends see each other: a mutual friend who is here, one who is not; a one-way contact is not shown at all', async () => {
+  it('friends see each other: a mutual friend who is here, one who is not; a friend request not yet accepted is not shown at all', async () => {
     const port = fakePort();
     const now = Date.now();
     await port.beat(BOB, beatEntry({ app: 'seed-bible-reader', scope: 'JHN.3', label: 'reading John 3' }, now));

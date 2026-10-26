@@ -247,10 +247,10 @@
           "bucket": "invite-near",
           "ask": "Add dave to my contacts.",
           "plan": [
-            "person.contact.invite"
+            "person.friend.add"
           ],
           "reply": "authority_required",
-          "capability": "person.contact.invite",
+          "capability": "person.friend.add",
           "ux": false,
           "principles": [],
           "checks": [
@@ -877,10 +877,10 @@
           "bucket": "ux-read",
           "ask": "who are my contacts",
           "plan": [
-            "person.contact.list"
+            "person.friend.list"
           ],
           "reply": "answer",
-          "capability": "person.contact.list",
+          "capability": "person.friend.list",
           "ux": true,
           "principles": [],
           "checks": [],

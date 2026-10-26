@@ -2,7 +2,7 @@
 // I have not added back are requests; people I added who have not added me back are requested. Own records only.
 import { describe, it, expect } from 'vitest';
 import type { Address, Hex } from 'viem';
-import { contactRecordType, type ContactDeps, type ContactRecordV1 } from '../src/contacts.js';
+import { friendOfferRecordType, legacyOfferRecordType, type FriendDeps, type FriendOfferRecordV1, type FriendType } from '../src/friend-offers.js';
 import { friendListInvoker } from '../src/friends.js';
 
 const ALICE = '0x00000000000000000000000000000000000000a1' as Address;
@@ -12,15 +12,20 @@ const DAN = '0x00000000000000000000000000000000000000d2' as Address;
 const EVE = '0x00000000000000000000000000000000000000e5' as Address;
 const GOOSE = '0x00000000000000000000000000000000000000d1' as Address;
 
-const grant = { delegator: ALICE, delegate: BOB, authority: '0x', caveats: [], salt: '1', signature: '0x' } as unknown as ContactRecordV1['delegation'];
-const contact = (who: Address, role: ContactRecordV1['role'], status: ContactRecordV1['status'] = 'contact', mutual?: boolean): ContactRecordV1 =>
-  ({ type: 'ap.contact.v1', contact: who, role, delegation: grant, grantDigest: '0xg' as Hex, status, createdAt: 1_700_000_000_000, ...(mutual !== undefined ? { mutual } : {}) });
+const grant = { delegator: ALICE, delegate: BOB, authority: '0x', caveats: [], salt: '1', signature: '0x' } as unknown as FriendOfferRecordV1['delegation'];
+/** My offer to `who` (`friend:`), or — `legacy` — the pre-2026-10-26 record the view still reads (`contact:`). */
+const offer = (who: Address, type: FriendType | 'runtime', status: 'standing' | 'withdrawn' = 'standing'): FriendOfferRecordV1 =>
+  ({ type: 'ap.friend-offer.v1', offeredTo: who, friendType: type as FriendType, delegation: grant, grantDigest: '0xg' as Hex, status, offeredAt: 1_700_000_000_000 });
+const legacyRecord = (who: Address, role: string, mutual?: boolean) =>
+  ({ type: 'ap.contact.v1', contact: who, role, delegation: grant, grantDigest: '0xg' as Hex, status: 'contact', createdAt: 1_700_000_000_000, ...(mutual !== undefined ? { mutual } : {}) });
+const contactRecordType = friendOfferRecordType;
+const contact = (who: Address, role: FriendType | 'runtime', status: 'contact' | 'removed' = 'contact', mutual?: boolean): FriendOfferRecordV1 => ({ ...offer(who, role, status === 'removed' ? 'withdrawn' : 'standing'), ...(mutual ? { mutual: true as const } : {}) });
 
 const store = new Map<string, unknown>();
 store.set(contactRecordType(BOB), contact(BOB, 'friend', 'contact', false)); // Bob added me back (inbox below)
-store.set(contactRecordType(CARA), contact(CARA, 'family', 'contact', true)); // mutual on the record itself
+store.set(legacyOfferRecordType(CARA), legacyRecord(CARA, 'family', true)); // a not-yet-moved legacy record (mutual at the time): still read
 store.set(contactRecordType(DAN), contact(DAN, 'friend', 'contact', false)); // never added me back → requested
-store.set(contactRecordType(GOOSE), contact(GOOSE, 'runtime')); // a runtime is not a friend
+store.set(legacyOfferRecordType(GOOSE), legacyRecord(GOOSE, 'runtime')); // a runtime is not a friend
 store.set(contactRecordType(EVE), contact(EVE, 'friend', 'removed')); // removed: neither friend nor request
 store.set('inbox.data', {
   envelopes: [
@@ -32,7 +37,7 @@ store.set('inbox.data', {
   ],
 });
 
-const deps = (): ContactDeps => ({
+const deps = (): FriendDeps => ({
   env: { CHAIN_ID: '34348', DELEGATION_MANAGER: '0x00000000000000000000000000000000000000dd' },
   enforcers: { timestamp: '0x00000000000000000000000000000000000000e1', value: '0x00000000000000000000000000000000000000e2', digestBinding: '0x00000000000000000000000000000000000000e3' },
   vaultServerId: 'demo-mcp',
@@ -87,7 +92,7 @@ describe('contact notices (no messaging wire needed)', () => {
 
 describe('the other half, already signed', () => {
   it('someone I added who added me too is a friend even with no notice in my inbox', async () => {
-    const d = { ...deps(), readSubjectRecord: async (s: string, t: string) => (s === ALICE ? store.get(t) ?? null : s === DAN && t === contactRecordType(ALICE) ? contact(ALICE, 'friend') : null) };
+    const d = { ...deps(), readSubjectRecord: async (s: string, t: string) => (s === ALICE ? store.get(t) ?? null : s === DAN && t === contactRecordType(ALICE) ? offer(ALICE, 'friend') : null) };
     const out = (await friendListInvoker(d, ALICE)('person.friend.list', {}, ctx())) as { friends: Array<{ agent: string }>; requested: Array<{ agent: string }> };
     expect(out.friends.map((f) => f.agent)).toContain(DAN);
     expect(out.requested).toEqual([]);
@@ -96,7 +101,7 @@ describe('the other half, already signed', () => {
 
 
 describe('two-way: their half decides (owner, 2026-10-26)', () => {
-  const removedNamingAlice = (removedAt: number): ContactRecordV1 => ({ ...contact(ALICE, 'friend', 'removed'), removedAt });
+  const removedNamingAlice = (removedAt: number): FriendOfferRecordV1 => ({ ...offer(ALICE, 'friend', 'withdrawn'), withdrawnAt: removedAt });
   it('a friend who removed me is ENDED, not a friend — shown so it is never mistaken for one', async () => {
     const d = { ...deps(), readSubjectRecord: async (s: string, t: string) => (s === ALICE ? store.get(t) ?? null : s === BOB && t === contactRecordType(ALICE) ? removedNamingAlice(1_800_000_000_000) : null) };
     const out = (await friendListInvoker(d, ALICE)('person.friend.list', {}, ctx())) as { friends: Array<{ agent: string }>; ended: Array<{ agent: string; name: string | null; type: string; endedAt: string | null }>; note: string };
@@ -121,7 +126,7 @@ describe('two-way: their half decides (owner, 2026-10-26)', () => {
   });
   it('someone I removed who asks again AFTER is a request again', async () => {
     const local = new Map(store);
-    local.set(contactRecordType(EVE), { ...contact(EVE, 'friend', 'removed'), removedAt: Date.parse('2026-10-01T00:00:00.000Z') });
+    local.set(contactRecordType(EVE), { ...offer(EVE, 'friend', 'withdrawn'), withdrawnAt: Date.parse('2026-10-01T00:00:00.000Z') });
     local.set('inbox.data', { contactNotices: [{ from: EVE, at: '2026-10-24T00:00:00.000Z', grantDigest: '0x' + '3'.repeat(64) }] });
     const d = { ...deps(), readSubjectRecord: async (s: string, t: string) => (s === ALICE ? local.get(t) ?? null : null), survey: async () => [...local.keys()].map((recordType) => ({ recordType })), readRecords: async (_s: string, keys: string[]) => Object.fromEntries(keys.map((k) => [k, local.get(k)])) };
     const out = (await friendListInvoker(d, ALICE)('person.friend.list', {}, ctx())) as { requests: Array<{ agent: string }> };

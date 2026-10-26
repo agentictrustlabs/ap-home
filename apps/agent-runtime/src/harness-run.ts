@@ -71,7 +71,8 @@ import { MCP_CONNECTOR_PREFIX, MCP_CONNECTORS_LIST, MCP_CONNECTORS_LIST_TOOL, is
 import { PREFERENCES_TOOLS, PREFERENCES_ACTS, PREFERENCES_GET, preferencesInvoker } from './preferences-tools.js';
 import type { TriggerScheduleV1 } from './triggers.js';
 import { factsForPrompt, factsOf, type RememberedFactsV1 } from '@agenticprimitives/context';
-import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactGrantFor, contactInviteInvoker, contactListInvoker, contactRemoveInvoker, type ContactDeps } from './contacts.js';
+import { FRIEND_ADD_TOOL, FRIEND_REMOVE_TOOL, friendArg, friendGrantFor, friendAddInvoker, friendRemoveInvoker, type FriendDeps } from './friend-offers.js';
+import { loadPlaybook, canonicalCapabilityId, canonicalArgs } from './playbook-aliases.js';
 import { FRIEND_LIST_TOOL, friendListInvoker } from './friends.js';
 import { PRESENCE_LIST_TOOL, presenceListInvoker, presencePort } from './presence.js';
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
@@ -94,7 +95,7 @@ import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunction
 import { type Plan, type Planner,
   runIntent, CONTINUE_STEP_ID, deriveArgs, type ArgDerivationV1, InputRequired, dataFor, signatureFor,
   type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, foundIsNotAsked, capabilitiesAvailable, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, completePlan, transitionsHold, type FactsV1, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
-import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, forgetMemo, type AskScopeV1 } from '@agenticprimitives/harness';
+import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, declaredEffectSink, setBillStep, declaredCapabilities, forgetMemo, type AskScopeV1 } from '@agenticprimitives/harness';
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
 export type { AskScopeV1 } from '@agenticprimitives/harness';
 import {
@@ -313,7 +314,7 @@ export const ACCESS_LIST_TOOL: ToolSpec = {
 
 export const ACCESS_AUDIT_CAPABILITY = 'access.grants.audit' as const;
 /** Spec 400 W2 (B4) — ONE SCREEN OF EVERY GRANT an agent issued: apps (Home MCP connections among them), members,
- *  contacts, runtimes' standing grants, a coach's study grant — who holds it, what it permits, its digest, whether
+ *  friendships, runtimes' standing grants, a coach's study grant — who holds it, what it permits, its digest, whether
  *  the chain says it is revoked. The ACL a peer platform shows, made of grants. For the asker's own agent or one
  *  they steward; a read, never authority. Revoke with `access.grant.revoke` naming the digest. */
 export const ACCESS_AUDIT_TOOL: ToolSpec = {
@@ -321,7 +322,7 @@ export const ACCESS_AUDIT_TOOL: ToolSpec = {
   answers: ['every grant', 'all the grants', 'who holds a grant', 'what has this organization granted', 'what have I granted', 'grants issued', 'audit the grants'],
   description:
     'LISTS EVERY GRANT an agent has ISSUED that its records can enumerate — apps reading its records (Home MCP '
-    + 'connections among them), members\' access delegations, contacts, standing grants to runtimes, a coach\'s study '
+    + 'connections among them), members\' access delegations, friendships, standing grants to runtimes, a coach\'s study '
     + 'grant — each with who holds it, what it permits, its digest, when, and whether it is revoked on chain. Use for '
     + '"what has the organization granted", "every grant", "who holds a grant", "audit the grants". Args: subject '
     + '(optional — the organization whose grants, a name or address; omit for the asker\'s own). A read.',
@@ -795,7 +796,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     description:
       'Revoke ON CHAIN a grant this agent issued, so it stops working everywhere rather than only here: an '
       + 'app\'s read grant by client id, or ANY grant by its digest from access.grants.audit (a member\'s access, a '
-      + 'contact, a runtime\'s standing grant, a coach\'s study grant). Args: app (the client id from '
+      + 'friendship, a runtime\'s standing grant, a coach\'s study grant). Args: app (the client id from '
       + 'access.grants.list) OR digest (0x…, from access.grants.audit), holder (the SA whose grant it is — the person '
       + 'asking, or an organization they steward). Use for "stop <app> reading my records", "revoke <app> access", '
       + '"revoke grant 0x…", "cut off <app>".',
@@ -1089,8 +1090,8 @@ export interface HarnessDeps {
   declareTrigger?: (agent: string, row: TriggerScheduleV1) => Promise<TriggerScheduleV1>;
   removeTrigger?: (agent: string, triggerId: string) => Promise<void>;
   /** Send a direct message through the sender's own interactions plane. */
-  /** Spec 401 — a contact notice in the contact's own vault (contacts.ts `deliverContactNotice`). */
-  deliverContactNotice?: (input: { sender: Address; recipient: Address; grantDigest: string }) => Promise<{ ok: boolean; error?: string }>;
+  /** Spec 401 §10 — a friend request in the other person's own vault (friend-offers.ts `deliverFriendRequest`). */
+  deliverFriendRequest?: (input: { sender: Address; recipient: Address; grantDigest: string }) => Promise<{ ok: boolean; error?: string }>;
   sendDirectMessage?: (input: {
     sender: Address; recipient: Address; bodyText: string; session: string;
     /** Spec 400 W1 / 375 W2 — the sender is an agent the session's person STEWARDS (an outside runtime's reply, an
@@ -1396,8 +1397,8 @@ export function harnessReconcilePort(deps: HarnessDeps, env: HarnessEnv, present
     [HOUSEHOLD_RECORD_CAPABILITY]: ledger(self, 'write'),
     [MEMORY_REMEMBER]: ledger(self, 'write'),
     'person.memory.forget': ledger(self, 'write'),
-    'person.contact.invite': ledger(self, 'write'),
-    'person.contact.remove': ledger(self, 'write'),
+    'person.friend.add': ledger(self, 'write'),
+    'person.friend.remove': ledger(self, 'write'),
     ...Object.fromEntries([...PREFERENCES_ACTS, ...ROUTINE_ACTS].map((id) => [id, ledger(self, 'write')])),
   }, routed);
 }
@@ -2341,9 +2342,12 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
   const raw: ToolInvoker = async (toolId, args, ctx) => {
     // Spec 396 W3 — the DO calls this step makes are charged to it on the run's bill.
     setBillStep(ctx.step.id ?? `s${ctx.index}`);
+    // Spec 401 §10 — a step named before a capability was renamed (a run parked as `person.contact.invite`) runs as
+    // the capability it now is, under its current argument names.
+    if (canonicalCapabilityId(toolId) !== toolId) { args = canonicalArgs(toolId, args); toolId = canonicalCapabilityId(toolId); }
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || BUILD_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || MAIL_DRIVE_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === MEMBER_ROLE_SET_CAPABILITY || toolId === CREDENTIAL_ISSUE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || BUILD_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || MAIL_DRIVE_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === MEMBER_ROLE_SET_CAPABILITY || toolId === CREDENTIAL_ISSUE_CAPABILITY || toolId === FRIEND_ADD_TOOL.id || toolId === FRIEND_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
     if (toolId === ASK_CLARIFY_TOOL.id) {
       const ids = Array.isArray(args.options) ? (args.options as unknown[]).map(String).slice(0, 2) : [];
       const purposes = Array.isArray(args.purposes) ? (args.purposes as unknown[]).map(String) : [];
@@ -2402,9 +2406,9 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === WORK_SEARCH_TOOL.id) {
       return workSearchInvoker({ ...(deps.readableVaults ? { readableVaults: deps.readableVaults } : {}), ...(deps.searchSubject ? { searchSubject: deps.searchSubject } : {}) }, person)(toolId, args, ctx);
     }
-    // Spec 401 C1 — CONTACTS: membership on the person agent. The organization's mechanism with the person as principal.
-    if (toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_LIST_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === FRIEND_LIST_TOOL.id || toolId === PRESENCE_LIST_TOOL.id) {
-      const cdeps: ContactDeps = {
+    // Spec 401 §10 — FRIENDSHIP: each person's own offer (friend-offers.ts), the two-way view (friends.ts), presence.
+    if (toolId === FRIEND_ADD_TOOL.id || toolId === FRIEND_REMOVE_TOOL.id || toolId === FRIEND_LIST_TOOL.id || toolId === PRESENCE_LIST_TOOL.id) {
+      const cdeps: FriendDeps = {
         env, enforcers: harnessEnforcers(env), vaultServerId: vaultServerId(env),
         ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
         ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}),
@@ -2413,18 +2417,17 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
         ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
         ...(deps.agentTypeOf ? { agentTypeOf: deps.agentTypeOf } : {}),
         ...(deps.sendDirectMessage ? { sendDirectMessage: deps.sendDirectMessage } : {}),
-        ...(deps.deliverContactNotice ? { deliverContactNotice: deps.deliverContactNotice } : {}),
+        ...(deps.deliverFriendRequest ? { deliverFriendRequest: deps.deliverFriendRequest } : {}),
         ...(deps.executeAsServiceSa ? { executeAsServiceSa: deps.executeAsServiceSa } : {}),
         ...(deps.readContract ? { readContract: deps.readContract } : {}),
         digestBindingArgsFor, stepDigests,
       };
-      if (toolId === CONTACT_LIST_TOOL.id) return contactListInvoker(cdeps, person)(toolId, args, ctx);
-      // Friends: a view over the same records (spec 401) — mutual friend-role contacts, and who is waiting on whom.
+      // Friends: the two-way view — both halves, and who is waiting on whom (friends.ts).
       if (toolId === FRIEND_LIST_TOOL.id) return friendListInvoker(cdeps, person)(toolId, args, ctx);
       // Presence: which friends are here now (presence.ts) — the friends gate, then each one's live entries.
       if (toolId === PRESENCE_LIST_TOOL.id) return presenceListInvoker(cdeps, presencePort(env as { PRESENCE?: DurableObjectNamespace }), person)(toolId, args, ctx);
-      if (toolId === CONTACT_INVITE_TOOL.id) return contactInviteInvoker(cdeps, presented!, person, session)(toolId, args, ctx);
-      return contactRemoveInvoker(cdeps, presented!, person)(toolId, args, ctx);
+      if (toolId === FRIEND_ADD_TOOL.id) return friendAddInvoker(cdeps, presented!, person, session)(toolId, args, ctx);
+      return friendRemoveInvoker(cdeps, presented!, person)(toolId, args, ctx);
     }
     if (toolId === RESOLUTION_REQUEST_TOOL.id) {
       return resolutionRequestInvoker(
@@ -3192,7 +3195,7 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   // Likewise: a revocation is a call to the DelegationManager, and WHICH grant it kills travels in the
   // calldata. The caveat bounds the contract; the invoker bounds the grant to one the person issued.
   'access.grant.revoke': 'manager',
-  'person.contact.remove': 'manager',
+  'person.friend.remove': 'manager',
   'profile.contact.update': 'record',
   'household.member.record': 'record',
 };
@@ -4191,9 +4194,9 @@ export async function resolveStepArgs(
     out.record = String(env.AGENT_RELATIONSHIP).toLowerCase();
   }
 
-  if ((where?.capabilityId === ACCESS_REVOKE_CAPABILITY || where?.capabilityId === CONTACT_REMOVE_TOOL.id) && env.DELEGATION_MANAGER) {
-    // Spec 401 — removing a contact IS a revocation: the call's target is the DelegationManager; WHICH grant travels in
-    // the calldata (the contact names it), so the caveat bounds the contract, never the contact.
+  if ((where?.capabilityId === ACCESS_REVOKE_CAPABILITY || where?.capabilityId === FRIEND_REMOVE_TOOL.id) && env.DELEGATION_MANAGER) {
+    // Spec 401 §10 — removing a friend IS a revocation: the call's target is the DelegationManager; WHICH grant travels in
+    // the calldata (the friend names it), so the caveat bounds the contract, never the friend.
     out.manager = String(env.DELEGATION_MANAGER).toLowerCase();
   }
   // The RECORD a profile edit writes. Not an address and not a contract — it is a vault record type, and
@@ -4377,14 +4380,14 @@ async function askReplyForInner(env: HarnessEnv, input: {
     // one custodian signature for the mandate AND the grant, and the invoker's run finds the grant
     // already approved on chain instead of prompting again.
     const alsoApprove: Array<{ purpose: string; digest: Hex }> = [];
-    // The same for adding a contact: the person→contact grant is approved in the mandate's own prompt.
-    if (r.required.capability.id === CONTACT_INVITE_TOOL.id) {
+    // The same for adding a friend: the person→friend grant is approved in the mandate's own prompt.
+    if (r.required.capability.id === FRIEND_ADD_TOOL.id) {
       const person = String(input.addressee ?? '').toLowerCase();
-      const contact = String(args.contact ?? '').toLowerCase();
-      if (/^0x[0-9a-f]{40}$/.test(person) && /^0x[0-9a-f]{40}$/.test(contact) && person !== contact) {
+      const friend = friendArg(args);
+      if (/^0x[0-9a-f]{40}$/.test(person) && /^0x[0-9a-f]{40}$/.test(friend) && person !== friend) {
         requirement.validAfter ??= Math.floor(Date.now() / 1000) - 60;
-        const g = contactGrantFor({ env, enforcers: harnessEnforcers(env), vaultServerId: vaultServerId(env) }, person as Address, contact as Address, { intentDigest: requirement.intentDigest, validAfter: requirement.validAfter }, r.required.stepRef);
-        alsoApprove.push({ purpose: `the contact grant ${person.slice(0, 10)}… → ${contact.slice(0, 10)}… (they may read your contact profile)`, digest: g.digest });
+        const g = friendGrantFor({ env, enforcers: harnessEnforcers(env), vaultServerId: vaultServerId(env) }, person as Address, friend as Address, { intentDigest: requirement.intentDigest, validAfter: requirement.validAfter }, r.required.stepRef);
+        alsoApprove.push({ purpose: `your friendship grant ${person.slice(0, 10)}… → ${friend.slice(0, 10)}… (they may see your profile)`, digest: g.digest });
       }
     }
     if (r.required.capability.id === ORG_INVITE_CAPABILITY) {
@@ -4809,8 +4812,8 @@ const ONCHAIN_CALLS_FOR: Record<string, readonly Hex[]> = {
   // authority kill. The struct shape is the DelegationManager's, so the selector is computed from it
   // rather than written down: a hand-copied selector is a revocation that reverts.
   [ACCESS_REVOKE_CAPABILITY]: [methodSelectorOf('revokeDelegationByOwner((address,address,bytes32,(address,bytes,bytes)[],uint256,bytes))')],
-  // Spec 401 — removing a contact IS that same revocation, of the grant the person gave the contact.
-  [CONTACT_REMOVE_TOOL.id]: [methodSelectorOf('revokeDelegationByOwner((address,address,bytes32,(address,bytes,bytes)[],uint256,bytes))')],
+  // Spec 401 §10 — removing a friend IS that same revocation, of the grant the person gave the friend.
+  [FRIEND_REMOVE_TOOL.id]: [methodSelectorOf('revokeDelegationByOwner((address,address,bytes32,(address,bytes,bytes)[],uint256,bytes))')],
 };
 
 /** Ceremonies every surface is assumed to render: it is a conversation, so it can ask and be answered. */
@@ -5902,14 +5905,12 @@ step is then handed to that agent under authority the person grants; leave it ou
     // Spec 400 W1 — the agent's own inbox since a cursor (the runtime-member playbook offers it; a person's may too).
     ...(playbook?.tools?.[INBOX_LIST_TOOL.id] ? [mergeContractTool(INBOX_LIST_TOOL, playbook.tools[INBOX_LIST_TOOL.id])] : []),
     ...(playbook?.tools?.[WORK_SEARCH_TOOL.id] ? [mergeContractTool(WORK_SEARCH_TOOL, playbook.tools[WORK_SEARCH_TOOL.id])] : []),
-    // Spec 401 C1 — contacts (the person-steward playbook offers them).
-    ...(playbook?.tools?.[CONTACT_INVITE_TOOL.id] ? [mergeContractTool(CONTACT_INVITE_TOOL, playbook.tools[CONTACT_INVITE_TOOL.id])] : []),
-    ...(playbook?.tools?.[CONTACT_LIST_TOOL.id] ? [mergeContractTool(CONTACT_LIST_TOOL, playbook.tools[CONTACT_LIST_TOOL.id])] : []),
-    // Friends ride the contacts read: a playbook that offers the contact list offers the friends view (the same records,
-    // no act); a playbook that pins `person.friend.list` itself carries its contract.
-    ...(playbook?.tools?.[FRIEND_LIST_TOOL.id] ? [mergeContractTool(FRIEND_LIST_TOOL, playbook.tools[FRIEND_LIST_TOOL.id])] : playbook?.tools?.[CONTACT_LIST_TOOL.id] ? [FRIEND_LIST_TOOL] : []),
-    ...(playbook?.tools?.[PRESENCE_LIST_TOOL.id] ? [mergeContractTool(PRESENCE_LIST_TOOL, playbook.tools[PRESENCE_LIST_TOOL.id])] : playbook?.tools?.[CONTACT_LIST_TOOL.id] ? [PRESENCE_LIST_TOOL] : []),
-    ...(playbook?.tools?.[CONTACT_REMOVE_TOOL.id] ? [mergeContractTool(CONTACT_REMOVE_TOOL, playbook.tools[CONTACT_REMOVE_TOOL.id])] : []),
+    // Spec 401 §10 — friendship (the person-steward playbook offers it; a stored playbook's older ids are read as these).
+    ...(playbook?.tools?.[FRIEND_ADD_TOOL.id] ? [mergeContractTool(FRIEND_ADD_TOOL, playbook.tools[FRIEND_ADD_TOOL.id])] : []),
+    // The friends view; presence rides it (what friends see of each other).
+    ...(playbook?.tools?.[FRIEND_LIST_TOOL.id] ? [mergeContractTool(FRIEND_LIST_TOOL, playbook.tools[FRIEND_LIST_TOOL.id])] : []),
+    ...(playbook?.tools?.[PRESENCE_LIST_TOOL.id] ? [mergeContractTool(PRESENCE_LIST_TOOL, playbook.tools[PRESENCE_LIST_TOOL.id])] : playbook?.tools?.[FRIEND_LIST_TOOL.id] ? [PRESENCE_LIST_TOOL] : []),
+    ...(playbook?.tools?.[FRIEND_REMOVE_TOOL.id] ? [mergeContractTool(FRIEND_REMOVE_TOOL, playbook.tools[FRIEND_REMOVE_TOOL.id])] : []),
     // Spec 380 — one member of an organization, asked through their own agent (fan-out over the roster).
     MEMBER_CONSULT_TOOL,
     // Spec 384 — ask other agents whether they would take this work, and on what terms (an offer is never accepted here).

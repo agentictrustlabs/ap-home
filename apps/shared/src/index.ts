@@ -70,7 +70,17 @@ export const APP_CREDENTIAL_SCOPES = ['vault:credential.issuer-facet:*', 'vault:
 export const APP_IDENTITY_SCOPES = ['vault:identity.pairwise-secret'] as const;
 
 /** The extension both apps append to the core, as the grant builder takes it — the ONE list. */
+/** Spec 401 §10 — a person's friendship offers (`friend:<sa>`). Ring 0's core grant names this family from fabric
+ *  0.0.0-alpha.39; listed here too so a Home pinned before that still issues it. ADDITIVE: a grant signed before this line
+ *  is re-issued by the Home's coverage check (silently on a KMS home, one signature otherwise). */
+export const APP_FRIENDSHIP_SCOPES = ['vault:friend:*'] as const;
+/** Spec 401 §10 step 3 — the LEGACY `contact:<sa>` records, until each person's have moved to `friend:`: read to move
+ *  them, write to mark one withdrawn that could not move, DELETE to remove the old record once moved (a tombstone is a
+ *  distinct op at the record-scope gate). The product grants this, never the substrate; drop it when no vault holds one. */
+export const APP_LEGACY_CONTACT_MIGRATION_SCOPES = ['vault:contact:*'] as const;
+
 export const INTERACTIONS_APP_SCOPES: ReadonlyArray<RecordScopeSpec> = [
   { resources: [...APP_COORDINATION_READ_SCOPES, ...APP_OWN_NAMESPACE_READ_SCOPES], ops: ['read'] },
-  { resources: [...APP_OWN_NAMESPACE_SEED_SCOPES, ...APP_ASSESSMENT_SCOPES, ...APP_DOMAIN_RECORD_SCOPES, ...APP_CREDENTIAL_SCOPES, ...APP_IDENTITY_SCOPES], ops: ['read', 'write'] },
+  { resources: [...APP_OWN_NAMESPACE_SEED_SCOPES, ...APP_ASSESSMENT_SCOPES, ...APP_DOMAIN_RECORD_SCOPES, ...APP_CREDENTIAL_SCOPES, ...APP_IDENTITY_SCOPES, ...APP_FRIENDSHIP_SCOPES], ops: ['read', 'write'] },
+  { resources: [...APP_LEGACY_CONTACT_MIGRATION_SCOPES], ops: ['read', 'write', 'delete'] },
 ];

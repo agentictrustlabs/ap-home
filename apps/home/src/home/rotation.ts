@@ -7,7 +7,7 @@
 // signed over:
 //
 //   1. THE REVIEWED LIST is computed, never typed: every live wire the person issued, from her agent's own audit
-//      (`access.grants.audit` — the plane wires, apps, runtimes, contacts, the coach) and from the Home's `app-grants`
+//      (`access.grants.audit` — the plane wires, apps, runtimes, friendships, the coach) and from the Home's `app-grants`
 //      rows (the ask-as-me wires relying apps hold). Shown once, with what each permits; she may strike one.
 //   2. APPROVED-DIGEST wires are re-approved as-is (`approveDigest` × N in the batch): same object, new epoch.
 //   3. KEY-SIGNED wires are RE-ISSUED — same terms, same salt, the sentinel — their digests join the batch, and a
@@ -44,7 +44,7 @@ export interface ReviewedWire {
   clientId?: string;
   /** Spec 397 §11 — an ACT wire of an app-grants row: its ref, so the row's wire (not the ask line) is re-pointed or struck. */
   wireRef?: Hex;
-  /** Spec 410 §1.2 — a key-signed wire the AGENT holds in one of HER vault records (`contact:<sa>`): read from that
+  /** Spec 410 §1.2 — a key-signed wire the AGENT holds in one of HER vault records (`friend:<sa>`, or a not-yet-moved `contact:<sa>`): read from that
    *  record so it can be re-issued here, and written back to it once the batch lands. */
   recordType?: string;
   source: string;
@@ -64,13 +64,13 @@ export async function reviewedList(input: { person: Address; session: { token: s
     if (!g.signed) { warnings.push(`${g.holderName ?? g.holder} (${g.kind}): your agent did not say how this wire is signed — it will be re-approved, and if it was key-signed it will need re-issuing from its screen`); }
     byDigest.set(g.digest.toLowerCase(), { digest: g.digest as Hex, kind: g.kind, holder: g.holder, ...(g.holderName ? { holderName: g.holderName } : {}), what: g.what, signed: g.signed ?? 'approved-digest', source: g.source });
   }
-  // Spec 410 §1.2 — KEY-SIGNED WIRES THE AGENT HOLDS in her own vault records (a contact's access grant lives in
-  // `contact:<sa>`): read the record so the wire can be re-issued here rather than re-authorized at its screen.
+  // Spec 410 §1.2 — KEY-SIGNED WIRES THE AGENT HOLDS in her own vault records (her friendship grant lives in her offer,
+  // `friend:<sa>`; one not yet moved, in `contact:<sa>`): read the record so the wire is re-issued here, not re-authorized.
   for (const w of byDigest.values()) {
-    if (w.signed !== 'key' || w.wire || !w.source.startsWith('contact:')) continue;
+    if (w.signed !== 'key' || w.wire || !(w.source.startsWith('friend:') || w.source.startsWith('contact:'))) continue;
     try {
       const rec = (await readPersonRecord(input.person, w.source)) as { type?: string; delegation?: DelegationWire; status?: string } | null;
-      if (rec?.type === 'ap.contact.v1' && rec.delegation && rec.status !== 'removed' && digestOf(rec.delegation).toLowerCase() === w.digest.toLowerCase()) { w.wire = rec.delegation; w.recordType = w.source; }
+      if (rec && (rec.type === 'ap.friend-offer.v1' ? rec.status === 'standing' : rec.type === 'ap.contact.v1' && rec.status !== 'removed') && rec.delegation && digestOf(rec.delegation).toLowerCase() === w.digest.toLowerCase()) { w.wire = rec.delegation; w.recordType = w.source; }
     } catch { /* unreadable ⇒ the ceremony says so below, as before */ }
   }
   await ensureCsrfToken();
@@ -149,7 +149,7 @@ export async function rotateThisDevicePasskey(input: {
         lineages.push(r.lineage);
         replacements.push({ clientId: w.clientId, wire: r.wire, ...(w.wireRef ? { ref: w.wireRef, nextRef: r.digest } : {}) });
       } else if (w.wire && w.recordType) {
-        // A contact's wire from her own record: re-issued the same way, written back to the record after the batch.
+        // A friendship wire from her own record: re-issued the same way, written back to the record after the batch.
         const r = reissueForRotation(toLineageWire(w.wire), CHAIN_ID, CONTRACTS.delegationManager);
         reapprove.push(r.digest);
         lineages.push(r.lineage);
@@ -193,7 +193,7 @@ export async function rotateThisDevicePasskey(input: {
       const rec = (await readPersonRecord(input.person, rep.recordType)) as Record<string, unknown> | null;
       const next = { ...(rec ?? {}), delegation: { ...rep.wire, salt: rep.wire.salt }, grantDigest: rep.digest };
       const r = await fetch(`/a2a/interactions/${input.person.toLowerCase()}/record.put`, { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...csrfHeaders() }, body: JSON.stringify({ session: input.session.token, recordType: rep.recordType, record: next }) });
-      if (!r.ok) warnings.push(`the re-issued wire for ${rep.recordType} could not be written back to your record — the contact will be asked to refresh instead`);
+      if (!r.ok) warnings.push(`the re-issued wire for ${rep.recordType} could not be written back to your record — your friend will be asked to refresh instead`);
     } catch (e) { warnings.push(`the re-issued wire for ${rep.recordType} could not be written back: ${e instanceof Error ? e.message : String(e)}`); }
   }
   for (const rep of replacements) {

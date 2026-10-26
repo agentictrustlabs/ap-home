@@ -56,7 +56,7 @@ import { memberConsultGrant, readConsultArtifact, readDelegatedTask, signAsOrg, 
 import { recordRetention } from './run-export.js';
 import { authorityCapabilityOf, checkpointForStep, awaitingAuthorityNote, engagesProvider } from './endeavor-authority-steps.js';
 import { runEngagementCampaign, campaignNote } from './engagement-campaign.js';
-import { loadPlaybook } from '@agenticprimitives/harness';
+import { loadPlaybook } from './playbook-aliases.js';
 import { discoveryFetchFor } from './context-wiring.js';
 import { scopedActionTools } from './harness-run.js';
 import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-scope.js';

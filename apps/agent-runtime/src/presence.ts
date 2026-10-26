@@ -2,7 +2,7 @@
 // Home itself) BEATS every so often: "I am in <app>, at <scope>" — a heartbeat with a short life, kept in the
 // person's own presence object (presence-do.ts), never a record, never an act, never a mandate. Their MUTUAL FRIENDS
 // (spec 401: the person added them and they added the person back) may read it; nobody else, and nothing of it is
-// public. A friend's presence is part of what a contact grant lets a friend see of the person — their contact
+// public. A friend's presence is part of what a friendship grant lets a friend see of the person — their
 // profile, as it stands this minute — so the friends view (friends.ts) is the one gate.
 //
 // Why not a harness run: a heartbeat every half minute cannot be a run on the person's agent (seconds and money,

@@ -32,7 +32,7 @@ export default function FriendInvitePage({ params }: { params: Promise<{ token: 
 
   const addBack = () => {
     if (!invite || !session) return;
-    askCommand({ toolId: 'person.contact.invite', args: { contact: invite.from, role: 'friend' }, message: `add ${who ?? invite.from} as a friend` });
+    askCommand({ toolId: 'person.friend.add', args: { friend: invite.from, type: 'friend' }, message: `add ${who ?? invite.from} as a friend` });
     setAdded(true);
     // The stash is spent once the invitee acted on it; the contact grant is what makes the friendship, not this.
     void fetch('/connect/friend-invite/email', {

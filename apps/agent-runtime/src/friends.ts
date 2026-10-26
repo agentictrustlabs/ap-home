@@ -1,10 +1,10 @@
-// FRIENDS — a friendship is TWO-WAY (spec 401; owner, 2026-10-26). Each person keeps their own half: a record in
-// their own vault naming the other, under a grant they signed (`contact:<sa>`, the wire name kept so no record or
-// grant is orphaned). Neither half is a friendship on its own:
+// FRIENDS — a friendship is TWO-WAY (spec 401 §10; owner, 2026-10-26). Each person keeps their own half: a friendship
+// offer in their own vault naming the other, under a grant they signed (`friend:<sa>`, aporg:FriendshipOffer —
+// friend-offers.ts). Neither half is a friendship on its own (the ontology's `friendshipState`):
 //
 //   mine + theirs, both standing  → FRIENDS (the type — friend · family · coach · other — is mine to give)
 //   mine only                     → SENT (a request waiting on them)
-//   theirs only                   → REQUEST (waiting on me; accepting is `person.contact.invite` back)
+//   theirs only                   → REQUEST (waiting on me; accepting is `person.friend.add` back)
 //   mine standing, theirs removed → ENDED — they removed me. Shown, so it is never mistaken for a friendship; my half
 //                                   is mine to remove (my grant, my signature), which the screen offers in one tap.
 //
@@ -16,28 +16,26 @@
 // friends and are not listed here — the grants they hold are on Grants.
 import type { ToolInvoker, ToolSpec } from '@agenticprimitives/orchestration';
 import { kindOfName } from '@agenticprimitives/ontology/participant-vocabulary';
-import { CONTACT_RECORD_PREFIX, contactRecordType, whoAddedMe, type ContactDeps, type ContactRecordV1 } from './contacts.js';
+import { friendshipState } from '@agenticprimitives/ontology/participant-vocabulary';
+import { offersOf, readOffer, whoOfferedMe, migrateLegacyOffers, FRIEND_TYPES, type FriendDeps, type FriendType } from './friend-offers.js';
 
 /** What the friends view reads: the person's own records and names — a route can build this without the act deps. */
-export type FriendsDeps = Pick<ContactDeps, 'survey' | 'readRecords' | 'readSubjectRecord' | 'nameOf'>;
+export type FriendsDeps = Pick<FriendDeps, 'survey' | 'readRecords' | 'readSubjectRecord' | 'nameOf'> & Partial<Pick<FriendDeps, 'writeSubjectRecord'>>;
 
 export const FRIEND_LIST_CAPABILITY = 'person.friend.list' as const;
 
 /** How many of the other halves one read checks (one record of theirs each). */
 const OTHER_HALF_CHECK_MAX = 100;
 
-/** The kinds of friend — what they are to you. Declarative; none authorizes anything. */
-export const FRIEND_TYPES = ['friend', 'family', 'coach', 'other'] as const;
-export type FriendType = typeof FRIEND_TYPES[number];
-const FRIEND_ROLES: ReadonlySet<string> = new Set(FRIEND_TYPES);
+export { FRIEND_TYPES, type FriendType };
 
 export const FRIEND_LIST_TOOL: ToolSpec = {
   id: FRIEND_LIST_CAPABILITY,
   answers: ['my friends', 'who are my friends', 'friend requests', 'who added me', 'who has not added me back', 'pending friends', 'who removed me', 'who unfriended me'],
   description:
     'YOUR FRIENDS — two-way: people you added who added you back, each with the type you gave them (friend, family, '
-    + 'coach, other). Plus REQUESTS (people who added you — accept with person.contact.invite), SENT (people you added '
-    + 'who have not added you back) and ENDED (friends who removed you — remove them too with person.contact.remove). '
+    + 'coach, other). Plus REQUESTS (people who added you — accept with person.friend.add), SENT (people you added '
+    + 'who have not added you back) and ENDED (friends who removed you — remove them too with person.friend.remove). '
     + 'Your own records, and each friend\'s record naming you. Args: none.',
   inputSchema: { type: 'object', properties: {} },
   establishes: 'lookup',
@@ -47,61 +45,54 @@ export interface FriendRow { agent: string; name: string | null; since: string; 
 export interface FriendRequestRow { agent: string; name: string | null; at: string | null }
 export interface EndedRow { agent: string; name: string | null; type: FriendType; endedAt: string | null }
 
-type OtherHalf = 'standing' | 'removed' | 'silent';
-
-async function otherHalf(deps: FriendsDeps, them: string, me: string): Promise<{ half: OtherHalf; at: number | null }> {
-  const theirs = (await deps.readSubjectRecord?.(them, contactRecordType(me)).catch(() => null)) as ContactRecordV1 | null;
-  if (theirs?.type !== 'ap.contact.v1') return { half: 'silent', at: null };
-  if (theirs.status === 'removed') return { half: 'removed', at: theirs.removedAt ?? null };
-  return { half: 'standing', at: theirs.createdAt ?? null };
-}
-
 const isPersonName = (name: string | null): boolean => { const k = kindOfName(name); return k === null || k === 'person'; };
 
 /** The friends view itself — shared with presence (presence.ts), which is what friends see of each other. */
-export async function friendsOf(deps: FriendsDeps, person: string): Promise<{ friends: FriendRow[]; requests: FriendRequestRow[]; requested: FriendRow[]; ended: EndedRow[]; records: number }> {
+export async function friendsOf(deps: FriendsDeps, person: string): Promise<{ friends: FriendRow[]; requests: FriendRequestRow[]; requested: FriendRow[]; ended: EndedRow[]; records: number; moved?: number; moveError?: string }> {
   if (!deps.survey || !deps.readRecords) return { friends: [], requests: [], requested: [], ended: [], records: 0 };
   const me = person.toLowerCase();
-  const keys = (await deps.survey(me).catch(() => [])).map((r) => r.recordType).filter((rt) => rt.startsWith(CONTACT_RECORD_PREFIX)).slice(0, 200);
-  const bodies: Record<string, unknown> = keys.length ? await deps.readRecords(me, keys).catch(() => ({} as Record<string, unknown>)) : {};
-  // MY OWN EVIDENCE of their half: their add notices and the messages that carried them, in my inbox.
-  const addedMe = await whoAddedMe(deps, me);
+  // STEP 3 OF spec 401 §10, lazily: a legacy `contact:` record moves to `friend:` the first time its holder reads. A
+  // refusal (a grant that predates `vault:friend:*`) is carried on the result, and the view still reads both shapes.
+  const move = deps.writeSubjectRecord ? await migrateLegacyOffers({ survey: deps.survey, readRecords: deps.readRecords, writeSubjectRecord: deps.writeSubjectRecord }, me) : { moved: 0 };
+  const mine = await offersOf(deps, me);
+  // MY OWN EVIDENCE of their half: friend requests in my inbox and the messages that carried them.
+  const offeredMe = await whoOfferedMe(deps, me);
   const nameOf = async (a: string) => (deps.nameOf ? await deps.nameOf(a as `0x${string}`).catch(() => null) : null);
   const friends: FriendRow[] = [];
   const requested: FriendRow[] = [];
   const ended: EndedRow[] = [];
-  /** My half for everyone I ever added: standing, or when I removed them (null when the record does not say — then a
-   *  later ask cannot be told from an old one, and is not shown). */
-  const mine = new Map<string, { standing: boolean; removedAt: number | null }>();
   let checked = 0;
-  for (const rt of keys) {
-    const rec = bodies[rt] as ContactRecordV1 | undefined;
-    if (rec?.type !== 'ap.contact.v1') continue;
-    const agent = rec.contact.toLowerCase();
-    mine.set(agent, { standing: rec.status === 'contact', removedAt: rec.status === 'removed' ? (rec.removedAt ?? null) : null });
-    if (rec.status !== 'contact' || !FRIEND_ROLES.has(rec.role)) continue;
+  const theirHalf = async (them: string) => {
+    if (checked++ >= OTHER_HALF_CHECK_MAX) return null;
+    const o = await readOffer(deps, them, me);
+    return o ? { status: o.status, at: o.status === 'withdrawn' ? (o.withdrawnAt ?? null) : o.offeredAt } : null;
+  };
+  for (const [agent, { offer }] of mine) {
+    if (offer.status !== 'standing' || !(FRIEND_TYPES as readonly string[]).includes(offer.friendType)) continue;
     const name = await nameOf(agent);
     if (!isPersonName(name)) continue;
-    const type = rec.role as FriendType;
-    const since = new Date(rec.createdAt).toISOString();
-    const { half, at } = checked++ < OTHER_HALF_CHECK_MAX ? await otherHalf(deps, agent, me) : { half: 'silent' as const, at: null };
-    if (half === 'removed') ended.push({ agent, name, type, endedAt: at ? new Date(at).toISOString() : null });
-    else if (half === 'standing' || rec.mutual === true || addedMe.has(agent)) friends.push({ agent, name, since, type });
-    else requested.push({ agent, name, since, type });
+    const half = await theirHalf(agent);
+    // A read that says nothing (unreachable, never written) falls back to MY evidence that they offered.
+    const theirs = half?.status ?? (offeredMe.has(agent) || offer.mutual ? 'standing' : null);
+    const state = friendshipState('standing', theirs);
+    const since = new Date(offer.offeredAt).toISOString();
+    if (state === 'ended') ended.push({ agent, name, type: offer.friendType, endedAt: half?.at ? new Date(half.at).toISOString() : null });
+    else if (state === 'friends') friends.push({ agent, name, since, type: offer.friendType });
+    else requested.push({ agent, name, since, type: offer.friendType });
   }
-  // REQUESTS: people who added me, whom I have not added — or whom I removed BEFORE they asked again. Their half is
-  // checked: a request they withdrew (removed me since) is no longer one.
+  // REQUESTS: people who offered me friendship, whom I have not offered mine — or whose offer is newer than my
+  // withdrawal (they asked again). Their half is checked: a request they withdrew is no longer one.
   const requests: FriendRequestRow[] = [];
-  for (const [agent, at] of addedMe) {
-    const my = mine.get(agent);
-    if (my?.standing) continue;
-    if (my && !(at && my.removedAt !== null && Date.parse(at) > my.removedAt)) continue;
-    const { half } = checked++ < OTHER_HALF_CHECK_MAX ? await otherHalf(deps, agent, me) : { half: 'silent' as const };
-    if (half === 'removed') continue;
+  for (const [agent, at] of offeredMe) {
+    const my = mine.get(agent)?.offer;
+    if (my?.status === 'standing') continue;
+    if (my && !(at && my.withdrawnAt && Date.parse(at) > my.withdrawnAt)) continue;
+    const half = await theirHalf(agent);
+    if (half?.status === 'withdrawn') continue;
     requests.push({ agent, name: await nameOf(agent), at });
   }
   requests.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')));
-  return { friends, requests, requested, ended, records: keys.length };
+  return { friends, requests, requested, ended, records: mine.size, ...(move.moved ? { moved: move.moved } : {}), ...(move.error ? { moveError: move.error } : {}) };
 }
 
 /** `person.friend.list` — a read of the person's own records and inbox, and each friend's record naming them; no mandate. */
@@ -109,7 +100,7 @@ export function friendListInvoker(deps: FriendsDeps, person: string | undefined)
   return async () => {
     if (!person) return { refused: 'friends are a person\'s own — there is no person on this run' };
     if (!deps.survey || !deps.readRecords) return { refused: 'this agent cannot read its friends here' };
-    const { friends, requests, requested, ended, records } = await friendsOf(deps, person);
+    const { friends, requests, requested, ended, records, moved, moveError } = await friendsOf(deps, person);
     const parts = [
       requests.length ? `${requests.length} waiting on you — add them back to be friends` : '',
       requested.length ? `${requested.length} not yet added you back` : '',
@@ -121,6 +112,8 @@ export function friendListInvoker(deps: FriendsDeps, person: string | undefined)
       requests,
       requested,
       ended,
+      ...(moved ? { moved } : {}),
+      ...(moveError ? { storageNeedsEnabling: true, moveError } : {}),
       interpretation: `read the person's own friend records (${records}) and inbox, and each friend's record naming them`,
       note: friends.length
         ? `${friends.length} friend(s)${parts.length ? `; ${parts.join('; ')}` : ''}.`

@@ -34,8 +34,8 @@ export const CARRIES = {
   memberRole: { role: [T.MembershipTerms] },
   /** An issuance (spec 444 W3): the claims the organization vouches for — classed as credential claims, never free text. */
   credential: { claims: [T.CredentialClaims] },
-  /** A contact invitation's role word. */
-  contact: { role: [T.MembershipTerms] },
+  /** A friendship offer's type word (friend · family · coach · other). */
+  friend: { type: [T.MembershipTerms] },
   /** A standing instruction: the default an argument will take from now on. */
   instruction: { value: [T.Instruction] },
   /** A routine: the sentence, clock and all, that will run. */
