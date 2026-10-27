@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Address, Hex } from 'viem';
 import { friendOfferRecordType, type FriendDeps, type FriendOfferRecordV1 } from '../src/friend-offers.js';
-import { beatEntry, friendsPresence, livePresence, presenceListInvoker, type PresenceEntry, type PresencePort } from '../src/presence.js';
+import { beatEntry, foldRecent, friendsPresence, livePresence, presenceListInvoker, RECENT_MAX, type PresenceEntry, type PresencePort, type RecentEntry } from '../src/presence.js';
 
 const ALICE = '0x00000000000000000000000000000000000000a1' as Address;
 const BOB = '0x00000000000000000000000000000000000000b1' as Address;
@@ -22,13 +22,22 @@ const deps = (): FriendDeps => ({
   nameOf: async (a) => ({ [BOB]: 'bob.me', [DAN]: 'dan.me' } as Record<string, string>)[a] ?? null,
   digestBindingArgsFor: () => '0x' as Hex, stepDigests: (_a, intent) => ({ intent }),
 });
+/** The presence objects as presence-do.ts keeps them: live entries, and the week's places folded in on each beat. */
 const fakePort = (): PresencePort & { objects: Map<string, PresenceEntry[]> } => {
   const objects = new Map<string, PresenceEntry[]>();
+  const recents = new Map<string, RecentEntry[]>();
   return {
     objects,
     read: async (a) => objects.get(a.toLowerCase()) ?? [],
-    beat: async (a, e) => { objects.set(a.toLowerCase(), [...(objects.get(a.toLowerCase()) ?? []).filter((x) => x.app !== e.app), e]); },
-    gone: async (a, app) => { objects.set(a.toLowerCase(), (objects.get(a.toLowerCase()) ?? []).filter((x) => x.app !== app)); },
+    recent: async (a) => recents.get(a.toLowerCase()) ?? [],
+    beat: async (a, e) => {
+      objects.set(a.toLowerCase(), [...(objects.get(a.toLowerCase()) ?? []).filter((x) => x.app !== e.app), e]);
+      recents.set(a.toLowerCase(), foldRecent(recents.get(a.toLowerCase()) ?? [], e, e.at));
+    },
+    gone: async (a, app, forget) => {
+      objects.set(a.toLowerCase(), (objects.get(a.toLowerCase()) ?? []).filter((x) => x.app !== app));
+      if (forget) recents.set(a.toLowerCase(), (recents.get(a.toLowerCase()) ?? []).filter((r) => r.app !== app));
+    },
   };
 };
 const ctx = () => ({ step: { id: 's0' }, index: 0, intent: { goal: 'who is online', context: {} }, supplied: [] } as never);
@@ -61,5 +70,33 @@ describe('presence', () => {
     expect(out.count).toBe(1); expect(out.here[0]!.name).toBe('bob.me'); expect(out.note).toMatch(/bob\.me: at their Home/);
     expect((await presenceListInvoker(deps(), null, ALICE)('person.presence.list', {}, ctx())) as { refused?: string }).toHaveProperty('refused');
     expect((await presenceListInvoker(deps(), port, undefined)('person.presence.list', {}, ctx())) as { refused?: string }).toHaveProperty('refused');
+  });
+});
+
+describe('where a friend was this week', () => {
+  const at = (scope: string, t: number, app = 'seed-bible-reader') => beatEntry({ app, scope, label: `reading ${scope}` }, t);
+  it('one row per place, newest first, a week deep and bounded; a live session is never kept', () => {
+    const DAY = 86_400_000; const now = 30 * DAY;
+    let r: RecentEntry[] = [];
+    r = foldRecent(r, at('JHN.3', now - 8 * DAY), now - 8 * DAY);
+    r = foldRecent(r, at('JHN.3', now - DAY), now - DAY);
+    r = foldRecent(r, at('GEN.1', now - 1000), now - 1000);
+    r = foldRecent(r, at('session:abc', now - 500), now - 500);
+    r = foldRecent(r, at('ROM.8', now), now);
+    expect(r.map((x) => x.scope)).toEqual(['ROM.8', 'GEN.1', 'JHN.3']);
+    let many: RecentEntry[] = [];
+    for (let i = 0; i < RECENT_MAX + 5; i++) many = foldRecent(many, at(`PSA.${i + 1}`, now + i), now + i);
+    expect(many).toHaveLength(RECENT_MAX);
+  });
+  it('a mutual friend reads where they were; turning sharing off forgets it', async () => {
+    const port = fakePort();
+    const now = Date.now();
+    await port.beat(BOB, beatEntry({ app: 'seed-bible-reader', scope: 'JHN.3', label: 'reading John 3' }, now - 3_600_000));
+    const rows = await friendsPresence(deps(), port, ALICE, now);
+    const bob = rows.find((r) => r.agent === BOB)!;
+    expect(bob.presence).toEqual([]); // not here now — the beat lapsed
+    expect(bob.recent.map((r) => r.scope)).toEqual(['JHN.3']);
+    await port.gone(BOB, 'seed-bible-reader', true);
+    expect((await friendsPresence(deps(), port, ALICE, now)).find((r) => r.agent === BOB)!.recent).toEqual([]);
   });
 });

@@ -11680,10 +11680,11 @@ app.post('/presence/beat', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const port = presencePort(c.env);
   if (!port) return c.json({ ok: false, error: 'this deployment keeps no presence' }, 503);
-  const body = (await c.req.json().catch(() => ({}))) as { scope?: unknown; label?: unknown; ttlMs?: unknown; gone?: unknown };
+  const body = (await c.req.json().catch(() => ({}))) as { scope?: unknown; label?: unknown; ttlMs?: unknown; gone?: unknown; forget?: unknown };
   if (body.gone === true) {
-    await port.gone(who.sa, who.app);
-    return c.json({ ok: true, gone: true });
+    // `forget`: the person turned "let friends see where I am" off — where they were this week goes with it.
+    await port.gone(who.sa, who.app, body.forget === true);
+    return c.json({ ok: true, gone: true, ...(body.forget === true ? { forgotten: true } : {}) });
   }
   const entry = beatEntry({ app: who.app, scope: body.scope, label: body.label, ttlMs: body.ttlMs }, Date.now());
   await port.beat(who.sa, entry);

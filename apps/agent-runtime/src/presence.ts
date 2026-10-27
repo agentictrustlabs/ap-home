@@ -29,9 +29,26 @@ export interface PresenceEntry {
   until: number;
 }
 
+/** Where a person WAS, lately: the places their beats named, newest first — what friends read as "Ruth read John 3".
+ *  Kept a week, at most RECENT_MAX; told only while the person lets friends see where they are (their device beats
+ *  only then, and turning it off forgets this too). A live session is never kept here. */
+export interface RecentEntry { app: string; scope: string; label?: string; at: number }
+export const RECENT_MAX = 30;
+export const RECENT_DAYS = 7;
+
+/** The recent list with a beat folded in: one row per app and place (its newest time), a week deep, bounded. */
+export function foldRecent(recent: readonly RecentEntry[], entry: PresenceEntry, now: number): RecentEntry[] {
+  const fresh = recent.filter((r) => now - r.at < RECENT_DAYS * 86_400_000);
+  if (!entry.scope || entry.scope.startsWith('session:')) return fresh;
+  const row: RecentEntry = { app: entry.app, scope: entry.scope, ...(entry.label ? { label: entry.label } : {}), at: entry.at };
+  return [row, ...fresh.filter((r) => !(r.app === row.app && r.scope === row.scope))].slice(0, RECENT_MAX);
+}
+
 export interface FriendPresence extends FriendRow {
   /** Live entries, newest first; empty when the friend is not here now. */
   presence: PresenceEntry[];
+  /** Where they were this past week, newest first. */
+  recent: RecentEntry[];
 }
 
 /** The entries still alive at `now`, newest first. */
@@ -50,8 +67,11 @@ export function beatEntry(input: { app: string; scope?: unknown; label?: unknown
 /** The presence objects, by person — the Worker binds them; a test fakes this. */
 export interface PresencePort {
   read(agent: string): Promise<PresenceEntry[]>;
+  /** Where they were this past week (the person's own object; a friend reads it through the same gate). */
+  recent(agent: string): Promise<RecentEntry[]>;
   beat(agent: string, entry: PresenceEntry): Promise<void>;
-  gone(agent: string, app: string): Promise<void>;
+  /** `forget`: the person stopped letting friends see where they are — the week's list goes too. */
+  gone(agent: string, app: string, forget?: boolean): Promise<void>;
 }
 
 export function presencePort(env: { PRESENCE?: DurableObjectNamespace }): PresencePort | null {
@@ -59,11 +79,12 @@ export function presencePort(env: { PRESENCE?: DurableObjectNamespace }): Presen
   if (!ns) return null;
   const stub = (agent: string) => ns.get(ns.idFromName(agent.toLowerCase()));
   const call = async (agent: string, body: unknown) =>
-    (await (await stub(agent).fetch('https://presence/', { method: 'POST', body: JSON.stringify(body) })).json()) as { entries?: PresenceEntry[] };
+    (await (await stub(agent).fetch('https://presence/', { method: 'POST', body: JSON.stringify(body) })).json()) as { entries?: PresenceEntry[]; recent?: RecentEntry[] };
   return {
     read: async (agent) => (await call(agent, { op: 'read' })).entries ?? [],
+    recent: async (agent) => (await call(agent, { op: 'recent' })).recent ?? [],
     beat: async (agent, entry) => { await call(agent, { op: 'beat', entry }); },
-    gone: async (agent, app) => { await call(agent, { op: 'gone', app }); },
+    gone: async (agent, app, forget) => { await call(agent, { op: 'gone', app, ...(forget ? { forget: true } : {}) }); },
   };
 }
 
@@ -72,8 +93,8 @@ export async function friendsPresence(deps: FriendsDeps, port: PresencePort, per
   const { friends } = await friendsOf(deps, person);
   const out: FriendPresence[] = [];
   for (const f of friends) {
-    const presence = livePresence(await port.read(f.agent).catch(() => []), now);
-    out.push({ ...f, presence });
+    const [live, recent] = await Promise.all([port.read(f.agent).catch(() => []), port.recent(f.agent).catch(() => [])]);
+    out.push({ ...f, presence: livePresence(live, now), recent: recent.filter((r) => now - r.at < RECENT_DAYS * 86_400_000) });
   }
   // Those here now first, then by name.
   return out.sort((a, b) => (b.presence.length ? 1 : 0) - (a.presence.length ? 1 : 0) || String(a.name ?? a.agent).localeCompare(String(b.name ?? b.agent)));
