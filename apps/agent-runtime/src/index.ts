@@ -11680,13 +11680,16 @@ app.post('/presence/beat', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const port = presencePort(c.env);
   if (!port) return c.json({ ok: false, error: 'this deployment keeps no presence' }, 503);
-  const body = (await c.req.json().catch(() => ({}))) as { scope?: unknown; label?: unknown; ttlMs?: unknown; gone?: unknown; forget?: unknown };
+  const body = (await c.req.json().catch(() => ({}))) as { scope?: unknown; label?: unknown; ttlMs?: unknown; gone?: unknown; forget?: unknown; channel?: unknown };
+  // A second line an app may keep beside "where I am": `channel: 'session'` — "I am sharing a live session" (its scope
+  // `session:<id>:<code>`, so a friend can join) — told to the same mutual friends, lapsing the same way.
+  const app = body.channel === 'session' ? `${who.app}:session` : who.app;
   if (body.gone === true) {
     // `forget`: the person turned "let friends see where I am" off — where they were this week goes with it.
-    await port.gone(who.sa, who.app, body.forget === true);
+    await port.gone(who.sa, app, body.forget === true);
     return c.json({ ok: true, gone: true, ...(body.forget === true ? { forgotten: true } : {}) });
   }
-  const entry = beatEntry({ app: who.app, scope: body.scope, label: body.label, ttlMs: body.ttlMs }, Date.now());
+  const entry = beatEntry({ app, scope: body.scope, label: body.label, ttlMs: body.ttlMs }, Date.now());
   await port.beat(who.sa, entry);
   return c.json({ ok: true, until: new Date(entry.until).toISOString() });
 });
