@@ -34,3 +34,10 @@ export function reusesStandingGrantWithSelfVault(aud: string | undefined): boole
 export function sharesEmailClaim(app?: Pick<RelyingApp, 'idTokenClaims'> | null): boolean {
   return Array.isArray(app?.idTokenClaims) && app.idTokenClaims.includes('email');
 }
+
+/** Whether an organization this client's person creates claims a public name at creation. True unless the client
+ *  set `provisioning.orgPublicName` to false (2026-10-28) — then it is chartered nameless and named later, by
+ *  choice, from its Naming page. No client and unknown clients get the default. */
+export function namesOrgsAtCreation(aud: string | undefined): boolean {
+  return client(aud)?.provisioning?.orgPublicName !== false;
+}

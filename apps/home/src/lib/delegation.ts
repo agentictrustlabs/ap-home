@@ -1025,6 +1025,56 @@ export async function issueOrgReadDelegation(
   return delegation;
 }
 
+// ─── spec 344 §2.1 — the GOVERNOR → WORKSPACE OPERATING grant ─────────────────────────────────
+
+/** One year, like the org read grant: structural, held by the workspace; the governor's exit is the on-chain revoke. */
+export const WORKSPACE_OPERATING_VALIDITY_SECONDS = 365 * 24 * 60 * 60;
+
+/**
+ * The OPERATING grant `governor → workspace` (spec 344 §2.1, Rich/Paul 2026-10-28): the governing organization's own
+ * authorization for the workspace agent it governs to operate — the reverse of the workspace → governor content read.
+ * Without it the governance pointer is only a statement; with it, the governor can withdraw the workspace by revoking
+ * one delegation, and the runtime refuses to treat the workspace as governed once it is revoked.
+ *
+ * NARROW BY CONSTRUCTION: a vault-record-scope caveat over exactly the grants the caller names (the scope lives in
+ * `workspace-governor.ts`, never client-supplied), value 0, timestamp-bounded. It carries no allowed-targets /
+ * methods terms, so it redeems no on-chain call: it authorizes record operations, not spending or execution.
+ */
+export function buildApprovedWorkspaceOperatingDelegation(
+  governor: Address,
+  workspace: Address,
+  grants: readonly VaultRecordScopeGrant[],
+  validitySeconds = WORKSPACE_OPERATING_VALIDITY_SECONDS,
+): { delegation: Delegation; digest: Hex } {
+  if (!grants.length) throw new Error('a workspace operating grant names its scope');
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
+    buildVaultRecordScopeCaveat(grants.map((g) => ({ server: g.server, resources: [...g.resources], ops: [...g.ops] }))),
+  ];
+  const d: Delegation = { delegator: governor, delegate: workspace, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = APPROVED_HASH_SENTINEL;
+  return { delegation: d, digest };
+}
+
+/** Signed directly by the governor's custody (the person who stewards it) — `signHashFor(via, governor, auth)`. */
+export async function issueWorkspaceOperatingDelegation(
+  governor: Address,
+  workspace: Address,
+  grants: readonly VaultRecordScopeGrant[],
+  signHash: SignHash,
+  validitySeconds = WORKSPACE_OPERATING_VALIDITY_SECONDS,
+): Promise<Delegation> {
+  const { delegation, digest } = buildApprovedWorkspaceOperatingDelegation(governor, workspace, grants, validitySeconds);
+  delegation.signature = await signHash(digest);
+  return delegation;
+}
+
 // ─── spec 345 — the SELF VAULT GRANT (delegator = delegate = personSA) ────────────────────────
 
 /** The scope a relying app's whitelabel entry may declare for its self-vault grant — fixed
