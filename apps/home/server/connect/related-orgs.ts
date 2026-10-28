@@ -226,7 +226,8 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // name the viewer holds, never a public registration. Only rows still showing the raw address are touched, so a
   // public name (healed above) always wins. Cheap KV gets, no vault read in this hot path.
   {
-    const unnamed = orgs.filter((o) => String(o.orgName ?? '').toLowerCase() === String(o.orgAgent).toLowerCase());
+    // An EMPTY name is unnamed too: a name-later organization's link carries '' (no public name to heal to), not its address.
+    const unnamed = orgs.filter((o) => !String(o.orgName ?? '').trim() || String(o.orgName ?? '').toLowerCase() === String(o.orgAgent).toLowerCase());
     if (unnamed.length > 0) {
       await Promise.all(unnamed.map(async (o) => {
         try {

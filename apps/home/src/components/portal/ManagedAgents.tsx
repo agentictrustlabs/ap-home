@@ -329,6 +329,15 @@ export async function createAgentWithBirthrights(
           body: JSON.stringify({ person, orgAgent: res.result.agent.toLowerCase(), orgProfile: { displayName: commonName } }),
         }).catch((e) => console.warn('[org-create] common name not projected:', e));
       }
+      // NAME LATER: with no public name, the common name is also its PRIVATE name (`org-localname:<org>`), so the
+      // steward's lists show "<name> *" rather than "Unnamed organization". Never a public registration.
+      if (later && !res.result.name && commonName) {
+        await fetch('/connect/related-orgs', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+          body: JSON.stringify({ person, orgAgent: res.result.agent.toLowerCase(), orgLocalName: { name: commonName } }),
+        }).catch((e) => console.warn('[org-create] private name not projected:', e));
+      }
       await fetch('/connect/channels', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
@@ -761,7 +770,8 @@ export function OrganizationsManager({
               <div className="manage-card" key={org.agent} style={inactive ? { opacity: 0.72 } : undefined}>
                 <div className="manage-card-head">
                   <span className="manage-card-icon"><BuildingIcon size={17} /></span>
-                  <span className="manage-card-label">{org.name || 'Unnamed organization'}</span>
+                  {/* A private name (no public one yet) is marked `*`, as everywhere else a local name shows. */}
+                  <span className="manage-card-label" title={org.nameIsLocal ? 'A private name — it has no public name yet' : undefined}>{org.name ? `${org.name}${org.nameIsLocal ? ' *' : ''}` : 'Unnamed organization'}</span>
                   <span className={`manage-card-badge${inactive ? '' : ' live'}`}>
                     {/* The subclass word (team / circle / church), not the class — a church is an organization, and says which. */}
                     {inactive ? STATUS_LABEL.inactive : orgKindWordOf(org.kind).replace(/^./, (c) => c.toUpperCase())}
@@ -772,7 +782,7 @@ export function OrganizationsManager({
                   You steward it — your key signs for it. <ExplorerLink address={org.agent} label="explorer ↗" />
                   {onSelect && <> · <button type="button" onClick={() => onSelect(org.agent)} style={{ background: 'none', border: 'none', color: 'var(--color-amber-700)', cursor: 'pointer', padding: 0, minHeight: 0, fontSize: 'inherit' }}>view data →</button></>}
                 </p>
-                {!org.name && <NameAgentForm agent={org.agent} kind="org" parent={person} person={person} token={token} via={via} onDone={reload} />}
+                {(!org.name || org.nameIsLocal) && <NameAgentForm agent={org.agent} kind="org" parent={person} person={person} token={token} via={via} onDone={reload} />}
                 {inactive && <ActivateOrgRow org={org} person={person} token={token} onDone={reload} />}
                 <div style={{ marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid var(--c-g100, #eee)' }}>
                   {t ? (
