@@ -19,12 +19,13 @@ import { assignDefaultArchetype } from '../../home/default-archetype';
 import { buyNameForNewAgent, kindNameIsBought } from '../../home/charter-name';
 import { NAMING_COIN, namePrice } from '../../lib/naming-price';
 import { emitControlEvent } from '../../home/control-plane';
-import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, signHashFor, type Via } from '../../home/onboarding';
+import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, governanceGapWords, repairWorkspaceGovernance, signHashFor, type Via } from '../../home/onboarding';
+import { governanceGaps, governorOf, WORKSPACE_GOVERNOR_RECORD, type GovernanceGrant } from '../../lib/workspace-governor';
 import { setOrgLifecycleStatus } from '../../home/org-lifecycle';
 import { orgStatusOf, STATUS_LABEL, type OrgSurface } from '../../lib/org-lifecycle';
 import type { DelegationWire } from '../../lib/delegation';
 import { ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS } from '../../lib/delegation';
-import { vaultWriteWithDelegation } from '../../lib/vault-client';
+import { vaultReadWithDelegation, vaultWriteWithDelegation } from '../../lib/vault-client';
 import { COINS, FUNDING_COIN, shown, type Coin } from '../../lib/coins';
 import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
@@ -269,7 +270,7 @@ export async function enableAgentPlanes(agent: string, via: string, token: strin
  * person's new agent must not fail to exist because a courtesy failed.
  */
 export async function createAgentWithBirthrights(
-  input: { kind: AgentKind; label?: string; parent: string; person: string; via: string; displayName?: string; /** For a protected label (431 §3): the person's verified email at that domain. */ email?: string; /** A line about it, written with the name (430 N6a). */ about?: string },
+  input: { kind: AgentKind; label?: string; parent: string; person: string; via: string; displayName?: string; /** NAME LATER (2026-10-28): an organization chartered with no public name — neither claimed nor bought; its display name kept in its own `org.profile`, a public name claimed later from its Naming page. */ nameLater?: boolean; /** For a protected label (431 §3): the person's verified email at that domain. */ email?: string; /** A line about it, written with the name (430 N6a). */ about?: string },
   token: string,
   onStep: (s: string) => void,
 ): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
@@ -280,10 +281,11 @@ export async function createAgentWithBirthrights(
   // `register(label, owner)` the claim path builds no longer exists on those roots; sending it reverted the
   // whole deploy, so "Add an organization" with a name failed on faithnet from the root switch until this.
   const wantName = !!input.label && input.label.trim().length >= 3;
-  const bought = wantName && kindNameIsBought(kind);
-  const label = bought ? undefined : input.label;
+  const later = kind === 'org' && input.nameLater === true;
+  const bought = wantName && !later && kindNameIsBought(kind);
+  const label = bought || later ? undefined : input.label;
   const res = await createManagedAgent(
-    { kind, label, parent: parent as `0x${string}`, person: person as `0x${string}`, via, ...(bought ? { nameLater: true } : {}) },
+    { kind, label, parent: parent as `0x${string}`, person: person as `0x${string}`, via, ...(bought || later ? { nameLater: true } : {}) },
     token, onStep,
   );
   if (!res.ok) return res;
@@ -391,15 +393,19 @@ export function CreateAgentForm({
   // Plumbing (a treasury) may defer. The table says which; a single-kind form keeps the old rule.
   const nameRequired = choice ? choice.nameRequired : kind === 'org';
 
-  async function create(named: boolean) {
+  // An organization may be chartered with NO public name (2026-10-28, Rich): what is typed is then only the name it
+  // goes by, kept in its own profile, and the public name is claimed later from its page.
+  const canNameLater = kind === 'org';
+  async function create(named: boolean, later = false) {
     const clean = label.trim().toLowerCase();
+    if (later && label.trim().length < 3) { setErr('Type the name it goes by — at least 3 characters. It stays private until you claim it.'); return; }
     if (named && clean.length < 3) {
       setErr(nameRequired ? 'Organizations require a name — at least 3 characters.' : 'Pick a name with at least 3 characters, or create it unnamed.');
       return;
     }
     setBusy(true); setErr(''); setStep('');
     const res = await createAgentWithBirthrights(
-      { kind, label: named ? clean : undefined, parent, person, via, ...(kind === 'org' ? { displayName: commonName } : {}) }, token, setStep,
+      { kind, label: named ? clean : undefined, parent, person, via, ...(kind === 'org' ? { displayName: commonName.trim() || (later ? label.trim() : '') } : {}), ...(later ? { nameLater: true } : {}) }, token, setStep,
     );
     setBusy(false);
     if (!res.ok) { setErr(res.error); return; }
@@ -457,6 +463,11 @@ export function CreateAgentForm({
         <BusyButton busy={busy} busyLabel={step || 'Working…'} className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} onClick={() => void create(true)}>
           Create + name
         </BusyButton>
+        {canNameLater && (
+          <button type="button" className="btn-ghost" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => void create(false, true)} data-testid="create-name-later">
+            Create, name it later
+          </button>
+        )}
         {!nameRequired && (
           <button type="button" className="btn-ghost" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => void create(false)}>
             Create without a name
@@ -468,7 +479,7 @@ export function CreateAgentForm({
       </div>
       <p className="onboarding-note" style={{ margin: 0 }}>
         Deploys its own Smart Agent, stewarded by you (your key signs for it) — one {via === 'wallet' ? 'wallet' : 'device'} prompt, gas sponsored.
-        {' '}{choice?.blurb ? `${choice.blurb} ` : ''}{nameRequired ? 'It is counterparty-facing, so a name is required.' : 'A name is optional; you can name it later.'}
+        {' '}{choice?.blurb ? `${choice.blurb} ` : ''}{canNameLater ? 'Create + name claims it publicly now. Name it later keeps the name you type private, in its own profile, until you claim a public name from its page.' : nameRequired ? 'It is counterparty-facing, so a name is required.' : 'A name is optional; you can name it later.'}
       </p>
       {err && <p className="onboarding-hint taken" style={{ margin: 0 }}>{err}</p>}
     </div>
@@ -807,6 +818,7 @@ export function OrganizationsManager({
                   steward's Enable when a plane is missing (a service chartered before 2026-10-10 was born without them). */}
               <ServicePlanes agent={svc.agent} token={token} via={via} />
               {!svc.name && <NameAgentForm agent={svc.agent} kind={svc.kind} parent={svc.parent} person={person} token={token} via={via} onDone={reload} />}
+              {svc.kind === 'workspace' && <WorkspaceGovernanceRow ws={svc} orgs={orgs} person={person} token={token} via={via} />}
             </div>
           ))}
 
@@ -930,6 +942,62 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * A GOVERNED WORKSPACE'S GRANTS (Rich, 2026-10-28): says which of the two governance grants this workspace lacks — the
+ * workspace → organization content read, the organization → workspace operating grant — and offers Repair, which issues
+ * only the missing ones. Silent when both are there, and for a standalone workspace (no governor recorded).
+ */
+function WorkspaceGovernanceRow({ ws, orgs, person, token, via }: { ws: ManagedAgent; orgs: ManagedAgent[]; person: string; token: string; via: string }) {
+  const [gaps, setGaps] = useState<GovernanceGrant[] | null>(null);
+  const [governor, setGovernor] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const wire = ws.stewardshipDelegation as DelegationWire | undefined;
+  useEffect(() => {
+    if (!wire) return;
+    let live = true;
+    void vaultReadWithDelegation(wire, WORKSPACE_GOVERNOR_RECORD)
+      .then((pointer) => {
+        if (!live) return;
+        const g = governorOf(pointer);
+        setGovernor(g);
+        setGaps(g ? governanceGaps(pointer, ws.agent) : []);
+      })
+      .catch(() => { if (live) setGaps([]); });
+    return () => { live = false; };
+  }, [wire, ws.agent]);
+  if (!gaps || !gaps.length || !governor || !wire) return msg ? <p className="onboarding-note" style={{ margin: '.4rem 0 0' }}>{msg}</p> : null;
+  const org = orgs.find((o) => o.agent.toLowerCase() === governor);
+  const orgWire = org?.stewardshipDelegation as DelegationWire | undefined;
+  async function repair() {
+    if (!orgWire) return;
+    setBusy(true); setMsg('');
+    const r = await repairWorkspaceGovernance({
+      ws: ws.agent as `0x${string}`, wsStewardship: wire!, governor: governor as `0x${string}`, orgStewardship: orgWire,
+      label: ws.name || '', person: person as `0x${string}`, via: via.toLowerCase() as Via, auth: { token }, token,
+    });
+    setBusy(false);
+    if (!r.ok) { setMsg(r.error); return; }
+    setGaps(r.missing);
+    setMsg(r.missing.length ? `Partly repaired — still missing: ${r.missing.map(governanceGapWords).join('; ')}.` : 'Repaired — both governance grants are in place.');
+  }
+  return (
+    <div style={{ marginTop: '.5rem', paddingTop: '.5rem', borderTop: '1px solid var(--c-g100, #eee)', fontSize: '.82rem' }} data-testid={`ws-governance-${ws.agent.toLowerCase()}`}>
+      <p className="onboarding-hint taken" style={{ margin: 0 }}>
+        Governed by {org?.name || governor}, but missing {gaps.map(governanceGapWords).join(' and ')}.
+      </p>
+      {orgWire ? (
+        <BusyButton busy={busy} busyLabel="Repairing…" className="btn-ghost" style={{ fontSize: '.8rem', padding: '.3rem .6rem', marginTop: '.35rem' }} onClick={() => void repair()}>
+          Repair governance
+        </BusyButton>
+      ) : (
+        <p className="onboarding-note" style={{ margin: '.3rem 0 0' }}>A steward of {org?.name || 'the governing organization'} can repair it.</p>
+      )}
+      {msg && <p className="onboarding-note" style={{ margin: '.3rem 0 0' }}>{msg}</p>}
     </div>
   );
 }

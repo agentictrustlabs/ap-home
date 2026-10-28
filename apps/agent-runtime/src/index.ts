@@ -8767,6 +8767,9 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
      * from the person's treasury, through the PRICED subregistry), so the org deploys NAMELESS here and the Home
      * buys next. The legacy `register(label, owner)` the batch built reverted on every priced root (0xea8e4eb5
      * NotAuthorized: the root no longer names the permissionless subregistry) — five club charters on 2026-10-06.
+     *
+     * It is also the creator's own choice (NAME LATER, 2026-10-28): an organization chartered with no public name at
+     * all - its type still declared, its grants the same - named later, if ever, from its Naming page.
      */
     nameLater?: boolean;
   } | null;
@@ -8813,19 +8816,20 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
     const stewardship = buildOrgGrant(c.env, orgSA, person);
     approveCalls.push(orgApproveHashCall(c.env, stewardship.digest, 0n, orgSA));
 
-    let orgName = '';
-    let nameCalls: Array<{ to: Address; value: bigint; data: Hex }> = [];
-    if (!nameLater) {
-      const root = subregistryForTld(c.env, body.tld);
-      if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
-      orgName = `${label}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
-      // Type first, then the claim — the record the suffix asserts must exist before the name does.
-      const declare = root.typed ? await declareTypeCallsFor(c.env, orgSA, root.tld) : [];
-      const register = buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: orgSA });
-      const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node! });
-      nameCalls = [...declare, register, setPrimary];
-    }
-    const callData = buildExecuteBatchCallData([...nameCalls, ...approveCalls]);
+    const root = subregistryForTld(c.env, body.tld);
+    if (!root.ok && !nameLater) return c.json({ ok: false, error: root.error }, 503);
+    // Type first, then the claim - the record the suffix asserts must exist before the name does. NAMELESS IS NOT
+    // TYPELESS (spec 346 s3.6 step 1b, as the device-signed path already does): a nameless organization declares its
+    // type in the same genesis and claims nothing - whether its name is bought next or claimed later by choice.
+    const declare = root.ok && root.typed ? await declareTypeCallsFor(c.env, orgSA, root.tld) : [];
+    const orgName = nameLater || !root.ok ? '' : `${label}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
+    const nameCalls = nameLater || !root.ok
+      ? []
+      : [
+          buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: orgSA }),
+          buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node! }),
+        ];
+    const callData = buildExecuteBatchCallData([...declare, ...nameCalls, ...approveCalls]);
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
@@ -9021,6 +9025,8 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
 
   const body = (await c.req.json().catch(() => null)) as {
     session?: string; kind?: string; parent?: Address; label?: string; node?: Hex; tld?: string; serviceRole?: string;
+    /** NAME LATER (2026-10-28) — an organization deployed with no public name, said explicitly. */
+    nameLater?: boolean;
   } | null;
   if (!body?.session || !body?.kind || !body?.parent) {
     return c.json({ ok: false, error: 'session + kind + parent required' }, 400);
@@ -9031,10 +9037,12 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
     if (!/^[a-z0-9-]{1,63}$/.test(body.label!.toLowerCase())) return c.json({ ok: false, error: 'bad_label' }, 400);
     if (!/^0x[0-9a-fA-F]{64}$/.test(body.node!)) return c.json({ ok: false, error: 'bad_node' }, 400);
   }
-  // Orgs MUST be named (name-deferral is for person/treasury agents only): an
-  // organization is a counterparty-facing identity — other agents delegate to
-  // it, receive grants from it, and resolve it by name.
-  if (body.kind === 'org' && !wantName) {
+  // An organization is named unless its creator said "name later" (2026-10-28). An unnamed organization is a full
+  // agent — the address is its identifier (ADR-0010) and other agents delegate to it by address; the public name is
+  // an optional facet claimed later. Saying so is explicit: a missing label alone is still refused, so a form that
+  // drops the name by mistake fails here rather than charter an organization nobody meant to leave unnamed.
+  const orgNameLater = body.kind === 'org' && !wantName && body.nameLater === true;
+  if (body.kind === 'org' && !wantName && !orgNameLater) {
     return c.json({ ok: false, error: 'org_requires_name' }, 400);
   }
 
@@ -9072,6 +9080,10 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
       calls.push(buildSubregistryRegisterCall({ subregistry: root.subregistry, label: body.label!.toLowerCase(), newOwner: childSA }));
       calls.push(buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node! }));
       claimedName = `${body.label!.toLowerCase()}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
+    } else if (orgNameLater && body.tld) {
+      // NAMELESS IS NOT TYPELESS: the organization declares its type now, in the same genesis, and claims nothing.
+      const root = subregistryForTld(c.env, body.tld);
+      if (root.ok && root.typed) calls.push(...(await declareTypeCallsFor(c.env, childSA, root.tld, body.serviceRole)));
     }
     calls.push(orgApproveHashCall(c.env, stewardship.digest, 0n, childSA)); // deployed in this batch: epoch 0
     const callData = buildExecuteBatchCallData(calls);

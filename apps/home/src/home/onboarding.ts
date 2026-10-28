@@ -36,7 +36,7 @@ import {
   type SignHash,
   typedTldForKind,
 } from '../connect-client';
-import { writeGovernancePair, WORKSPACE_CONTENT_SCOPE } from '../lib/workspace-governor';
+import { writeGovernancePair, governanceGaps, governorOf, workspaceOperatingScope, WORKSPACE_CONTENT_SCOPE, WORKSPACE_GOVERNOR_RECORD, type GovernanceGrant } from '../lib/workspace-governor';
 import type { ConnectionKind } from '@agenticprimitives/agent-naming';
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { writePendingEnrollJson } from '../components/onboarding/pending-enroll';
@@ -46,7 +46,7 @@ import { connectWallet, personalSign } from '../lib/wallet';
 import { isDemoCustodyHome, demoCustodySignHash } from '../lib/persona-custody';
 import { writeOrganizationMembership } from '../lib/membership-write';
 import { getClient } from '../lib/oidc-clients';
-import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, issueOrgReadDelegation, buildApprovedSelfVaultGrant, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, ORG_INTERACTIONS_SESSION_LEAF_LADDER_RUNGS, PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type SelfVaultGrantConfig, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, issueOrgReadDelegation, issueWorkspaceOperatingDelegation, buildApprovedSelfVaultGrant, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, ORG_INTERACTIONS_SESSION_LEAF_LADDER_RUNGS, PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type SelfVaultGrantConfig, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
 import { saveStandingGrant, loadStandingGrant, saveStandingGrantWithSelfVault, loadStandingGrantWithSelfVault } from '../lib/grant-cache';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
@@ -57,6 +57,7 @@ import { readSsoCookie } from '../lib/sso-cookie';
 import { SESSION_KEY } from '../context/session';
 import type { Home } from './types';
 import { homeLabel } from './types';
+import { namesOrgsAtCreation } from '../whitelabel/provisioning';
 
 /** The person's Home session Bearer, from wherever it lives (explicit auth → this-origin localStorage →
  *  parent-domain SSO cookie) — session-gated /connect endpoints (e.g. the naming + membership stores)
@@ -601,6 +602,11 @@ export async function createOrganization(
      *  `org.profile.displayName` and rides the `org` payload as `orgProfile`, which `/oidc/grant` projects onto
      *  the steward's link — so the first `/token` and `related-orgs` read already carry `displayName`. */
     displayName?: string;
+    /** NAME LATER (2026-10-28, Rich): a NEW organization is chartered with NO public name — vault, stewardship and
+     *  every grant exactly as a named one, its type declared, the name it goes by (`displayName`, else `base`) kept
+     *  in its own `org.profile`. Claiming a public name is a separate act, from its Naming page. Leaving the name off
+     *  discloses less; it does not hide the account or its on-chain relationships. */
+    nameLater?: boolean;
     onProgress?: (p: { step: number; total: number; label: string; hint?: string }) => void;
   } = {},
 ): Promise<Result<{ org: Record<string, unknown>; grant: unknown }>> {
@@ -709,13 +715,15 @@ export async function createOrganization(
       return { ok: false, error: e instanceof Error ? e.message : 'existing-org grant failed' };
     }
   }
+  // NAME LATER — asked for by the caller, or the relying app's own setting (`provisioning.orgPublicName: false`).
+  if (opts.nameLater === undefined && !namesOrgsAtCreation(opts.requestedBy)) opts = { ...opts, nameLater: true };
   // spec 256 — route by credential, like secureHome: a Google member's org is custodied by their
   // KMS C_sub and deployed server-side (ZERO device prompts); passkey/wallet sign on device.
   const say = opts.onProgress;
   say?.({
     step: 1,
     total: 5,
-    label: 'Finding a name…',
+    label: opts.nameLater ? 'Setting up the organization…' : 'Finding a name…',
     hint: 'This can take a moment — we’re setting the organization up.',
   });
   // ap-town spec 431 — a priced org root: the device-signed path (passkey / wallet / demo custody) deploys the org
@@ -775,7 +783,7 @@ export async function createOrganization(
         if (!ix.ok) console.warn('[org-create] interactions grant not provisioned:', ix.error);
       }),
       x.stewardshipDelegation
-        ? vaultWriteWithDelegation(x.stewardshipDelegation, 'org.profile', { v: 1, displayName: commonName || x.childName }).catch((e: unknown) =>
+        ? vaultWriteWithDelegation(x.stewardshipDelegation, 'org.profile', { v: 1, displayName: commonName || x.childName || base }).catch((e: unknown) =>
             console.warn('[org-create] org profile seed failed:', e),
           )
         : Promise.resolve(),
@@ -862,7 +870,8 @@ export async function createOrganization(
       stewardshipDelegation: x.stewardshipDelegation,  // org→person (person reads org)
       operationalDelegation: x.operationalDelegation,  // org→app service agent (submit intents)
       readGrantDelegation: x.readGrantDelegation,      // org→app workspace (read one record family)
-      ...(commonName ? { orgProfile: { displayName: commonName } } : {}), // → the steward's link, at /oidc/grant
+      ...(commonName || (opts.nameLater && base) ? { orgProfile: { displayName: commonName || base } } : {}), // → the steward's link, at /oidc/grant
+      ...(opts.nameLater ? { nameLater: true } : {}), // no public name yet
     },
     grant: x.delegation,
   };
@@ -980,13 +989,12 @@ export async function createGovernedWorkspace(
   // workspace (server-side for a KMS workspace). A member then reads the workspace's content by chaining their org
   // membership onto this grant (the field runtime presents the chain) — "read through the governor", never a
   // relationship to the workspace agent (the hub doctrine). Content only; best-effort, like the other ws grants.
-  let governorRead: DelegationWire | undefined;
+  // Spec 344 §2.1 — and the REVERSE: the governor's own OPERATING grant to the workspace, signed as the organization. The
+  // pointer records the relationship; this is what authorizes it, and revoking it withdraws the workspace.
+  const grants = await issueGovernanceGrants({ ws, governor, via, auth, need: ['governorRead', 'governorMandate'] });
+  const { governorRead, governorMandate } = grants;
   try {
-    const signWs = await signHashFor(via, ws, auth);
-    governorRead = toWire(await issueOrgReadDelegation(ws, governor, { server: MCP_SERVER_ID, resources: WORKSPACE_CONTENT_SCOPE }, signWs));
-  } catch (e) { console.warn('[workspace-create] governor content-read grant not minted:', e instanceof Error ? e.message : String(e)); }
-  try {
-    await writeGovernancePair({ orgStewardship, wsStewardship, governor, workspace: ws, label: created.result.name || name, purpose, ...(governorRead ? { governorRead } : {}) });
+    await writeGovernancePair({ orgStewardship, wsStewardship, governor, workspace: ws, label: created.result.name || name, purpose, ...(governorRead ? { governorRead } : {}), ...(governorMandate ? { governorMandate } : {}) });
   } catch (e) {
     return { ok: false, error: `${created.result.name} and ${governorName} were created, but the record that ${governorName} governs the workspace could not be written: ${e instanceof Error ? e.message : String(e)}` };
   }
@@ -999,6 +1007,9 @@ export async function createGovernedWorkspace(
       body: JSON.stringify({ person: home.address, orgAgent: governor, governedWorkspace: { workspace: ws, workspaceName: created.result.name || name, grant: governorRead } }),
     }).catch((e) => console.warn('[workspace-create] governed-workspace projection not written:', e instanceof Error ? e.message : String(e)));
   }
+  // A grant that could not be issued is SAID, not only logged (Rich, 2026-10-28): the workspace is created and governed,
+  // and Repair governance on its card issues what is missing (repairWorkspaceGovernance).
+  if (grants.missing.length) console.warn(`[workspace-create] ${created.result.name || name} is missing: ${grants.missing.map(governanceGapWords).join('; ')} — Repair governance on its card issues it`);
   return {
     ok: true,
     org: {
@@ -1013,6 +1024,84 @@ export async function createGovernedWorkspace(
     },
     grant: wsStewardship,
   };
+}
+
+/** Plain words for a missing governance grant — what the workspace cannot do until Repair issues it. */
+export function governanceGapWords(gap: GovernanceGrant): string {
+  return gap === 'governorMandate'
+    ? 'the organization’s authorization for this workspace to operate'
+    : 'members’ read access to the workspace through the organization';
+}
+
+/**
+ * Issue the governance grants a workspace is MISSING, each signed by the agent that grants it: the workspace → governor
+ * content read (signed as the WORKSPACE) and the governor → workspace operating grant (signed as the GOVERNOR — the
+ * organization's own consent, through the custody of the person who stewards it). Each is independent: one that cannot
+ * be signed (a co-steward who does not custody the organization, a refused prompt) comes back in `missing` and the
+ * other is still issued. The runtime stops treating a workspace as governed once its operating grant is revoked, so
+ * this is also how a workspace is re-authorized after a deliberate revoke.
+ */
+export async function issueGovernanceGrants(input: {
+  ws: Address; governor: Address; via: Via; auth: Auth | undefined; need: readonly GovernanceGrant[];
+}): Promise<{ governorRead?: DelegationWire; governorMandate?: DelegationWire; missing: GovernanceGrant[] }> {
+  const { ws, governor, via, auth, need } = input;
+  const out: { governorRead?: DelegationWire; governorMandate?: DelegationWire; missing: GovernanceGrant[] } = { missing: [] };
+  if (need.includes('governorRead')) {
+    try {
+      const signWs = await signHashFor(via, ws, auth);
+      out.governorRead = toWire(await issueOrgReadDelegation(ws, governor, { server: MCP_SERVER_ID, resources: WORKSPACE_CONTENT_SCOPE }, signWs));
+    } catch (e) {
+      console.warn('[workspace-governance] governor content-read grant not minted:', e instanceof Error ? e.message : String(e));
+      out.missing.push('governorRead');
+    }
+  }
+  if (need.includes('governorMandate')) {
+    try {
+      const signGov = await signHashFor(via, governor, auth);
+      out.governorMandate = toWire(await issueWorkspaceOperatingDelegation(governor, ws, workspaceOperatingScope(ws, MCP_SERVER_ID), signGov));
+    } catch (e) {
+      console.warn('[workspace-governance] governor → workspace operating grant not minted:', e instanceof Error ? e.message : String(e));
+      out.missing.push('governorMandate');
+    }
+  }
+  return out;
+}
+
+/**
+ * REPAIR A GOVERNED WORKSPACE (Rich, 2026-10-28): issue whichever governance grants its pointer lacks — every workspace
+ * chartered before the operating grant existed, and any whose creation only partly completed — and rewrite the pair
+ * with them. Grants already present are kept as they are, never re-signed. Reads the pointer over the person's
+ * stewardship of the workspace; issuing the operating grant needs their custody of the organization.
+ */
+export async function repairWorkspaceGovernance(input: {
+  ws: Address; wsStewardship: DelegationWire; governor: Address; orgStewardship: DelegationWire;
+  label: string; purpose?: string; person: Address; via: Via; auth: Auth | undefined; token: string;
+}): Promise<Result<{ issued: GovernanceGrant[]; missing: GovernanceGrant[] }>> {
+  const { ws, wsStewardship, orgStewardship, label, person, via, auth, token } = input;
+  const governor = input.governor.toLowerCase() as Address;
+  const pointer = await vaultReadWithDelegation(wsStewardship, WORKSPACE_GOVERNOR_RECORD).catch(() => null);
+  const recorded = governorOf(pointer);
+  if (recorded && recorded !== governor) return { ok: false, error: `this workspace records a different governor (${recorded})` };
+  const gaps: GovernanceGrant[] = recorded ? governanceGaps(pointer, ws) : ['governorRead', 'governorMandate'];
+  if (!gaps.length) return { ok: true, issued: [], missing: [] };
+  const grants = await issueGovernanceGrants({ ws, governor, via, auth, need: gaps });
+  const prior = (pointer ?? {}) as { governorRead?: DelegationWire; governorMandate?: DelegationWire };
+  const governorRead = grants.governorRead ?? prior.governorRead;
+  const governorMandate = grants.governorMandate ?? prior.governorMandate;
+  const issued = gaps.filter((g) => !grants.missing.includes(g));
+  if (!issued.length) return { ok: false, error: `nothing could be issued — still missing: ${grants.missing.map(governanceGapWords).join('; ')}` };
+  try {
+    await writeGovernancePair({ orgStewardship, wsStewardship, governor, workspace: ws, label, purpose: input.purpose ?? 'workspace', ...(governorRead ? { governorRead } : {}), ...(governorMandate ? { governorMandate } : {}) });
+  } catch (e) {
+    return { ok: false, error: `the grants were issued, but the governance record could not be rewritten: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  if (grants.governorRead) {
+    await fetch('/connect/related-orgs', {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ person, orgAgent: governor, governedWorkspace: { workspace: ws, workspaceName: label, grant: grants.governorRead } }),
+    }).catch((e) => console.warn('[workspace-governance] governed-workspace projection not written:', e instanceof Error ? e.message : String(e)));
+  }
+  return { ok: true, issued, missing: grants.missing };
 }
 
 /**

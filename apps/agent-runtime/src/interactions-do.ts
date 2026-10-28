@@ -531,6 +531,8 @@ const json = (b: unknown, s = 200): Response => new Response(JSON.stringify(b), 
 export interface InteractionsDeps {
   /** ERC-1271 verification. Default: a chain read via `env.RPC_URL`. */
   erc1271?(account: Address, digest: Hex, signature: Hex): Promise<boolean>;
+  /** DelegationManager.isRevoked for a wire verified by `verifyWire`. Default: a chain read via `env.RPC_URL`. */
+  isRevoked?(digest: Hex): Promise<boolean>;
   /** One demo-mcp vault tool call. Default: bound-mint transport over `env.MCP_URL`. */
   vaultTool?(
     grant: IncomingDelegation,
@@ -1355,7 +1357,7 @@ export class InteractionsDO {
       checks: {
         digest: (d) => hashDelegation(d, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address),
         erc1271: (signer, digest, sig) => this.erc1271(signer, digest, sig),
-        isRevoked: async (digest) =>
+        isRevoked: async (digest) => this.deps?.isRevoked ? this.deps.isRevoked(digest as Hex) :
           (await this.pub().readContract({
             address: this.env.DELEGATION_MANAGER as Address,
             abi: IS_REVOKED_ABI,
@@ -1669,11 +1671,41 @@ export class InteractionsDO {
   /** This workspace's governing organization (its own `workspace.governor` pointer), or null — an organization,
    *  a person, or a legacy workspace holds none. Remembered for a few minutes: a pairing is chartered once. */
   private governorMemo: { at: number; governor: string | null } | null = null;
-  private static readonly GOVERNOR_MEMO_TTL_MS = 300_000;
+  // A minute, not five (2026-10-28): the answer now includes the governor's OPERATING grant, and a revoked grant should
+  // stop the workspace being treated as governed within about a minute (this memo + the 20 s wire-verify memo).
+  private static readonly GOVERNOR_MEMO_TTL_MS = 60_000;
   /** A positive answer from the governor, remembered a minute (the club standing's rule): the burst of board
    *  reads that opens a topic must not cost one DO hop each. Only TRUE is kept, so an ended membership is
    *  refused within the minute. */
   private governedMemberMemo = new Map<string, { until: number; name: string }>();
+
+  /** Spec 344 s2.1 (Rich/Paul, 2026-10-28) - the governor this workspace may be TREATED AS GOVERNED BY: the one its
+   *  pointer names, and only while the pointer carries that governor's OPERATING grant to this workspace, valid and
+   *  unrevoked on chain. The pointer records the relationship; the grant is what authorizes it, so revoking the grant
+   *  makes the workspace inert as a governed one (no member reads through the governor). A pointer written before the
+   *  grant existed is honoured as before, and said once, until Repair issues it - unless the deployment sets
+   *  WORKSPACE_GOVERNOR_MANDATE=required, which refuses it. */
+  private mandateNoted = false;
+  private async mandatedGovernor(doc: unknown, governor: string, principal: string): Promise<string | null> {
+    const mandate = (doc as { governorMandate?: IncomingDelegation } | null)?.governorMandate;
+    if (!mandate) {
+      const required = String((this.env as unknown as Record<string, unknown>).WORKSPACE_GOVERNOR_MANDATE ?? '') === 'required';
+      if (!this.mandateNoted) {
+        this.mandateNoted = true;
+        console.log(`[board-gate] ${principal} is governed by ${governor} with NO operating grant - ${required ? 'refused (WORKSPACE_GOVERNOR_MANDATE=required)' : 'honoured until Repair issues one'}`);
+      }
+      return required ? null : governor;
+    }
+    if (String(mandate.delegator ?? '').toLowerCase() !== governor || String(mandate.delegate ?? '').toLowerCase() !== principal.toLowerCase()) {
+      console.log(`[board-gate] ${principal} carries an operating grant that is not ${governor} -> this workspace - not governed`);
+      return null;
+    }
+    try {
+      if (await this.verifyWire(mandate, governor, principal as Address)) return governor;
+    } catch { /* unverifiable is not verified (ADR-0013) */ }
+    console.log(`[board-gate] ${principal} operating grant from ${governor} is revoked, expired or unverifiable - not governed`);
+    return null;
+  }
 
   /** Spec 424 — the board gate's governed-workspace proof: the session's principal is a CURRENT member of the
    *  organization that governs this workspace, answered by that organization's own object
@@ -1691,7 +1723,9 @@ export class InteractionsDO {
         return null;
       }
       const read = governorOf(doc);
-      this.governorMemo = { at: now, governor: read ? read.toLowerCase() : null };
+      // The pointer names the governor; its OPERATING grant decides whether the workspace is governed (spec 344 s2.1).
+      const mandated = read ? await this.mandatedGovernor(doc, read.toLowerCase(), principal) : null;
+      this.governorMemo = { at: now, governor: mandated };
     }
     const governor = this.governorMemo.governor;
     if (!governor || governor === principal.toLowerCase() || !this.env.INTERACTIONS) return null;

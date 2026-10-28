@@ -87,3 +87,13 @@ describe('the email claim on the id_token', () => {
     expect(sharesEmailClaim(selfRegistered as never)).toBe(false);
   });
 });
+// Name later (2026-10-28, Rich): a client may charter its people's organizations with no public name. Off for every
+// client until someone decides to turn it on (Gather included), so organizations are named as before.
+describe('naming organizations at creation', () => {
+  it('every client names its organizations at creation today', async () => {
+    const { namesOrgsAtCreation } = await import('./provisioning');
+    for (const a of whitelabel.relyingApps) expect(namesOrgsAtCreation(a.client_id)).toBe(true);
+    expect(namesOrgsAtCreation(undefined)).toBe(true);
+    expect(namesOrgsAtCreation('no-such-client')).toBe(true);
+  });
+});

@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   governorFromRows, governorOf, governorPointerOf, relationshipCredentialDigest, relationshipOfferOf,
-  termsDigestOf, workspaceRecordKey, workspaceRecordOf,
+  termsDigestOf, workspaceRecordKey, workspaceRecordOf, workspaceOperatingScope, governanceGaps,
 } from './workspace-governor';
 
 const PERSON = '0xeef5ed02e052ee221afcbbd2708919473c4e2b28';
@@ -95,5 +95,40 @@ describe('the relationship credential digest', () => {
     expect(relationshipOfferOf({ ...body, terms: {}, digest: relationshipCredentialDigest(body) })).toBeNull();
     expect(relationshipOfferOf({ kind: 'has-member' })).toBeNull();
     expect(relationshipOfferOf(null)).toBeNull();
+  });
+});
+
+// Spec 344 §2.1 (Rich/Paul, 2026-10-28) — the governor → workspace OPERATING grant.
+describe('the governor’s operating grant', () => {
+  const ws = WS.toLowerCase();
+  const read = { delegator: ws, delegate: ORG, caveats: [] };
+  const mandate = { delegator: ORG, delegate: ws, caveats: [] };
+
+  it('names only the workspace’s own entity (read + write) and the governor’s roster (read) — nothing else', () => {
+    const scope = workspaceOperatingScope(WS, 'demo-mcp');
+    expect(scope).toEqual([
+      { server: 'demo-mcp', resources: [`vault:workspace:${ws}`], ops: ['read', 'write'] },
+      { server: 'demo-mcp', resources: ['vault:org.membership:member:*'], ops: ['read'] },
+    ]);
+    const all = scope.flatMap((g) => g.resources);
+    expect(all.some((r) => r === 'vault:*' || /custody|relationship|playbook|treasury|contact/.test(r))).toBe(false);
+    expect(scope.find((g) => g.resources.includes('vault:org.membership:member:*'))!.ops).toEqual(['read']);
+  });
+
+  it('rides on the pointer beside the read grant', () => {
+    expect(governorPointerOf({ governor: ORG as never, workspace: WS as never, governorRead: read as never, governorMandate: mandate as never }))
+      .toEqual({ governedBy: ORG, coordinatedBy: ws, governorRead: read, governorMandate: mandate });
+  });
+
+  it('says which grants a pointer lacks, by direction — a wire between the wrong agents counts as missing', () => {
+    const base = { governedBy: ORG, coordinatedBy: ws };
+    expect(governanceGaps({ ...base }, WS)).toEqual(['governorRead', 'governorMandate']);
+    expect(governanceGaps({ ...base, governorRead: read }, WS)).toEqual(['governorMandate']);
+    expect(governanceGaps({ ...base, governorRead: read, governorMandate: mandate }, WS)).toEqual([]);
+    // Reversed directions are not the grants.
+    expect(governanceGaps({ ...base, governorRead: mandate, governorMandate: read }, WS)).toEqual(['governorRead', 'governorMandate']);
+    // A standalone workspace (no governor) has nothing to repair.
+    expect(governanceGaps({ coordinatedBy: ws }, WS)).toEqual([]);
+    expect(governanceGaps(null, WS)).toEqual([]);
   });
 });
