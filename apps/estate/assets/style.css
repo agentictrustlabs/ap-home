@@ -1,0 +1,22 @@
+:root { --bg:#fbfaf7; --fg:#1d1b17; --muted:#6b665c; --line:#e3dfd4; --card:#fff; --ok:#1f7a45; --warn:#a66300; --bad:#b3261e; --accent:#2b4fd8; color-scheme: light dark; }
+@media (prefers-color-scheme: dark) { :root { --bg:#15140f; --fg:#f1eee4; --muted:#a39e90; --line:#2e2b22; --card:#1d1b15; --ok:#5ec88a; --warn:#e5a53c; --bad:#ff8a80; --accent:#8fa6ff; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+a { color:var(--accent); }
+.top { display:flex; flex-wrap:wrap; gap:12px 24px; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); }
+.brand { font-weight:700; font-size:1.1rem; color:var(--fg); text-decoration:none; }
+nav { display:flex; gap:16px; } nav a { color:var(--muted); text-decoration:none; } nav a[aria-current] { color:var(--fg); border-bottom:2px solid var(--accent); }
+.who { margin-left:auto; font-size:.9rem; color:var(--muted); }
+main { max-width:960px; margin:0 auto; padding:24px 16px 64px; }
+h1 { margin:0 0 4px; font-size:1.6rem; } h2 { margin:32px 0 10px; font-size:1.05rem; }
+.quiet { color:var(--muted); }
+.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:12px; margin-top:16px; }
+.tile { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+.tile .l { font-size:.8rem; color:var(--muted); } .tile .v { font-size:1.6rem; font-weight:650; } .tile .s { font-size:.8rem; color:var(--muted); }
+.tile.warn .v { color:var(--warn); } .tile.bad .v { color:var(--bad); } .tile.quiet .v { color:var(--muted); }
+dl.facts { display:grid; grid-template-columns:max-content 1fr; gap:6px 18px; margin:0; } dl.facts dt { color:var(--muted); } dl.facts dd { margin:0; word-break:break-all; }
+.row { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin:10px 0; }
+button, .btn { font:inherit; padding:6px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; }
+button.primary { background:var(--accent); border-color:var(--accent); color:#fff; } button:disabled { opacity:.5; cursor:default; }
+input { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg); width:7rem; }
+.err { color:var(--bad); } .note { padding:10px 12px; border-left:3px solid var(--warn); background:var(--card); }

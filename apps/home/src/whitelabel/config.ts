@@ -187,6 +187,21 @@ const faithImpact: WhiteLabelConfig = {
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
     {
+      // THE ESTATE SITE (apps/estate, faithnet.estate) — the estate's own page, so a steward need not come here to
+      // see how it is doing or what is waiting on them. Like the town portal it is a thin relying app: `site-login`
+      // ONLY (who someone is, no authority to act), the token kept in the browser tab, and every call it relays
+      // decided by the runtime from the session it is given. A signature is still made at the Home, with the passkey.
+      client_id: 'estate-app',
+      name: 'The estate',
+      redirect_uris: [
+        'https://faithnet.estate/connected',
+        'http://localhost:8797/connected',
+      ],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
+    {
       client_id: 'skills-app',
       name: 'Skills',
       // EXACT MATCH (CN-1) — a redirect_uri that is not listed here is refused, so the app's own

@@ -1,0 +1,31 @@
+# The estate's own site: faithnet.estate. One Worker, static assets, no key, no Durable Object. It reads the
+# estate's heartbeat and relays a steward's signed-in calls to the estate's runtime; it is deployed by THIS
+# repository (DEPLOYER.md). Secret: ESTATE_HEARTBEAT_TOKEN (the runtime's TOWN_HEARTBEAT_TOKEN).
+name = "estate-site"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+[assets]
+directory = "./assets"
+binding = "ASSETS"
+run_worker_first = ["/", "/connected", "/waiting", "/api/*"]
+
+[vars]
+ESTATE_ID = "faithnet"
+ESTATE_NAME = "faithnet.estate"
+HOME_ORIGIN = "https://www.faithnet.me"
+A2A_ORIGIN = "https://a2a.faithnet.io"
+PUBLIC_ORIGIN = "http://localhost:8797"
+
+[env.faithnet]
+name = "faithnet-estate-site"
+routes = [{ pattern = "faithnet.estate", custom_domain = true }]
+
+[env.faithnet.vars]
+ESTATE_ID = "faithnet"
+ESTATE_NAME = "faithnet.estate"
+HOME_ORIGIN = "https://www.faithnet.me"
+A2A_ORIGIN = "https://a2a.faithnet.io"
+PUBLIC_ORIGIN = "https://faithnet.estate"
+ASK_NAME = "faith-estate.workspace"
+ASK_CARD_URL = "https://faith-estate-workspace.faithnet.ai/.well-known/agent-card.json"
