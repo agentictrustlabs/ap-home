@@ -3,6 +3,7 @@
 // Local dev:  wrangler dev (port 8788; uses local D1 SQLite)
 // Production: wrangler deploy + wrangler d1 migrations apply demo-mcp
 
+import { CATALOG_RECORD, expandCatalog } from './catalog-codec.js';
 import { Hono } from 'hono';
 import {
   withDelegation,
@@ -1408,7 +1409,7 @@ app.post('/tools/get_vault_records', async (c) => {
           });
           if (!verdict.ok) { authFailed = true; return; } // do NOT read; fail the whole batch below
           const obj = await pv.vault.read({ owner: principal, resource });
-          records[rt] = obj?.data ?? null;
+          records[rt] = rt === CATALOG_RECORD ? expandCatalog(obj?.data ?? null) : obj?.data ?? null;
         }));
         if (authFailed) return { ok: false, error: 'vault_key_unauthorized', served_by: 'demo-mcp:get_vault_records' };
         return { ok: true, owner: principal, records, served_by: 'demo-mcp:get_vault_records' };
@@ -1469,7 +1470,9 @@ async function getVaultRecordRun(env: Env, principal: Address, args: { recordTyp
   const gate = await authorizePersonVaultOp(env, principal, resource, 'read', 'internal');
   if (!gate.ok) return { ok: false, error: gate.error, served_by: servedBy };
   const obj = await gate.pv.vault.read({ owner: principal, resource });
-  return { ok: true, owner: principal, recordType, data: obj?.data ?? null, served_by: servedBy };
+  // The Library index may be STORED compact (catalog-codec.ts); no caller ever sees that — the Home, the skills app and
+  // an older runtime all read the plain array.
+  return { ok: true, owner: principal, recordType, data: recordType === CATALOG_RECORD ? expandCatalog(obj?.data ?? null) : obj?.data ?? null, served_by: servedBy };
 }
 
 /** ENUMERATE the owner's record types. A record-scoped delegation lists only what it may READ, so a write-only
