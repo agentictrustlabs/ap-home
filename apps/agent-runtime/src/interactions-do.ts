@@ -17,6 +17,7 @@
 //   replay    = monotonic publishedAt per subject + tombstones honored by the gate.
 // The VAULT enforces scopes only — never membership (stated so nobody optimizes this gate away).
 // Audit: D1 (spec 322 §7), before commit.
+import { CATALOG_RECORD, compactCatalog, expandCatalog } from './catalog-codec.js';
 import { CONTACT_FIELD_ARGS, contactField, precisionOf } from '@agenticprimitives/ontology';
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { chainFor, chainIdOf } from './chain';
@@ -544,6 +545,13 @@ export interface InteractionsDeps {
 /** The records `libraryDocs` keeps: the Library's index and its documents' records. */
 const LIBRARY_DOC = /^content\.(catalog|artifact\.[A-Za-z0-9_-]+)$/;
 const LIBRARY_DOC_MS = 60_000;
+/** A document's record bigger than this is not remembered: it is read once per act, and a minute of 1–2 MB bodies is what
+ *  filled the object (2026-10-28 — a publish saves three of them, a retry three more). The catalog is kept, compact. */
+const LIBRARY_DOC_KEEP_MAX = 256_000;
+const libraryDocSize = (data: unknown): number => {
+  const b = (data as { bytesB64?: unknown } | null)?.bytesB64;
+  return typeof b === 'string' ? b.length : 0;
+};
 
 export class InteractionsDO {
   constructor(private state: DurableObjectState, private env: Env, private deps?: InteractionsDeps) {}
@@ -1018,7 +1026,9 @@ export class InteractionsDO {
         assertOwner(owner);
         // A rate-limited write was rejected at verify time (never executed) — same bounded retry as reads.
         for (let attempt = 0; attempt < 4; attempt++) {
-          const resp = await callTool('set_vault_record', { recordType: resource, data });
+          // THE LIBRARY INDEX GOES COMPACT (catalog-codec.ts): the shared signature wire once, not once per document —
+          // the record was 4.7 MB and sending it exhausted this object's memory on every Library save.
+          const resp = await callTool('set_vault_record', { recordType: resource, data: resource === CATALOG_RECORD ? compactCatalog(data) : data });
           const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string; code?: string };
           if (resp.ok && out.ok !== false) return;
           if (isRetryableVaultToolFailure(resp.status, out)) {
@@ -1052,7 +1062,8 @@ export class InteractionsDO {
             throw new Error([out.error ?? `vault read failed (${resp.status})`, (out as { detail?: string }).detail].filter(Boolean).join(' — '));
           }
           if (out.ok === false) { lastErr = out.error ?? 'vault read unauthorized'; if (attempt < 3) { await new Promise((r) => setTimeout(r, 120)); continue; } throw new Error(lastErr); }
-          return out.data === null || out.data === undefined ? null : { data: out.data };
+          // Whoever stored it, the caller gets the plain index (a compact record from this side, or the vault service's own expansion).
+          return out.data === null || out.data === undefined ? null : { data: resource === CATALOG_RECORD ? expandCatalog(out.data) : out.data };
         }
         throw new Error(lastErr);
       },
@@ -1297,7 +1308,11 @@ export class InteractionsDO {
     }
     // Every write of a Library record passes here (the runtime's `vaultWrite`, the Home's `record.put`): what was
     // written is what the next internal read of it answers, for a minute.
-    if (LIBRARY_DOC.test(resource)) this.libraryDocs.set(resource, { data: structuredClone(data), until: Date.now() + LIBRARY_DOC_MS });
+    if (LIBRARY_DOC.test(resource)) {
+      if (resource === CATALOG_RECORD) this.libraryDocs.set(resource, { data: structuredClone(compactCatalog(data)), until: Date.now() + LIBRARY_DOC_MS });
+      else if (libraryDocSize(data) <= LIBRARY_DOC_KEEP_MAX) this.libraryDocs.set(resource, { data: structuredClone(data), until: Date.now() + LIBRARY_DOC_MS });
+      else this.libraryDocs.delete(resource);
+    }
     // What admission and naming are derived from changed: the remembered admissions are dropped, never served stale.
     if (resource === DIRECTORY_RESOURCE || resource === LOCAL_NAMES_RESOURCE || resource.startsWith('org.membership:')) this.presenceMemo.clear();
   }
@@ -2988,10 +3003,13 @@ export class InteractionsDO {
           if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
           try {
             const held = this.libraryDocs.get(recordType);
-            if (held && held.until > Date.now()) return json({ ok: true, recordType, data: held.data });
+            if (held && held.until > Date.now()) return json({ ok: true, recordType, data: recordType === CATALOG_RECORD ? expandCatalog(held.data) : held.data });
             const data = await this.readDoc<unknown>(g, recordType, null);
             console.log(`[334§6 vaultRead] ${recordType} ok hasData=${data !== null && data !== undefined}`);
-            if (LIBRARY_DOC.test(recordType)) this.libraryDocs.set(recordType, { data, until: Date.now() + LIBRARY_DOC_MS });
+            if (LIBRARY_DOC.test(recordType)) {
+              if (recordType === CATALOG_RECORD) this.libraryDocs.set(recordType, { data: compactCatalog(data), until: Date.now() + LIBRARY_DOC_MS });
+              else if (libraryDocSize(data) <= LIBRARY_DOC_KEEP_MAX) this.libraryDocs.set(recordType, { data, until: Date.now() + LIBRARY_DOC_MS });
+            }
             return json({ ok: true, recordType, data });
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
