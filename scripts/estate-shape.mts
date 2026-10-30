@@ -36,6 +36,9 @@ export type EstateDeclaration = {
   extraOrigins?: string[];
   agents?: { harness?: string; interactions?: string };
   extras?: Record<string, string>;
+  /** Where each Worker answers when the estate has NO zone of its own (the one-click estate, on workers.dev hosts):
+   *  there is no `mcp.<zone>` or `edge.<zone>` to derive, so the builder records the four hosts it deployed to. */
+  hosts?: { runtime: string; vault: string; edge: string; homeMcp: string };
 };
 
 export const ESTATES_DIR = 'estates';
@@ -76,8 +79,8 @@ export const deriveVars = (d: EstateDeclaration): Record<string, string> => {
     AKCS_TENANT_ID: d.kmsTenant ?? d.id,
     BROKER_ISS: home,
     BROKER_JWKS_URL: `${home}/jwks`,
-    MCP_URL: `https://mcp.${d.zone}`,
-    DEMO_EDGE_URL: `https://edge.${d.zone}`,
+    MCP_URL: d.hosts?.vault ?? `https://mcp.${d.zone}`,
+    DEMO_EDGE_URL: d.hosts?.edge ?? `https://edge.${d.zone}`,
     A2A_PUBLIC_BASE_DOMAIN: zones.join(','),
     ALLOWED_ORIGINS: [...new Set(origins)].join(','),
   };

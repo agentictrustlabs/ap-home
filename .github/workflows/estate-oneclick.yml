@@ -1,0 +1,128 @@
+# THE ONE-CLICK ESTATE BUILD. One file, two homes:
+#
+#   in the TOWN's ap-home    dispatched by the town's createestate site: part `all` (an estate the town hosts), or, for an
+#                            estate on its owner's own accounts, part `town` (its key vault and chain access) and part
+#                            `finish` (its .estate name and town listing)
+#   in an OWNER's copy       run by the owner with "Run workflow": part `estate` — the whole estate, on THEIR Cloudflare
+#                            and Vercel, with THEIR tokens. The town never sees those tokens.
+#
+# The dispatch carries only ids. The request itself — name, requester, the owner's public keys — is FETCHED from the
+# site, signed, and the site returns one only for an estate a town operator approved. So running this by hand, with any
+# inputs, builds nothing that was not approved.
+#
+# Dependencies are installed BEFORE any secret is in the environment, and the secrets are given to the one step that
+# builds — so no install script ever runs beside them.
+name: estate-oneclick
+
+on:
+  workflow_dispatch:
+    inputs:
+      estate_id: { description: 'Your estate''s short name (as on the createestate page)', required: true }
+      part:
+        description: 'Which part (owners: leave it on estate)'
+        type: choice
+        options: [estate, all, town, finish]
+        default: estate
+      request_id: { description: 'createestate request id (req_…) — optional', required: false, default: '' }
+
+# One build per estate at a time; a second run for the same estate waits rather than racing it.
+concurrency:
+  group: estate-oneclick-${{ inputs.estate_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # commits estate/<id>, and at the end the estate's configuration to the default branch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: estate-oneclick
+    env:
+      PART: ${{ inputs.part }}
+      # The town's parts and a hosted build need the town repository; the owner's part does not.
+      NEEDS_TOWN: ${{ inputs.part != 'estate' }}
+    steps:
+      - name: Check the inputs are ids and nothing else
+        env: { ESTATE_ID: '${{ inputs.estate_id }}', REQUEST_ID: '${{ inputs.request_id }}' }
+        run: |
+          [[ "$ESTATE_ID" =~ ^[a-z][a-z0-9-]{1,30}$ ]] || { echo "not an estate id"; exit 1; }
+          [[ -z "$REQUEST_ID" || "$REQUEST_ID" =~ ^req_[A-Za-z0-9]{6,40}$ ]] || { echo "not a request id"; exit 1; }
+          [[ "$PART" =~ ^(all|town|estate|finish)$ ]] || { echo "not a part"; exit 1; }
+
+      - name: Check out ap-home
+        uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Resume from estate/<id> if an earlier attempt made it
+        if: inputs.part == 'all' || inputs.part == 'estate'
+        env: { ESTATE_ID: '${{ inputs.estate_id }}' }
+        run: |
+          if git ls-remote --exit-code --heads origin "estate/$ESTATE_ID" >/dev/null; then
+            git fetch origin "estate/$ESTATE_ID" && git checkout -B "estate/$ESTATE_ID" "origin/estate/$ESTATE_ID"
+            echo "resuming from estate/$ESTATE_ID"
+          fi
+
+      - name: Check out ap-town (the town listing is committed there)
+        if: env.NEEDS_TOWN == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.AP_TOWN_REPO || 'agentictrustlabs/ap-town' }}
+          path: ap-town
+          token: ${{ secrets.AP_TOWN_PUSH_TOKEN }}
+          persist-credentials: true
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+
+      # No secret is in the environment for these two. pnpm 10 runs install scripts only for the packages each repo
+      # allow-lists (`pnpm.onlyBuiltDependencies`).
+      - name: Install ap-home
+        run: pnpm install --frozen-lockfile=false
+      - name: Install ap-town
+        if: env.NEEDS_TOWN == 'true'
+        working-directory: ap-town
+        run: pnpm install --frozen-lockfile=false
+
+      # The KMS operator steps run on the town's AKCS CVM through `az vm run-command`, as the operator of record. The
+      # service principal is THAT operator's identity, scoped to run-command on the CVM and nothing else. Only the town's
+      # parts ever sign in: an owner's GitHub has no Azure credential and needs none.
+      - name: Sign in to Azure as the KMS operator
+        if: inputs.part == 'all' || inputs.part == 'town'
+        uses: azure/login@v2
+        with: { creds: '${{ secrets.AZURE_CREDENTIALS }}' }
+
+      - name: Build the estate
+        env:
+          ESTATE_ID: ${{ inputs.estate_id }}
+          REQUEST_ID: ${{ inputs.request_id }}
+          ESTATE_BRANCH: estate/${{ inputs.estate_id }}
+          AP_HOME_REF: ${{ github.event.repository.default_branch }}
+          AP_TOWN_DIR: ${{ github.workspace }}/ap-town
+          TOWN: ${{ vars.TOWN || 'faithchain' }}
+          CREATE_ESTATE_SITE: ${{ vars.CREATE_ESTATE_SITE }}
+          # Whose Cloudflare and Vercel: the town's (in the town's repo) or the owner's (in theirs).
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          UPSTASH_EMAIL: ${{ secrets.UPSTASH_EMAIL }}
+          UPSTASH_API_KEY: ${{ secrets.UPSTASH_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.ESTATE_GEMINI_API_KEY }}
+          # The town's only.
+          WORKERS_SUBDOMAIN: ${{ vars.WORKERS_SUBDOMAIN }}
+          INFERENCE_APP_KEY: ${{ secrets.ESTATE_INFERENCE_APP_KEY }}
+          BUILD_CALLBACK_SECRET: ${{ secrets.BUILD_CALLBACK_SECRET }}
+          BUILD_STATE_SECRET: ${{ secrets.BUILD_STATE_SECRET }}
+          AGENTIC_CONTRACTS_DIR: ${{ vars.AGENTIC_CONTRACTS_DIR }}
+          ESTATE_ROOT_OWNER_KEY: ${{ secrets.ESTATE_ROOT_OWNER_KEY }}
+          TOWN_RPC_URL: ${{ secrets.TOWN_RPC_URL }}
+          # The owner's only: the build key file the createestate page gave them.
+          ESTATE_BUILD_KEY: ${{ secrets.ESTATE_BUILD_KEY }}
+        run: npx tsx scripts/estate-oneclick/run.mts --estate "$ESTATE_ID" --part "$PART" ${REQUEST_ID:+--request-id "$REQUEST_ID"}
+
+      - name: Never keep the custody file on the runner
+        if: always()
+        env: { ESTATE_ID: '${{ inputs.estate_id }}' }
+        run: shred -u ".estate-${ESTATE_ID}.local" 2>/dev/null || rm -f ".estate-${ESTATE_ID}.local"

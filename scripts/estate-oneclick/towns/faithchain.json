@@ -1,0 +1,63 @@
+{
+  "_": "What the one-click builder needs to know about ONE town. Everything town-specific lives here, so a second town is a second file, not a code change. Values the town manifest also states (chain id, gateway, operators) are checked against ap-town towns/<town>/town.yaml by test/town-profile.test.mts.",
+  "town": "faithchain",
+  "displayName": "faithnet.town",
+  "manifest": "towns/faithchain/town.yaml",
+  "chain": { "id": 34348, "name": "faithchain", "gateway": "https://rpc.faithnet.io" },
+  "site": "https://createestate.faithnet.town",
+  "townOrigin": "https://faithnet.town",
+  "naming": "https://names.faithnet.town",
+  "discoveryA2a": "https://discovery-a2a.faithnet.town",
+  "estateNameRoot": "estate",
+  "nameRoots": ["me", "org", "team", "svc", "workspace", "treasury", "registry", "church", "circle"],
+
+  "_hosted": "'Host it for me': the town's own accounts. Used only when an estate is built on them.",
+  "hosted": {
+    "cloudflareAccount": "5da2feaa56593839672948e16c6e809d",
+    "workersSubdomain": "richardpedersen3",
+    "repo": "agentictrustlabs/ap-home",
+    "townWorkerEnv": "faithnet"
+  },
+
+  "_sibling": "The estate whose Worker blocks a new estate is stamped from (runbook §3: copy faithnet's block, rename everything).",
+  "sibling": {
+    "env": "faithnet",
+    "declaration": "estates/faithnet.estate.json",
+    "workers": {
+      "demo-a2a-faithnet": "runtime",
+      "demo-mcp-faithnet": "vault",
+      "demo-edge-faithnet": "edge",
+      "home-mcp-faithnet": "homeMcp",
+      "harness-approval-faithnet": "approval"
+    },
+    "hostMap": {
+      "https://www.faithnet.me": "home",
+      "https://a2a.faithnet.io": "runtime",
+      "https://mcp.faithnet.io": "vault",
+      "https://edge.faithnet.io": "edge",
+      "https://home-mcp.faithnet.io": "homeMcp"
+    },
+    "estateHosts": ["www.faithnet.me", "a2a.faithnet.io", "mcp.faithnet.io", "edge.faithnet.io", "home-mcp.faithnet.io"],
+    "onlyPattern": "faithnet\\.me\\b|faithnet\\.ai\\b|gamenight\\.faithnet|poker\\.faithnet|explorer\\.faithnet|field\\.faithnet|richardpedersen3\\.workers\\.dev",
+    "ownWorkerPattern": "faithnet",
+    "townWorkerPattern": "^demo-discovery-|^demo-bible-",
+    "townMentions": "demo-discovery-mcp-faithnet|kms\\.faithnet\\.io|rpc\\.faithnet\\.io|discovery-a2a\\.faithnet\\.io|skills\\.faithnet\\.io|inference\\.faithnet\\.io|faithnet\\.town|faithnet\\.internal|ap-federation\\.faithnet\\.io"
+  },
+
+  "_kms": "The town's key custody (AKCS). Operator ceremonies run on the CVM through `az vm run-command`, exactly as ap-home scripts/estate-new.mts runs them (test/kms.test.mts holds the two to the same words).",
+  "kms": {
+    "resourceGroup": "RG-AKCS-PILOT-WESTUS",
+    "vm": "vm-akcs-pilot-0",
+    "config": "/etc/akcs/config.toml",
+    "envFile": "/etc/akcs/env",
+    "issuer": "https://akcs-pilot.faithnet.internal",
+    "kid": "akcs-pilot-1",
+    "audience": "akcs-pilot",
+    "signingKey": "/etc/akcs/issuer/issuer-signing-key.pem",
+    "tokenTtlSecs": 31536000,
+    "runtimeSigningPurposes": "EIP712,ERC4337_USER_OPERATION,EIP7702_AUTHORIZATION,PERSONAL_SIGN_DIGEST,RAW_32_BYTE_DIGEST,EIP155_TRANSACTION"
+  },
+
+  "_chainGateway": "Where the town mints an estate's chain token (ap-town apps/chain-gateway, its TOKENS KV).",
+  "chainGateway": { "dir": "apps/chain-gateway", "env": "faithnet" }
+}
