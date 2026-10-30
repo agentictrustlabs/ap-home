@@ -350,7 +350,7 @@ const PUBLISHABLE = new Set(['skill', 'md', 'json-ld']);
  * carries bytes inline for a person, so a very full Library can also meet the record's size ceiling; that write then
  * fails loudly too (writeSubjectRecord answers not ok).
  */
-export const CATALOG_MAX = 2000;
+export const CATALOG_MAX = 3000;
 const BYTES_MAX = 2_000_000;
 const defaultMime = (kind: string): string => ({ skill: 'text/markdown', md: 'text/markdown', ttl: 'text/turtle', 'json-ld': 'application/ld+json', image: 'image/png' } as Record<string, string>)[kind] ?? 'application/octet-stream';
 const encodeText = (s: string): string => btoa(unescape(encodeURIComponent(s)));
