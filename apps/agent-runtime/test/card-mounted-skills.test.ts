@@ -14,6 +14,7 @@ import { describe, it, expect } from 'vitest';
 import { MOUNTED_PEER_SKILLS, withMountedSkills, buildA2aAgentCard, type A2aSkill } from '../src/host-context.js';
 import { makeMessagingSkills, makeOrgApplySkill } from '../src/messaging-skills.js';
 import { PUBLIC_LANE_SKILLS, publicLaneSkillOf } from '../src/standard-a2a.js';
+import { makeLibraryGrantedReadSkill } from '../src/library-tools.js';
 
 const RECIPIENT = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 // EVERY factory the runtime mounts peer-callable skills from, not just one. The first version listed
@@ -25,6 +26,8 @@ const RECIPIENT = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const mountedIds = [
   ...makeMessagingSkills(RECIPIENT, async () => undefined).map((h) => h.skill),
   makeOrgApplySkill(RECIPIENT, async () => undefined).skill,
+  // Slice S2 — the granted Library read, mounted on every agent's task runtime beside the messaging skills.
+  makeLibraryGrantedReadSkill(RECIPIENT, () => ({ readSubjectRecord: async () => null })).skill,
   ...PUBLIC_LANE_SKILLS,
 ].sort();
 

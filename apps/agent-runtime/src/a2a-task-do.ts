@@ -18,6 +18,9 @@ import { putRecord } from './run-records.js';
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { chainFor, chainIdOf } from './chain';
 import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
+import { makeLibraryGrantedReadSkill } from './library-tools.js';
+import { enforcersFromEnv } from './org-wire.js';
+import { vaultServerId } from './vault-server-id.js';
 import { checkSessionWireShape } from '@agenticprimitives/a2a';
 import { buildArchetypeCatalog, chooseArchetypeRoute, resolveArchetypeMethod, type ArchetypeHostGrant, type LibraryPackageMeta } from './archetype-skill.js';
 import {
@@ -789,6 +792,23 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
           },
         },
         makeOrchestrateSkill(this.env, agentSA), makeEndeavorRequestSkill(this.env, agentSA), makeEndeavorStateSkill(this.env, agentSA), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeContentSkills(),
+        // Slice S2 — a granted Library read: another agent reads ONE document of this agent's Library under a grant this
+        // agent signed to it (delegator = this agent, delegate = the verified sender). The gate above admits the message;
+        // the skill re-decides the grant whole (`grantedLibraryRead`) with the same digest, revocation and signature reads.
+        makeLibraryGrantedReadSkill(agentSA, () => {
+          const read = harnessDeps(env, buildAuditSink(env)).readSubjectRecord;
+          if (!read) throw new Error('the private tier is not configured — no Library to read');
+          return {
+            readSubjectRecord: read,
+            grantChecks: {
+              enforcers: enforcersFromEnv(env as unknown as Record<string, string | undefined>),
+              vaultServer: vaultServerId(env as unknown as { VAULT_SERVER_ID?: string }),
+              delegationDigest: (d) => hashDelegation(d, chainId, dm),
+              isRevoked: isRevokedFn,
+              verifySignature: ({ signer, digest, signature }) => verifySig(signer, digest, signature),
+            },
+          };
+        }),
         // spec 341 §5.5a — admission for a stranger: the applicant's grant authorizes ASKING; this
         // org's own grant does the writing, in its own DO.
         makeOrgApplySkill(agentSA, async (application) => {

@@ -66,7 +66,7 @@ import { WEB_TOOLS, webReadInvoker } from './web-read.js';
 import { WEB_SEARCH_TOOLS, webSearchInvoker } from './web-search.js';
 import { BUILD_TOOLS, BUILD_ACTS, buildInvoker } from './build-tools.js';
 import { executorInvokeInvoker, readExecutors, type ExecutorSessionSeam } from './executor-invoke.js';
-import { LIBRARY_TOOLS, LIBRARY_ACTS, libraryInvoker, stewardshipOver } from './library-tools.js';
+import { LIBRARY_TOOLS, LIBRARY_ACTS, libraryInvoker, stewardshipOver, type LibraryGrantChecks } from './library-tools.js';
 import { PUBLISHER_TOOLS, publisherRead } from './publisher-contract.js';
 import { MCP_CONNECTOR_PREFIX, MCP_CONNECTORS_LIST, MCP_CONNECTORS_LIST_TOOL, isMcpTool, isMcpConnectorRecord, mcpConnectorTools, mcpConnectorInvoker, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
 import { PREFERENCES_TOOLS, PREFERENCES_ACTS, PREFERENCES_GET, preferencesInvoker } from './preferences-tools.js';
@@ -1405,6 +1405,25 @@ export function harnessReconcilePort(deps: HarnessDeps, env: HarnessEnv, present
   }, routed);
 }
 
+/**
+ * Slice S2 — the chain checks a granted Library read (`library.granted.read`) verifies its grant with: this deployment's
+ * enforcer map and vault id, the EIP-712 digest under this chain's DelegationManager, `isRevoked` on it, and the
+ * delegator's signature through the UniversalSignatureValidator (ERC-1271 / 6492) — the same reads the mandate verifier
+ * below makes. No validator configured ⇒ no signature verifies ⇒ every grant is refused (fail closed).
+ */
+function libraryGrantChecks(env: HarnessEnv, deps: Pick<HarnessDeps, 'readContract'>): LibraryGrantChecks {
+  const chainId = Number(env.CHAIN_ID);
+  const dm = env.DELEGATION_MANAGER as Address;
+  const validator = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
+  return {
+    enforcers: enforcersFromEnv(env as Record<string, string | undefined>),
+    vaultServer: vaultServerId(env),
+    delegationDigest: (d) => hashDelegation(d, chainId, dm),
+    isRevoked: async (d) => (await deps.readContract({ address: dm, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [hashDelegation(d, chainId, dm)] })) as boolean,
+    verifySignature: async ({ signer, digest, signature }) => !!validator && (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [signer, digest, signature] })) === true,
+  };
+}
+
 export function harnessEnforcers(env: HarnessEnv): EnforcerAddresses {
   const base = enforcersFromEnv(env as Record<string, string | undefined>);
   const db = (env.DIGEST_BINDING_ENFORCER ?? '').toLowerCase();
@@ -2470,7 +2489,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // The publisher contract, read by the owner's own agent over the whole Library (the private lane): the reader's
     // workspace asks it as the person for her marks at a verse; a stranger gets the public lane at the A2A door instead.
     if (PUBLISHER_TOOLS.some((t) => t.id === toolId)) { if (!deps.readSubjectRecord) throw new Error('the private tier is not configured'); return publisherRead({ readSubjectRecord: deps.readSubjectRecord }, (addressee ?? person) as string, 'private', toolId, args); }
-    if (LIBRARY_TOOLS.some((t) => t.id === toolId)) { if (!deps.readSubjectRecord) throw new Error('the private tier is not configured'); return libraryInvoker({ readSubjectRecord: deps.readSubjectRecord, ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}), ...(deps.signAsAgent ? { signAsOwner: deps.signAsAgent } : {}), ...(deps.announceShelf ? { announce: deps.announceShelf } : {}), ...(deps.holdCatalog ? { holdCatalog: deps.holdCatalog } : {}), stewardOf: (who, owner) => stewardshipOver({ readSubjectRecord: deps.readSubjectRecord!, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}) }, who, owner) }, addressee, person)(toolId, args, ctx); }
+    if (LIBRARY_TOOLS.some((t) => t.id === toolId)) { if (!deps.readSubjectRecord) throw new Error('the private tier is not configured'); return libraryInvoker({ readSubjectRecord: deps.readSubjectRecord, ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}), ...(deps.signAsAgent ? { signAsOwner: deps.signAsAgent } : {}), ...(deps.announceShelf ? { announce: deps.announceShelf } : {}), ...(deps.holdCatalog ? { holdCatalog: deps.holdCatalog } : {}), grantChecks: libraryGrantChecks(env, deps), stewardOf: (who, owner) => stewardshipOver({ readSubjectRecord: deps.readSubjectRecord!, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}) }, who, owner) }, addressee, person)(toolId, args, ctx); }
     if (isMcpTool(toolId) || toolId === MCP_CONNECTORS_LIST) return mcpConnectorInvoker({ env: env as never, readConnectors: (h) => mcpConnectorsOf(deps, h), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
     if (BUILD_TOOLS.some((t) => t.id === toolId)) return buildInvoker({ env: env as never, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}), ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}), ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
     if (GITHUB_TOOLS.some((t) => t.id === toolId)) return githubInvoker({ env: env as unknown as Record<string, unknown>, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
