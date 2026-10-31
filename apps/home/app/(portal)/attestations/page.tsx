@@ -4,7 +4,8 @@
 // member has signed it. The WEA keeps its /wea-sign URL (relying apps link there); other documents sign at /attest/<id>.
 // Below them, "Agreements with apps": the terms a member accepted INSIDE a relying app, signed with a DEL-001 session
 // leaf and filed by the app in the member's own vault (`agreement-acceptance:<releaseId>`); read here over the
-// interactions grant, withdrawn here by writing `withdrawnAt` into the same record (`src/attestations/agreement-rows.ts`).
+// interactions grant (`src/attestations/agreement-rows.ts`). Read-only here: an acceptance ends at the app, or when the
+// app's grant is revoked on /grants.
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { Address } from '@agenticprimitives/types';
@@ -17,7 +18,6 @@ import {
   loadImpactProfile,
   listPersonRecords,
   readPersonRecord,
-  writePersonRecord,
   VaultKeyUnauthorizedError,
   InteractionsNotEnabledError,
   type StoredAttestation,
@@ -25,8 +25,8 @@ import {
 import { storedFor, type AttestableDocument } from '../../../src/attestation-docs';
 import { ATTESTABLE_DOCUMENTS } from '../../../src/whitelabel/attestable-documents';
 import { WEA_DOC_ID } from '../../../src/wea-doc';
-import { List, Row, Button, Empty, Meta, Unknown } from '../../../src/ui';
-import { agreementRows, isAgreementRecordType, releaseUrl, withdrawn, type AgreementRow } from '../../../src/attestations/agreement-rows';
+import { List, Row, Empty, Meta, Unknown } from '../../../src/ui';
+import { agreementRows, isAgreementRecordType, releaseUrl, type AgreementRow } from '../../../src/attestations/agreement-rows';
 
 /** The estate's publishing site, where a release's public page lives (`/@<handle>/<slug>`). */
 const PUBLISHING_SITE = 'https://publishing.faithnet.io';
@@ -43,7 +43,6 @@ export default function AttestationsPage() {
   const [agreements, setAgreements] = useState<AgreementRow[] | null>(null);
   const [gate, setGate] = useState<'vault-key' | 'interactions' | null>(null);
   const [agreementsErr, setAgreementsErr] = useState<string | null>(null);
-  const [withdrawing, setWithdrawing] = useState<string | null>(null);
   const [enabling, setEnabling] = useState(false);
   const [enableErr, setEnableErr] = useState<string | null>(null);
 
@@ -87,20 +86,6 @@ export default function AttestationsPage() {
     }
   }, [agentAddress, session?.token, session?.via, profile?.credential]);
 
-  /** Withdraw: the same record with `withdrawnAt` set, nothing else changed; the app reads it on its next check. */
-  const withdraw = useCallback(async (row: AgreementRow) => {
-    if (!agentAddress) return;
-    setWithdrawing(row.recordType); setAgreementsErr(null);
-    try {
-      await writePersonRecord(agentAddress, row.recordType, withdrawn(row.record, new Date().toISOString()));
-      setAgreements(await readAgreements(agentAddress));
-    } catch (e) {
-      setAgreementsErr(String((e as Error)?.message ?? e));
-    } finally {
-      setWithdrawing(null);
-    }
-  }, [agentAddress, readAgreements]);
-
   useEffect(() => {
     if (!agentAddress) return;
     let cancelled = false;
@@ -127,7 +112,7 @@ export default function AttestationsPage() {
       </SettingsGroup>
       <SettingsGroup label="Agreements with apps">
         <p style={{ fontSize: '.85rem', opacity: 0.75, margin: '0 0 .8rem' }}>
-          Terms you accepted inside an app, signed with a key your agent authorized. Withdrawing here ends the acceptance; the app sees it on its next check.
+          Terms you accepted inside an app, signed with a key your agent authorized. Each links to the published release you accepted.
         </p>
         {agreements === null ? (
           <Meta>Reading your vault…</Meta>
@@ -154,11 +139,6 @@ export default function AttestationsPage() {
                 meta={r.withdrawnAt
                   ? `withdrawn ${new Date(r.withdrawnAt).toLocaleDateString()}`
                   : `accepted ${r.signedAt !== null ? new Date(r.signedAt * 1000).toLocaleDateString() : '—'} · published by ${r.publisher}`}
-                side={!r.withdrawnAt && (
-                  <Button size="sm" variant="danger" disabled={withdrawing === r.recordType} onClick={() => void withdraw(r)}>
-                    {withdrawing === r.recordType ? 'Withdrawing…' : 'Withdraw'}
-                  </Button>
-                )}
               />
             ))}
           </List>
