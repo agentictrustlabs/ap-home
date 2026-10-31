@@ -9,7 +9,8 @@ import { describe, expect, it } from 'vitest';
 import { whitelabel } from './config';
 import { provisionsCommunityMessaging, reusesStandingGrantWithSelfVault, sharesEmailClaim } from './provisioning';
 
-const others = whitelabel.relyingApps.filter((a) => a.client_id !== 'gather-app' && a.client_id !== 'source-publishing');
+// gather-app and demo-terms are the two clients that skip the messaging leg; source-publishing shares the email claim.
+const others = whitelabel.relyingApps.filter((a) => a.client_id !== 'gather-app' && a.client_id !== 'demo-terms' && a.client_id !== 'source-publishing');
 
 describe('community messaging on sign-in', () => {
   it('gather-app opts out — it registers no messaging capability and the leg cost 18 s', () => {
@@ -30,7 +31,7 @@ describe('community messaging on sign-in', () => {
   it('the field can only turn the leg OFF', () => {
     // The type says `false`; this pins that a truthy value is not a way to widen anything.
     const declared = whitelabel.relyingApps.filter((a) => a.provisioning !== undefined);
-    expect(declared.map((a) => a.client_id)).toEqual(['gather-app']);
+    expect(declared.map((a) => a.client_id).sort()).toEqual(['demo-terms', 'gather-app']);
     for (const a of declared) expect(a.provisioning?.communityMessaging).toBe(false);
   });
 });

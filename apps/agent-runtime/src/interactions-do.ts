@@ -6005,8 +6005,11 @@ export class InteractionsDO {
         // Found live: the ceremony wrote lineage through this op and this gate refused it, so every re-issued wire was
         // "recorded" as a warning. Self-gated like the rest; the record is hers.
         const ownRotationRecord = recordType.startsWith('delegation.lineage:') || recordType.startsWith('friend:') || recordType.startsWith('contact:');
-        if (op === 'record.put' && !CAPABILITY_RECORDS.has(recordType) && !recordType.startsWith('content.') && !ownStudyRecord && !ownRotationRecord) {
-          return json({ error: `recordType must be a capability record, a content.* record, the person's own cardroom.style / cardroom.read, or a rotation record (delegation.lineage:*, friend:*)` }, 400);
+        // The person's own acceptance of a relying app's terms (`agreement-acceptance:<releaseId>`): written by the app
+        // under its self-vault grant, hers to withdraw here (the Home writes `withdrawnAt` into the same record).
+        const ownAgreementRecord = recordType.startsWith('agreement-acceptance:');
+        if (op === 'record.put' && !CAPABILITY_RECORDS.has(recordType) && !recordType.startsWith('content.') && !ownStudyRecord && !ownRotationRecord && !ownAgreementRecord) {
+          return json({ error: `recordType must be a capability record, a content.* record, the person's own cardroom.style / cardroom.read, a rotation record (delegation.lineage:*, friend:*), or the person's own agreement-acceptance:*` }, 400);
         }
         if (op === 'record.get') {
           const r = await this.vaultFor(recordGrant).read<unknown>({ owner: '', resource: recordType });

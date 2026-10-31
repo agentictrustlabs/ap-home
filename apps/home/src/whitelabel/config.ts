@@ -202,6 +202,35 @@ const faithImpact: WhiteLabelConfig = {
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
     {
+      // demo-terms — the smallest relying app on the estate: an app's terms are agreement releases on the
+      // publishing service, the person's acceptance is signed in-app with a DEL-001 session leaf, and the
+      // acceptance is visible and withdrawable under "Agreements with apps" on /attestations. Plain
+      // site-login with `session_key=`; a self-vault grant on the person's OWN acceptance family. No
+      // email, no org, no messaging. The only template it may request asserts who someone is.
+      client_id: 'demo-terms',
+      name: 'Terms demo',
+      // EXACT MATCH (CN-1). The Worker's hostname is read from the deploy output, never guessed; the
+      // Vite dev origin is the second entry. Both end in `/` because the client's redirectUri is `${origin}/`.
+      redirect_uris: [
+        'https://demo-terms-production.richardpedersen3.workers.dev/',
+        'http://localhost:5179/',
+      ],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // spec 345 — read+write on the person's own acceptance records, one per accepted release
+      // (`agreement-acceptance:<releaseId>`); the anchored `*` is the form `vault:newcity:*` already uses.
+      self_vault_grant: {
+        server: VAULT_SERVER_ID,
+        resources: ['vault:agreement-acceptance:*'],
+        ops: ['read', 'write'],
+      },
+      // Registers no messaging capability (the gather-app precedent, measured 2026-09-15).
+      provisioning: { communityMessaging: false },
+      // No `standingGrant`: a ceremony that carries a session key is per-connect by construction
+      // (onboarding.ts givePermission), so there is nothing to reuse.
+    },
+    {
       client_id: 'skills-app',
       name: 'Skills',
       // EXACT MATCH (CN-1) — a redirect_uri that is not listed here is refused, so the app's own

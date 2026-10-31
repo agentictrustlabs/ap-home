@@ -241,8 +241,9 @@ export async function readPersonRecord(principal: Address, recordType: string): 
 }
 
 /** Write one of the person's OWN Home-managed records (self-gated `record.put`; the runtime whitelists the record
- *  types it accepts — `PERSON_CAPABILITY_RECORDS` mirrors that list). Same fail-closed surface as the reads. */
-export async function writePersonRecord(principal: Address, recordType: PersonRecordType, record: unknown): Promise<void> {
+ *  types it accepts — `PERSON_CAPABILITY_RECORDS` plus the person's own `agreement-acceptance:<releaseId>` records,
+ *  which the Home withdraws by writing `withdrawnAt` into the same record). Same fail-closed surface as the reads. */
+export async function writePersonRecord(principal: Address, recordType: string, record: unknown): Promise<void> {
   await ensureCsrfToken();
   const session = homeBearer();
   if (!session) throw new Error(`record ${recordType} write failed: no home session`);
