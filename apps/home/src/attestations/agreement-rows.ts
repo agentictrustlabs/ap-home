@@ -1,7 +1,7 @@
 // Agreements with apps — the person's own copies of the terms she accepted inside a relying app. The app writes
 // one record per accepted release under its self-vault grant (`agreement-acceptance:<releaseId>`); the Home reads
-// them over the interactions grant and withdraws one by writing `withdrawnAt` into the same record (the app's gate
-// reads the record on each request and locks when it finds it). Pure: nothing here touches the vault.
+// them over the interactions grant, read-only. A record may carry `withdrawnAt` (an acceptance the app ended); the row
+// shows it. Pure: nothing here touches the vault.
 
 export const AGREEMENT_RECORD_PREFIX = 'agreement-acceptance:';
 
@@ -14,7 +14,7 @@ export interface AgreementAcceptanceRecord {
   release?: { publisher?: string; handle?: string; slug?: string; releaseId?: string; workRoot?: string; sha256?: string };
   /** Unix SECONDS, as the signed message carries it. */
   signedAt?: number;
-  /** ISO timestamp, set by the Home on withdrawal; absent while the acceptance stands. */
+  /** ISO timestamp when the acceptance was ended; absent while it stands. */
   withdrawnAt?: string;
   [k: string]: unknown;
 }
@@ -63,12 +63,6 @@ export function agreementRows(records: Array<{ recordType: string; record: unkno
   }
   rows.sort((a, b) => (b.signedAt ?? 0) - (a.signedAt ?? 0));
   return rows;
-}
-
-/** The record after withdrawal: the same record with `withdrawnAt` set and nothing else changed — the app's copy of
- *  the signed acceptance stays intact, so what was accepted remains readable beside when it ended. */
-export function withdrawn(record: AgreementAcceptanceRecord, at: string): AgreementAcceptanceRecord {
-  return { ...record, withdrawnAt: at };
 }
 
 /** The release's public page on the publishing site — `<site>/@<handle>/<slug>` — or null when the record does not

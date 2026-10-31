@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agreementRows, isAgreementRecordType, releaseUrl, withdrawn, type AgreementAcceptanceRecord } from './agreement-rows';
+import { agreementRows, isAgreementRecordType, releaseUrl, type AgreementAcceptanceRecord } from './agreement-rows';
 
 const accepted: AgreementAcceptanceRecord = {
   app: 'demo-terms',
@@ -31,16 +31,8 @@ describe('agreement rows', () => {
     expect(releaseUrl('https://publishing.example', row)).toBeNull();
   });
 
-  it('a withdrawn payload adds withdrawnAt and changes nothing else', () => {
-    const out = withdrawn(accepted, '2026-10-30T12:00:00.000Z');
-    expect(out.withdrawnAt).toBe('2026-10-30T12:00:00.000Z');
-    const { withdrawnAt: _w, ...rest } = out;
-    expect(rest).toEqual(accepted);
-    expect(accepted.withdrawnAt).toBeUndefined(); // the input is not mutated
-  });
-
-  it('a withdrawn row is marked, so the page renders no Withdraw button for it', () => {
-    const [row] = agreementRows([{ recordType: 'agreement-acceptance:rel-1', record: withdrawn(accepted, '2026-10-30T12:00:00.000Z') }]);
+  it('a record that carries withdrawnAt is marked as ended', () => {
+    const [row] = agreementRows([{ recordType: 'agreement-acceptance:rel-1', record: { ...accepted, withdrawnAt: '2026-10-30T12:00:00.000Z' } }]);
     expect(row.withdrawnAt).toBe('2026-10-30T12:00:00.000Z');
   });
 
