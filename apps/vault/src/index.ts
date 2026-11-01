@@ -3,7 +3,8 @@
 // Local dev:  wrangler dev (port 8788; uses local D1 SQLite)
 // Production: wrangler deploy + wrangler d1 migrations apply demo-mcp
 
-import { CATALOG_RECORD, expandCatalog } from './catalog-codec.js';
+import { CATALOG_RECORD } from './catalog-codec.js';
+import { catalogIsPaged, readVaultRecordData } from './catalog-read.js';
 import { Hono } from 'hono';
 import {
   withDelegation,
@@ -1408,8 +1409,7 @@ app.post('/tools/get_vault_records', async (c) => {
             request: { vaultId: pv.binding.vaultId, ownerPersonSA: principal, serverId: vaultServerId(c.env), resource, op: 'read', classification: 'internal' },
           });
           if (!verdict.ok) { authFailed = true; return; } // do NOT read; fail the whole batch below
-          const obj = await pv.vault.read({ owner: principal, resource });
-          records[rt] = rt === CATALOG_RECORD ? expandCatalog(obj?.data ?? null) : obj?.data ?? null;
+          records[rt] = await readVaultRecordData(pv.vault, principal, resource);
         }));
         if (authFailed) return { ok: false, error: 'vault_key_unauthorized', served_by: 'demo-mcp:get_vault_records' };
         return { ok: true, owner: principal, records, served_by: 'demo-mcp:get_vault_records' };
@@ -1453,6 +1453,12 @@ async function setVaultRecordRun(env: Env, principal: Address, args: SetVaultRec
   }
   const gate = await authorizePersonVaultOp(env, principal, resource, 'write', 'internal');
   if (!gate.ok) return { ok: false, error: gate.error, served_by: servedBy };
+  // A PAGED owner's legacy index is the frozen pre-switch backup (docs/design/library-paged-catalog.md): a whole-list
+  // write of it would land where no reader looks. Refused in words; the interactions DO writes the pages. Only the
+  // switch's own rollback (`pagedRestore`) writes it while the owner is paged.
+  if (recordType === CATALOG_RECORD && (args as { pagedRestore?: unknown } | undefined)?.pagedRestore !== true && (await catalogIsPaged(gate.pv.vault, principal))) {
+    return { ok: false, error: 'catalog_paged', detail: 'this Library index is stored in pages — write it through the owner\'s interactions object, never as the single legacy record', served_by: servedBy };
+  }
   await gate.pv.vault.write({ owner: principal, resource, data: args?.data ?? null });
   return { ok: true, owner: principal, recordType, served_by: servedBy };
 }
@@ -1469,10 +1475,9 @@ async function getVaultRecordRun(env: Env, principal: Address, args: { recordTyp
   }
   const gate = await authorizePersonVaultOp(env, principal, resource, 'read', 'internal');
   if (!gate.ok) return { ok: false, error: gate.error, served_by: servedBy };
-  const obj = await gate.pv.vault.read({ owner: principal, resource });
-  // The Library index may be STORED compact (catalog-codec.ts); no caller ever sees that — the Home, the skills app and
-  // an older runtime all read the plain array.
-  return { ok: true, owner: principal, recordType, data: recordType === CATALOG_RECORD ? expandCatalog(obj?.data ?? null) : obj?.data ?? null, served_by: servedBy };
+  // The Library index may be STORED compact (catalog-codec.ts) or in pages (catalog-pages.ts); no caller ever sees
+  // that — the Home, the skills app and an older runtime all read the plain array.
+  return { ok: true, owner: principal, recordType, data: await readVaultRecordData(gate.pv.vault, principal, resource), served_by: servedBy };
 }
 
 /** ENUMERATE the owner's record types. A record-scoped delegation lists only what it may READ, so a write-only
@@ -1594,8 +1599,9 @@ async function readEntitledRecord(
     fields: ctx.fields, purpose: ctx.purpose, classification: 'internal', at: new Date(),
   });
   if (decision.decision === 'deny') return { ok: false, error: 'entitlement_denied', reason: decision.reason };
-  const obj = await gate.pv.vault.read({ owner: ctx.owner, resource, fields: decision.allowedFields });
-  return { ok: true, data: obj?.data ?? null, allowedFields: decision.allowedFields ?? null };
+  // The catalog is assembled (and expanded) before any field projection — the same plain array every other read gets.
+  const data = await readVaultRecordData(gate.pv.vault, ctx.owner, resource, decision.allowedFields);
+  return { ok: true, data, allowedFields: decision.allowedFields ?? null };
 }
 
 app.post('/tools/issue_org_entitlement', async (c) => {
