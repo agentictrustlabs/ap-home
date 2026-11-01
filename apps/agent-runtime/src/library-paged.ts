@@ -17,6 +17,7 @@ import type { ToolInvoker } from '@agenticprimitives/orchestration';
 import { requirePersonsTurn } from './persons-turn.js';
 import {
   ANNOUNCE_MAX, ID_RE, PUBLISHABLE, RECORD_WRITE_CONCURRENCY, LIBRARY_FILE_PUBLISH, LIBRARY_FILE_SAVE, LIBRARY_FILE_VISIBILITY,
+  LIBRARY_GRANT_ISSUE, LIBRARY_GRANT_REVOKE, isGrantRecord, issueLibraryGrant, libraryGrantPlan, revokeLibraryGrant,
   catalogView, effectiveAccessPolicy, findEntries, indexOnly, isEntry, pathOf, recordOf, releaseCore, upsertEntry,
   type LibraryAccessPolicy, type LibraryEntry, type LibraryRelease, type LibraryToolDeps,
 } from './library-tools.js';
@@ -49,21 +50,21 @@ export async function pagedRootOf(deps: Pick<LibraryToolDeps, 'catalogStore' | '
 /** A row with where it sits in the assembled list. */
 interface Placed { e: LibraryEntry; pos: number }
 
-export async function libraryWritePaged(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], root: CatalogRoot): Promise<Record<string, unknown>> {
+export async function libraryWritePaged(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], root: CatalogRoot, person?: string): Promise<Record<string, unknown>> {
   const progress = { committed: false };
   try {
-    return await libraryWritePagedOnce(deps, owner, toolId, args, ctx, root, progress);
+    return await libraryWritePagedOnce(deps, owner, toolId, args, ctx, root, progress, person);
   } catch (e) {
     // A page this root named was collected by later commits (a Home write landing during a long scan): before anything
     // was written, read the root once more and, only if it moved, run the act again against it.
     if (progress.committed || !isPageMissing(e)) throw e;
     const fresh = await pagedRootOf(deps, owner);
     if (!fresh || fresh.seq === root.seq) throw e;
-    return libraryWritePagedOnce(deps, owner, toolId, args, ctx, fresh, progress);
+    return libraryWritePagedOnce(deps, owner, toolId, args, ctx, fresh, progress, person);
   }
 }
 
-async function libraryWritePagedOnce(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], root: CatalogRoot, progress: { committed: boolean }): Promise<Record<string, unknown>> {
+async function libraryWritePagedOnce(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], root: CatalogRoot, progress: { committed: boolean }, person?: string): Promise<Record<string, unknown>> {
   const store = deps.catalogStore!;
   const write = deps.writeSubjectRecord!;
   const P = root.pageCount;
@@ -85,10 +86,10 @@ async function libraryWritePagedOnce(deps: LibraryToolDeps, owner: string, toolI
   const scan = async (visit: (rows: Placed[], k: number) => void): Promise<void> => { for (let k = 0; k < P; k++) visit(await placedPage(k), k); };
 
   /** Records first (the document's, and any older row in the page still carrying bytes inline), then the page edit. */
-  const commit = async (rows: LibraryEntry[], entry: LibraryEntry | undefined, opts: { resave?: boolean; recordForEntry?: boolean } = {}) => {
+  const commit = async (rows: LibraryEntry[], entry: LibraryEntry | undefined, opts: { resave?: boolean; recordForEntry?: boolean; alsoUpsert?: LibraryEntry[] } = {}) => {
     const withRecord = (e: LibraryEntry) => !e.isFolder && ((e === entry && opts.recordForEntry !== false) || typeof e.bytesB64 === 'string');
     const carrying = [...(entry && !rows.includes(entry) ? [entry] : []), ...rows].filter(withRecord);
-    const upserts = indexOnly([...(entry ? [entry] : []), ...carrying.filter((e) => e !== entry)]);
+    const upserts = indexOnly([...new Set([...(entry ? [entry] : []), ...(opts.alsoUpsert ?? []), ...carrying.filter((e) => e !== entry)])]);
     progress.committed = true; // from here on, something may have been written: never re-run the act
     const edit = async () => {
       const out = await store.edit(owner, upserts, ctx.operationId);
@@ -231,6 +232,42 @@ async function libraryWritePagedOnce(deps: LibraryToolDeps, owner: string, toolI
     await commit(rows.filter((e) => e !== entry), entry, { recordForEntry: typeof entry.bytesB64 === 'string' });
     await announce(entry);
     return { published: true, owner, file: catalogView(entry), release, answer: `Released ${pathOf(entry)} ${release.version}, signed as the owner — release ${release.releaseId.slice(0, 14)}…` };
+  }
+  if (toolId === LIBRARY_GRANT_ISSUE || toolId === LIBRARY_GRANT_REVOKE) {
+    // S4 — A GRANT IS RECORDED ON A CATALOG ENTRY, so it is a catalog write like any other: the same rules
+    // (`issueLibraryGrant` / `revokeLibraryGrant`) over the rows they need, then the one-page edit by id, under the lease.
+    // `rows` is the folders plus the pages that matter; the write sends exactly the entries the rule changed (and any
+    // row of those pages still carrying bytes inline, as every save does).
+    const rows: LibraryEntry[] = [...folders];
+    if (toolId === LIBRARY_GRANT_ISSUE) {
+      const plan = libraryGrantPlan(owner, args);
+      if (!('refused' in plan)) {
+        if ('id' in plan.scope) rows.push(...(await page(pageOf(plan.scope.id, P))));
+        else {
+          // A folder is known by its own entry, or by any document at or under it: the first such document will do.
+          const f = plan.scope.folder;
+          if (!rows.some((e) => e.isFolder && pathOf(e) === f)) {
+            let found: LibraryEntry | undefined;
+            for (let k = 0; k < P && !found; k++) found = (await page(k)).find((e) => (e.folder ?? '') === f || (e.folder ?? '').startsWith(`${f}/`));
+            if (found) rows.push(found);
+          }
+        }
+      }
+    } else {
+      // The grant is found by its digest wherever it sits: the folders, then each page in turn (one held at a time).
+      const hash = String(args.delegationHash ?? '').trim().toLowerCase();
+      const holds = (e: LibraryEntry) => (e.grants ?? []).some((g) => isGrantRecord(g) && g.delegationHash.toLowerCase() === hash);
+      if (!rows.some(holds)) for (let k = 0; k < P; k++) { const hit = (await page(k)).find(holds); if (hit) { rows.push(hit); break; } }
+    }
+    const before = new Map(rows.map((e) => [e, JSON.stringify(e)]));
+    const write = async () => {
+      const changed = rows.filter((e) => before.get(e) !== JSON.stringify(e));
+      capCheck(changed.filter((e) => !before.has(e)).length);
+      await commit(rows.filter((e) => !changed.includes(e)), undefined, { alsoUpsert: changed });
+    };
+    return toolId === LIBRARY_GRANT_ISSUE
+      ? issueLibraryGrant(deps, owner, rows, args, ctx, person, write)
+      : revokeLibraryGrant(deps, owner, rows, args, ctx, person, write);
   }
   throw new Error(`${toolId} is not a Library act`);
 }

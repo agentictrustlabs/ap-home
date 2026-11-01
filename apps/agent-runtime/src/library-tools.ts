@@ -452,8 +452,7 @@ async function libraryWriteHeld(deps: LibraryToolDeps, owner: string, toolId: st
   if (!deps.writeSubjectRecord) throw new Error('this agent cannot write its Library (the private tier is not configured)');
   // A PAGED owner (catalog-pages.ts) is saved one page at a time; everyone else exactly as before.
   const paged = await pagedRootOf(deps, owner);
-  // (A grant act is written through the whole list here; the DO pages it on write.)
-  if (paged && deps.catalogStore && !LIBRARY_GRANT_ACTS.has(toolId)) return libraryWritePaged(deps, owner, toolId, args, ctx, paged);
+  if (paged && deps.catalogStore) return libraryWritePaged(deps, owner, toolId, args, ctx, paged, person);
   const CATALOG_CAP = paged ? PAGED_CATALOG_MAX : CATALOG_MAX;
   if (deps.readSubjectRecordStatus) {
     const read = await deps.readSubjectRecordStatus(owner, 'content.catalog');
@@ -964,10 +963,10 @@ const wireOf = (d: Delegation): LibraryGrantWire => ({
   salt: d.salt.toString(), signature: d.signature,
 });
 
-const isGrantRecord = (g: unknown): g is LibraryGrantRecordV1 => !!g && typeof g === 'object' && (g as LibraryGrantRecordV1).type === LIBRARY_GRANT_RECORD && typeof (g as LibraryGrantRecordV1).delegationHash === 'string';
+export const isGrantRecord = (g: unknown): g is LibraryGrantRecordV1 => !!g && typeof g === 'object' && (g as LibraryGrantRecordV1).type === LIBRARY_GRANT_RECORD && typeof (g as LibraryGrantRecordV1).delegationHash === 'string';
 const scopeWords = (r: Pick<LibraryGrantRecordV1, 'scope'>): string => ('id' in r.scope ? `document ${r.scope.id}` : `everything under ${r.scope.folder}/`);
 
-async function issueLibraryGrant(deps: LibraryToolDeps, owner: string, list: LibraryEntry[], args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], person: string | undefined, write: () => Promise<void>): Promise<Record<string, unknown>> {
+export async function issueLibraryGrant(deps: LibraryToolDeps, owner: string, list: LibraryEntry[], args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], person: string | undefined, write: () => Promise<void>): Promise<Record<string, unknown>> {
   const refuse = (why: string) => ({ issued: false, owner, refused: why, answer: `No grant was issued: ${why}.` });
   const checks = deps.grantChecks;
   if (!checks) return refuse('this agent cannot sign or verify a grant here (no chain checks are configured)');
@@ -1057,7 +1056,7 @@ export async function listLibraryGrants(deps: LibraryToolDeps, owner: string, ar
   };
 }
 
-async function revokeLibraryGrant(deps: LibraryToolDeps, owner: string, list: LibraryEntry[], args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], person: string | undefined, write: () => Promise<void>): Promise<Record<string, unknown>> {
+export async function revokeLibraryGrant(deps: LibraryToolDeps, owner: string, list: LibraryEntry[], args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], person: string | undefined, write: () => Promise<void>): Promise<Record<string, unknown>> {
   const refuse = (why: string) => ({ revoked: false, owner, refused: why, answer: `Nothing was revoked: ${why}.` });
   const hash = String(args.delegationHash ?? '').trim().toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(hash)) return refuse(`a grant is named by its digest (0x and 64 hex, from library.grants.list) — "${String(args.delegationHash ?? '')}" is not one`);
