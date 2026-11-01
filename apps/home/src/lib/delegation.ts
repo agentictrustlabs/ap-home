@@ -1128,23 +1128,61 @@ export async function issueOrgConsultRoutingDelegation(
    */
   dispatchArchetypes: readonly string[] = [],
 ): Promise<Delegation> {
+  return issueAgentSigningWire(orgSA, interactionsSessionKey, [
+    consultSkillSelector(),
+    ...archetypeMethodSelectors([...new Set(dispatchArchetypes.map((a) => a.trim().toLowerCase()).filter(Boolean))]
+      .filter((a) => /^[a-z0-9][a-z0-9-]{1,60}$/.test(a))),
+  ], signHash, validitySeconds); // the org's custody (the steward's credential) authorizes routing
+}
+
+/**
+ * AN AGENT'S OWN A2A SIGNING WIRE `agent → interactions-session key` — the one construction both ceremonies sign:
+ *   timestamp window [0, now + validity], allowedTargets = [the agent] (usable solely to act AS it),
+ *   allowedMethods = the selectors given (the caller names every one — never the any-skill sentinel),
+ *   signed by `signHash` over the EIP-712 delegation digest: the AGENT's custody credential, so the signature verifies
+ *   ERC-1271 against the agent SA (its `isValidSignature` accepts its custodian's signature). Never session-wrapped.
+ */
+export async function issueAgentSigningWire(
+  agent: Address,
+  interactionsSessionKey: Address,
+  selectors: readonly Hex[],
+  signHash: SignHash,
+  validitySeconds: number,
+): Promise<Delegation> {
+  if (selectors.length === 0) throw new Error('a signing wire names at least one method');
   const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   let salt = 0n;
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
-    buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([orgSA])),
-    buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms([
-      consultSkillSelector(),
-      ...archetypeMethodSelectors([...new Set(dispatchArchetypes.map((a) => a.trim().toLowerCase()).filter(Boolean))]
-        .filter((a) => /^[a-z0-9][a-z0-9-]{1,60}$/.test(a))),
-    ])),
+    buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([agent])),
+    buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms([...selectors])),
   ];
-  const d: Delegation = { delegator: orgSA, delegate: interactionsSessionKey, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const d: Delegation = { delegator: agent, delegate: interactionsSessionKey, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
   const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
-  d.signature = await signHash(digest); // the org's custody (the steward's credential) authorizes routing
+  d.signature = await signHash(digest);
   return d;
+}
+
+/** The A2A method a workspace sends to read what a publisher granted it (agent-runtime `LIBRARY_GRANTED_READ`). */
+export const LIBRARY_GRANTED_READ_SKILL = 'library.granted.read' as const;
+/** 180 days, the routing wire's lifetime; re-running the ceremony refreshes it. */
+export const SERVICE_READ_WIRE_VALIDITY_SECONDS = CONSULT_GRANT_VALIDITY_SECONDS;
+
+/**
+ * The SERVICE LIBRARY-READ WIRE `service → interactions-session key`, signed by the person as the CUSTODIAN of a service
+ * agent they chartered ("Let <name>.svc read works it is granted"). Exactly ONE method — `library.granted.read` — so the
+ * runtime can sign that A2A message AS the service and nothing else: no consult, no archetype, never any-skill. Stored in
+ * the service's InteractionsDO under its own key (`signing.serviceWire`), never over an org's consult wire.
+ */
+export function issueServiceLibraryReadWire(
+  serviceSA: Address,
+  interactionsSessionKey: Address,
+  signHash: SignHash,
+  validitySeconds = SERVICE_READ_WIRE_VALIDITY_SECONDS,
+): Promise<Delegation> {
+  return issueAgentSigningWire(serviceSA, interactionsSessionKey, [a2aSkillSelector(LIBRARY_GRANTED_READ_SKILL)], signHash, validitySeconds);
 }
 
 // ─── spec 272/243 — x402 payment delegation (treasury → treasury) ─────────────────────────────

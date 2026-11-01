@@ -16,6 +16,7 @@ import { BusyButton } from '../shared/BusyButton';
 import { BehaviourPlaybook } from './BehaviourPlaybook';
 import { agentClassOf } from '../../lib/agent-class';
 import type { DelegationWire } from '../../lib/delegation';
+import { WorkspaceReadCard } from './WorkspaceReadCard';
 
 const lc = (s: string) => s.toLowerCase();
 
@@ -92,6 +93,11 @@ export function ServiceAccessSection({ agent }: { agent: string }) {
             ? ' The service-agent-wire (workspace → gather27-a2a) is held by the Worker, not this portal — authorize it from Gather ops.'
             : ''}
         </p>
+      )}
+      {agentClassOf(svc.kind) === 'service' && (
+        <div className="manage-grid" style={{ marginTop: '.8rem' }}>
+          <WorkspaceReadCard agent={svc.agent} name={svc.name} isService />
+        </div>
       )}
     </SectionShell>
   );

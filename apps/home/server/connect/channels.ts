@@ -330,6 +330,22 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return jsonCors(r.body, request, r.status);
   }
 
+  // A SERVICE agent's own A2A signing wire for library.granted.read (src/home/workspace-read-wire.ts). Pass-through: the
+  // agent's InteractionsDO verifies it (service principal; delegate = the interactions-session key; exactly that one method;
+  // ERC-1271 against the service — the custody proof; unrevoked) and keeps it under its own key, never the org consult wire.
+  // Enable is refused there for a relying app's token (OWNER_ONLY) — an app sends the person to /workspace-read instead.
+  if (body?.action === 'signingWireStatus' || body?.action === 'signingWireEnable' || body?.action === 'signingWireClear') {
+    const op = { signingWireStatus: 'signing.wireStatus', signingWireEnable: 'signing.wireEnable', signingWireClear: 'signing.wireClear' }[body.action]!;
+    const b = body as { delegation?: unknown };
+    const r = await callInteractions(env, communityId, op, {
+      session: who.token,
+      ...(body.action === 'signingWireEnable' && b.delegation ? { delegation: b.delegation } : {}),
+      // Carried like every other call here; the signing-wire ops decide on the wire's own custody signature, not on it.
+      ...(stewardship ? { stewardship } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
   // spec 334 §6 — the org's auto-work switch (the org agent does the work on its endeavors).
   // Steward-only for enable/disable (the DO gates); status is readable by the steward too.
   if (body?.action === 'autoWorkStatus' || body?.action === 'autoWorkEnable' || body?.action === 'autoWorkDisable') {

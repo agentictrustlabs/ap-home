@@ -11,7 +11,9 @@
 // session-audience, no allowedMethods — so a message signed under it is refused at every A2A gate ("session wire must
 // carry an allowedMethods caveat"). The wire that DOES verify is the one the rail already signs with: the agent's own
 // A2A signing wire (agent → this runtime's interactions-session key, allowedMethods enumerated, signed by the agent's
-// custodian, held in the agent's InteractionsDO — `orgConsultWire`). Exactly as the archetype dispatch does
+// custodian, held in the agent's InteractionsDO). For a WORKSPACE that wire is the SERVICE SIGNING WIRE its custodian mints at
+// Home ("Let <name>.svc read works it is granted" — agent-signing-wire.ts, stored under `signing.serviceWire`); an org's
+// consult wire (`routing.orgWire`) is read too, and `signingWireFor` returns whichever names the method. Exactly as the archetype dispatch does
 // (a2a-task-do.ts, "DOES THE WIRE ACTUALLY COVER THIS METHOD?"), the wire's coverage of `library.granted.read` is checked
 // HERE first, with the same membership check the publisher will apply, so a ceremony gap is said in words instead of
 // becoming a refusal on the publisher's agent.
@@ -21,7 +23,7 @@
 // delivery draw (`where`).
 import { checkSessionWireShape } from '@agenticprimitives/a2a';
 import type { Hex } from 'viem';
-import { orgConsultWire, readDelegatedTask, readTaskArtifact, submitDelegatedTask, type RawSigner } from './consult-rail.js';
+import { readDelegatedTask, readTaskArtifact, signingWireFor, submitDelegatedTask, type RawSigner } from './consult-rail.js';
 import { LIBRARY_GRANTED_READ, type GrantedReadSender, type GrantedReadSent } from './library-tools.js';
 import type { Env, IncomingDelegation } from './index.js';
 
@@ -31,7 +33,8 @@ export const GRANTED_FETCH_DEADLINE_MS = 20_000;
 export interface GrantedReadSenderDeps {
   /** Is the publisher served by THIS deployment? `{ here: false, refused }` names why not. Absent ⇒ every agent is treated as here. */
   where?: (publisher: string) => Promise<{ here: true } | { here: false; refused: string }>;
-  /** The sender's own A2A signing wire (tests inject; the Worker reads the agent's InteractionsDO — `orgConsultWire`). */
+  /** The sender's own A2A signing wire (tests inject; the Worker reads the agent's InteractionsDO — `signingWireFor`, the wire
+   *  covering library.granted.read: the service signing wire a custodian mints at Home, or an org's consult wire). */
   signingWire?: (agent: string) => Promise<IncomingDelegation | null>;
   /** The interactions-session raw signer (tests only; the Worker uses the KMS session key). */
   signRaw?: RawSigner;
@@ -51,10 +54,10 @@ export function grantedReadSender(env: Env, deps: GrantedReadSenderDeps = {}): G
       if (!at.here) return { ok: false, refused: `the publisher ${p} cannot be asked from here: ${at.refused}` };
     }
     let wire: IncomingDelegation | null;
-    try { wire = await (deps.signingWire ? deps.signingWire(s) : orgConsultWire(env, s)); } catch (e) {
+    try { wire = await (deps.signingWire ? deps.signingWire(s) : signingWireFor(env, s, LIBRARY_GRANTED_READ)); } catch (e) {
       return { ok: false, refused: `this workspace's signing wire could not be read (${e instanceof Error ? e.message : String(e)})` };
     }
-    if (!wire) return { ok: false, refused: `this workspace (${s}) holds no signing wire of its own — the A2A message must be signed as the workspace, and this runtime does that only under a wire the workspace's custodian signed (workspace → the interactions-session key) naming ${LIBRARY_GRANTED_READ}` };
+    if (!wire) return { ok: false, refused: `this workspace (${s}) holds no signing wire of its own — the A2A message must be signed as the workspace, and this runtime does that only under a wire the workspace's custodian signed (workspace → the interactions-session key) naming ${LIBRARY_GRANTED_READ}; its custodian signs one at their Home (/workspace-read)` };
     const tsEnf = (env.TIMESTAMP_ENFORCER ?? '').toLowerCase();
     const amEnf = (env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
     const shapeErr = [tsEnf, amEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))
