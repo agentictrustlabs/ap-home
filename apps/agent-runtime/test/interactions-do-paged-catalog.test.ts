@@ -23,19 +23,23 @@ const folder = { id: 'f-shelf', kind: 'md', name: 'shelf', folder: '', isFolder:
 const catalog = (n: number): Array<Record<string, unknown>> => [folder, ...Array.from({ length: n }, (_, i) => doc(i))];
 
 type Fail = (tool: string, args: Record<string, unknown>) => boolean;
+/** Where an injected failure strikes: before the vault runs the call, or after it ran (the answer is lost). */
+type Mode = 'before' | 'after';
 
 function world() {
   const { vault, exec } = sqliteVault();
   const tools = vaultTools(vault, PERSON);
   const log: Array<{ tool: string; args: Record<string, unknown> }> = [];
-  const fail: { when: Fail | null } = { when: null };
+  const fail: { when: Fail | null; mode: Mode } = { when: null, mode: 'before' };
   const deps: InteractionsDeps = {
     async erc1271() { return true; },
     async vaultTool(_g, tool, args) {
       const a = args as Record<string, unknown>;
       log.push({ tool, args: a });
-      if (fail.when?.(tool, a)) return new Response(JSON.stringify({ error: 'internal error', detail: 'injected failure' }), { status: 500 });
+      const strike = !!fail.when?.(tool, a);
+      if (strike && fail.mode === 'before') return new Response(JSON.stringify({ error: 'internal error', detail: 'injected failure' }), { status: 500 });
       const out = await tools(tool, a);
+      if (strike) return new Response(JSON.stringify({ error: 'internal error', detail: 'injected failure after the call ran' }), { status: 500 });
       return new Response(JSON.stringify(out.body), { status: out.status, headers: { 'Content-Type': 'application/json' } });
     },
   };
@@ -63,7 +67,12 @@ function world() {
   /** A fresh object over the same vault (its held minute gone) — what any reader after this one sees. */
   const restart = () => { obj = mkObj(); };
   const seedLegacy = async (list: unknown[]) => expect(await writeVaultRecord(vault, PERSON, 'content.catalog', compactCatalog(list))).toEqual({ ok: true });
-  return { vault, exec, log, fail, op, raw, stored, root, legacy, commits, legacyWrites, clear, restart, seedLegacy };
+  /** A SECOND object over the same vault — another isolate of the same principal, with its own held minute. */
+  const second = () => {
+    const o = mkObj();
+    return async (name: string, body: Record<string, unknown>) => (await (await o.fetch(new Request(`https://do/interactions/${PERSON}/${name}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': MARKER }, body: JSON.stringify(body) }))).json()) as Record<string, unknown>;
+  };
+  return { vault, exec, log, fail, op, raw, stored, root, legacy, commits, legacyWrites, clear, restart, seedLegacy, second };
 }
 type World = ReturnType<typeof world>;
 const paged = (w: World, action: string) => w.op('internal.library.paged', { action, owner: PERSON });
@@ -171,6 +180,7 @@ describe.skipIf(!sqliteAvailable)('a switched owner is written as pages', () => 
     const g0 = (await w.root())!.pages[k]!.gen;
     expect((await w.op('internal.library.catalogEdit', { upserts: [doc(5000)] })).ok).toBe(true);
     expect(w.commits()).toEqual(['pages:1', 'root']);
+    expect(w.log.length).toBeLessThanOrEqual(4); // root read, page read, pages, root swap (no garbage yet)
     expect(await w.stored(`content.catalog.p${k}.g${g0}`)).toMatchObject({ deleted: false }); // kept: the previous generation
     await w.op('internal.library.catalogEdit', { upserts: [doc(5000, { version: 2 })] });
     expect(await w.stored(`content.catalog.p${k}.g${g0}`)).toMatchObject({ deleted: true });
@@ -315,22 +325,119 @@ describe.skipIf(!sqliteAvailable)('the rollback carries every save since the swi
     expect((await w.root())!.active).toBe(true);
   });
 
-  it('deactivate interrupted at every vault call: the owner stays paged with nothing lost, or is restored exactly', async () => {
-    for (let stop = 0; stop < 8; stop++) {
+  for (const at of ['readback', 'flip'] as const) {
+    it(`PROBE: deactivate interrupted AFTER its restore landed (${at}) resumes — it never asks for a manual merge of its own write`, async () => {
       const w = await switched(catalog(40));
       await w.op('internal.library.catalogEdit', { upserts: [doc(4242)] });
       const truth = await readCatalog(w);
-      let n = 0;
-      w.fail.when = () => n++ === stop;
-      await paged(w, 'deactivate');
+      let restored = false;
+      w.fail.when = (tool, a) => {
+        if (tool === 'catalog_commit' && a.op === 'restore') { restored = true; return false; }
+        if (!restored) return false;
+        return at === 'readback' ? tool === 'get_catalog_records' : tool === 'catalog_commit' && a.op === 'root';
+      };
+      expect((await paged(w, 'deactivate')).ok).toBe(false);
       w.fail.when = null;
       w.restart();
-      expect(await readCatalog(w)).toEqual(truth);
-      const st = await paged(w, 'status');
-      if (st.paged) expect((await paged(w, 'deactivate')).ok, `stop ${stop}`).toBe(true);
+      expect(await paged(w, 'status')).toMatchObject({ paged: true, rollbackInProgress: { restoreLanded: true } });
+      expect(await paged(w, 'deactivate')).toMatchObject({ ok: true });
       w.restart();
       expect(await readCatalog(w)).toEqual(truth);
-    }
+      expect(await w.legacy()).toEqual(truth);
+      expect((await w.root())!.active).toBe(false);
+    });
+  }
+});
+
+/** Count the vault calls an action makes when nothing fails. */
+async function callsOf(make: () => Promise<World>, action: string): Promise<number> {
+  const w = await make();
+  w.clear();
+  expect((await paged(w, action)).ok).toBe(true);
+  return w.log.length;
+}
+
+describe.skipIf(!sqliteAvailable)('every vault call of the switch, interrupted — before it ran, and after it ran with its answer lost', () => {
+  const cases: Array<{ action: string; make: () => Promise<World>; after: (w: World, truth: unknown) => Promise<void> }> = [
+    {
+      action: 'prepare',
+      make: async () => { const w = world(); await w.seedLegacy(catalog(40)); return w; },
+      after: async (w, truth) => { expect((await paged(w, 'verify')).ok).toBe(true); expect((await w.root())!.active).toBe(false); expect(await readCatalog(w)).toEqual(truth); },
+    },
+    {
+      action: 'activate',
+      make: async () => { const w = world(); await w.seedLegacy(catalog(40)); expect((await paged(w, 'prepare')).ok).toBe(true); return w; },
+      after: async (w, truth) => { expect((await w.root())!.active).toBe(true); expect(await readCatalog(w)).toEqual(truth); },
+    },
+    {
+      action: 'deactivate',
+      make: async () => { const w = await switched(catalog(40)); await w.op('internal.library.catalogEdit', { upserts: [doc(4242), doc(3, { version: 9 })] }); return w; },
+      after: async (w, truth) => { expect((await w.root())!.active).toBe(false); expect(await w.legacy()).toEqual(truth); expect(await readCatalog(w)).toEqual(truth); },
+    },
+  ];
+  for (const c of cases) {
+    it(`${c.action}: at every call, the catalog never changes, and running it again finishes it`, async () => {
+      const n = await callsOf(c.make, c.action);
+      expect(n).toBeGreaterThan(2);
+      process.stderr.write(`[calls] ${c.action}: ${n} vault calls\n`);
+      for (const mode of ['before', 'after'] as const) {
+        for (let stop = 0; stop < n; stop++) {
+          const w = await c.make();
+          w.restart();
+          const truth = await readCatalog(w);
+          let calls = 0;
+          w.fail.mode = mode;
+          w.fail.when = () => calls++ === stop;
+          await paged(w, c.action);
+          w.fail.when = null;
+          w.restart();
+          expect(await readCatalog(w), `${c.action} ${mode} call ${stop}`).toEqual(truth);
+          const again = await paged(w, c.action);
+          expect(again.ok, `${c.action} ${mode} call ${stop}: ${JSON.stringify(again).slice(0, 300)}`).toBe(true);
+          w.restart();
+          await c.after(w, truth);
+        }
+      }
+    }, 120_000);
+  }
+});
+
+describe.skipIf(!sqliteAvailable)('readers racing collection, and the sweep', () => {
+  it('a whole-list write decided on a held (stale) root is refused by the vault, and lands as pages on the fresh one', async () => {
+    const w = world();
+    await w.seedLegacy(catalog(20));
+    await w.op('internal.coordination.vaultWrite', { recordType: 'content.catalog', record: catalog(21) }); // holds "no root"
+    const other = w.second();
+    expect((await other('internal.library.paged', { action: 'prepare', owner: PERSON })).ok).toBe(true);
+    expect((await other('internal.library.paged', { action: 'activate', owner: PERSON })).ok).toBe(true);
+    w.clear();
+    expect((await w.op('internal.coordination.vaultWrite', { recordType: 'content.catalog', record: catalog(22) })).ok).toBe(true);
+    expect(w.legacyWrites()).toBe(1); // tried as legacy on the held root, refused by the vault…
+    expect(w.commits()).toContain('root'); // …then written as pages
+    expect((await w.stored('content.catalog'))!.rev).toBe(1);
+    w.restart();
+    expect(await readCatalog(w)).toEqual(catalog(22));
+  });
+
+  it('a reader holding an older root whose page was collected by two later commits re-reads the root and succeeds', async () => {
+    const w = await switched(catalog(60));
+    w.restart();
+    await w.op('internal.coordination.vaultRead', { recordType: CATALOG_ROOT_RECORD }); // this object now holds root N (no pages)
+    const other = w.second();
+    for (const v of [2, 3]) expect((await other('internal.library.catalogEdit', { upserts: [doc(5, { version: v })] })).ok).toBe(true);
+    const out = await w.op('internal.coordination.vaultRead', { recordType: 'content.catalog' });
+    expect(out.ok).toBe(true);
+    expect(out.data).toEqual(catalog(60).map((e) => (e.id === 'doc-5' ? doc(5, { version: 3 }) : e)));
+  });
+
+  it('the operator sweep and the periodic sweep tombstone page records no root names', async () => {
+    const w = await switched(catalog(30));
+    const { commitCatalog } = await import('../../vault/src/catalog-store.js');
+    await commitCatalog(w.vault, PERSON, { op: 'pages', writes: [{ recordType: 'content.catalog.p4.gleak', data: [doc(1)] }] });
+    expect(await paged(w, 'sweep')).toMatchObject({ ok: true, swept: ['content.catalog.p4.gleak'] });
+    await commitCatalog(w.vault, PERSON, { op: 'pages', writes: [{ recordType: 'content.catalog.p5.gleak', data: [doc(1)] }] });
+    for (let i = 0; i < 16 && (await w.stored('content.catalog.p5.gleak'))?.deleted !== true; i++) await w.op('internal.library.catalogEdit', { upserts: [doc(900 + i)] });
+    expect(await w.stored('content.catalog.p5.gleak')).toMatchObject({ deleted: true });
   });
 });
 

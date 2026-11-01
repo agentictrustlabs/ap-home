@@ -30,6 +30,7 @@ async function pagedOwner(list: LibraryEntry[]) {
   records.set(CATALOG_ROOT_RECORD, built.root);
   const ledger = { reads: [] as string[], writes: [] as string[], readBytes: 0, writeBytes: 0 };
   const failRead = new Set<string>();
+  const hooks: { onRead?: (rt: string) => Promise<void> } = {};
   const root = () => records.get(CATALOG_ROOT_RECORD) as CatalogRoot;
   const deps: LibraryToolDeps = {
     // The whole-list reader — a paged save must never call it for the catalog.
@@ -41,6 +42,7 @@ async function pagedOwner(list: LibraryEntry[]) {
     signAsOwner: async () => `0x${'5'.repeat(130)}` as `0x${string}`,
     catalogStore: {
       read: async (_o, rt) => {
+        await hooks.onRead?.(rt);
         ledger.reads.push(rt);
         if (failRead.has(rt)) return { ok: false, data: null, error: 'vault unavailable' };
         const data = records.get(rt) ?? null;
@@ -64,7 +66,7 @@ async function pagedOwner(list: LibraryEntry[]) {
   /** The page record a root names for k, under the current root. */
   const pageName = (k: number) => pageRecordOf(root(), k) ?? `(empty page ${k})`;
   const reset = () => { ledger.reads = []; ledger.writes = []; ledger.readBytes = 0; ledger.writeBytes = 0; };
-  return { records, deps, ledger, catalog, reset, failRead, root, pageName };
+  return { records, deps, ledger, catalog, reset, failRead, root, pageName, hooks };
 }
 
 /** The same Library as one legacy record, saved by the whole-list path. */
@@ -158,6 +160,27 @@ describe('a save that names no id walks the pages one at a time and matches as b
     expect(a).toMatch(/2 documents match — which one\? a\/twin\.md · b\/twin\.md/);
     const none = await libraryWrite(p.deps, OWNER, 'library.file.visibility', { name: 'nothing-like-it', accessPolicy: 'public' }, ctx(9)).catch((e: Error) => e.message);
     expect(none).toBe('no document named "nothing-like-it" in the Library');
+  });
+});
+
+describe('a scan racing two other commits (a Home write lands twice mid-scan)', () => {
+  it('a page the scan’s root named was collected: the save re-reads the root once and runs against it — nothing lost', async () => {
+    const o = await pagedOwner(library(200));
+    const victim = pageOf('doc-150');
+    let fired = false;
+    o.hooks.onRead = async (rt) => {
+      if (fired || !rt.startsWith('content.catalog.p0.')) return;
+      fired = true;
+      // two commits change the victim page; the second collects the generation the scan's root names
+      for (const v of [2, 3]) await o.deps.catalogStore!.edit(OWNER, [{ ...entry(150), version: v }]);
+    };
+    expect(o.records.has(o.pageName(victim))).toBe(true);
+    const out = (await libraryWrite(o.deps, OWNER, 'library.file.save', { name: 'n9.md', folder: 'works/9', text: 'again' }, ctx(60))) as { file: { id: string; version: number } };
+    expect(fired).toBe(true);
+    expect(out.file).toMatchObject({ id: 'doc-9', version: 2 });
+    const all = await o.catalog();
+    expect(all.find((e) => e.id === 'doc-150')!.version).toBe(3);
+    expect(all).toHaveLength(library(200).length);
   });
 });
 

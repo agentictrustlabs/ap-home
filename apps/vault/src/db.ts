@@ -326,6 +326,12 @@ export async function putVaultObjectRowGuarded(
   if ((res.meta?.changes ?? 0) === 0) throw new VaultRevConflictError(row.resource);
 }
 
+/** The live resources of an owner that start with `prefix` (no payloads). */
+export async function liveVaultResourcesWithPrefix(db: D1Database, owner: string, prefix: string): Promise<string[]> {
+  const res = await db.prepare('SELECT resource FROM vault_objects WHERE owner_address = ? AND deleted_at IS NULL AND substr(resource, 1, ?) = ?').bind(owner.toLowerCase(), prefix.length, prefix).all<{ resource: string }>();
+  return (res.results ?? []).map((r) => r.resource);
+}
+
 /** Which of these resources hold a live row. */
 export async function liveVaultResources(db: D1Database, owner: string, resources: readonly string[]): Promise<Set<string>> {
   const out = new Set<string>();

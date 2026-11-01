@@ -15,8 +15,9 @@
 // commit (a compare-and-set on the root's stored rev at the vault). Until the root swaps, no reader can see the new
 // pages; after it, none can see the old ones. A write torn anywhere before the swap is invisible, a row moved between a
 // page and the root bucket moves in the swap, and a late write can never roll a page back under a newer root (the root
-// names the generation). The generation the previous root named is kept until the next successful write (`prevGen`),
-// then collected.
+// names the generation). The generation the previous root named is kept while it is that page's `prevGen` (until the
+// page's next change), then collected; a collection that is lost (an eviction between the swap and the collect) is
+// found by the sweep, which tombstones every page record the current root does not name.
 //
 // THE ROOT BUCKET. Folder rows — and any row that is not a document (no string id or name) — stay in the root itself
 // (`folders`): the effective-policy rule needs every folder on every save, and there are few of them.
@@ -76,8 +77,12 @@ export interface CatalogRoot {
   migratedFrom?: { hash: string; total: number; legacyRev: number; at: number };
   /** Set by `activate`: the legacy record's stored rev at the switch. `deactivate` requires it unchanged. */
   activation?: { legacyRev: number; at: number };
-  /** Set by `deactivate` just before it restores the legacy record: the vault accepts that one write only with this nonce. */
-  restore?: { nonce: string; expiresAt: number };
+  /**
+   * Set by `deactivate` before it restores the legacy record: the vault accepts that write only with this nonce, only
+   * over `fromRev` (the rev the switch froze, or the rev an earlier restore produced), and the write lands as `toRev`
+   * (= fromRev + 1). Kept on the root until the owner is switched off, so an interrupted rollback can be resumed.
+   */
+  restore?: { nonce: string; expiresAt: number; fromRev: number; toRev: number };
   /** The root's own write counter (the vault's stored rev is the compare-and-set). */
   seq: number;
   updatedAt: number;
@@ -88,10 +93,13 @@ export interface StoredRecord { data: unknown; rev: number; deleted: boolean }
 /** What the root record says about the owner. */
 export type RootState = { kind: 'legacy' } | { kind: 'inactive' | 'active'; root: CatalogRoot; rev: number };
 
-/** The paged index is not in a state any reader may trust. Never answered as "not paged". */
+/** The paged index is not in a state any reader may trust. Never answered as "not paged". `pageMissing`: a named page
+ *  generation was not there — which a reader holding an older root can meet after two later commits collected it. */
 export class CatalogIntegrityError extends Error {
-  constructor(message: string) { super(`catalog_integrity: ${message}`); this.name = 'CatalogIntegrityError'; }
+  readonly pageMissing: boolean;
+  constructor(message: string, opts: { pageMissing?: boolean } = {}) { super(`catalog_integrity: ${message}`); this.name = 'CatalogIntegrityError'; this.pageMissing = opts.pageMissing === true; }
 }
+export const isPageMissing = (e: unknown): boolean => e instanceof CatalogIntegrityError && e.pageMissing;
 
 type Json = Record<string, unknown>;
 const isObj = (v: unknown): v is Json => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -167,6 +175,8 @@ export async function catalogDigest(list: readonly unknown[], pageCount: number 
   for (const rows of split.pages) hashes.push(await pageHash(rows));
   return digestOf(pageCount, split.order, split.folders, hashes);
 }
+/** The same digest, from a root alone (its recorded page hashes) — what the vault checks a restored legacy record against. */
+export const rootDigest = (root: CatalogRoot): Promise<string> => digestOf(root.pageCount, root.order, root.folders, root.pages.map((p) => p.hash));
 /** The same digest, of the list a root and its pages assemble to — computed from the pages, the list never built. */
 export async function pagesDigest(root: CatalogRoot, pages: ReadonlyArray<readonly unknown[]>): Promise<string> {
   const hashes: string[] = [];
@@ -231,7 +241,7 @@ export function pageRows(root: CatalogRoot, k: number, stored: unknown): unknown
   const ref = root.pages[k];
   if (!ref) throw new CatalogIntegrityError(`the root has no page ${k}`);
   if (ref.gen === null) return [];
-  if (stored === null || stored === undefined) throw new CatalogIntegrityError(`page ${k} (generation ${ref.gen}) is missing — refusing to read a partial catalog`);
+  if (stored === null || stored === undefined) throw new CatalogIntegrityError(`page ${k} (generation ${ref.gen}) is missing — refusing to read a partial catalog`, { pageMissing: true });
   const rows = expandCatalog(stored);
   if (!Array.isArray(rows)) throw new CatalogIntegrityError(`page ${k} is not a list`);
   if (rows.length !== ref.count) throw new CatalogIntegrityError(`page ${k} holds ${rows.length} rows, the root says ${ref.count}`);
@@ -267,9 +277,20 @@ export interface CatalogSource {
  * (expanded), an inactive root ⇒ the same, an active root ⇒ its pages assembled, anything else ⇒ an error.
  */
 export async function readCatalog(src: CatalogSource, batch: number = PAGE_READ_BATCH): Promise<unknown> {
-  const st = rootState(await src.root());
-  if (st.kind !== 'active') return expandCatalog((await src.legacy()) ?? null);
-  return assembleCatalog(st.root, await readCatalogPages(st.root, src.records, batch));
+  let rec = await src.root();
+  for (let attempt = 0; ; attempt++) {
+    const st = rootState(rec);
+    if (st.kind !== 'active') return expandCatalog((await src.legacy()) ?? null);
+    try {
+      return assembleCatalog(st.root, await readCatalogPages(st.root, src.records, batch));
+    } catch (e) {
+      // A page the root named was collected by later commits: read the root once more, and only if it moved, again.
+      if (attempt > 0 || !isPageMissing(e)) throw e;
+      const again = await src.root();
+      if (!again || again.rev === rec?.rev) throw e;
+      rec = again;
+    }
+  }
 }
 
 // ── the write half (the interactions DO) ────────────────────────────────────────────────────────────────────────────
@@ -278,7 +299,8 @@ export interface PagedWrite {
   /** New page records, each under a fresh generation name — written before the root, never over anything. */
   pages: Array<{ recordType: string; data: unknown; k: number; rows: unknown[] }>;
   root: CatalogRoot;
-  /** Generations no root names after this one commits (the previous root's `prevGen`s): collect AFTER the root swap. */
+  /** Generations no root names after this one commits (the previous root's `prevGen`s): collected AFTER the root swap,
+   *  best effort; anything a lost collection leaves behind is found by the sweep (`catalog_commit` op `sweep`). */
   garbage: string[];
 }
 
@@ -316,8 +338,7 @@ export async function planPagedWrite(list: readonly unknown[], root: CatalogRoot
   const out: PagedWrite = { pages: [], root: null as unknown as CatalogRoot, garbage: [] };
   const refs: CatalogPageRef[] = [];
   for (let k = 0; k < root.pageCount; k++) refs.push(await nextRef(root.pages[k], k, split.pages[k]!, opts.gen, out));
-  const { restore: _r, ...rest } = root;
-  out.root = { ...rest, pages: refs, total: list.length, order: split.order, folders: split.folders, seq: root.seq + 1, updatedAt: opts.now };
+  out.root = { ...root, pages: refs, total: list.length, order: split.order, folders: split.folders, seq: root.seq + 1, updatedAt: opts.now };
   return out;
 }
 
@@ -364,8 +385,7 @@ export async function applyCatalogEdit(root: CatalogRoot, loadPage: (k: number) 
     const rows = loaded.get(k);
     refs.push(rows ? await nextRef(root.pages[k], k, rows, opts.gen, out) : root.pages[k]!);
   }
-  const { restore: _r, ...rest } = root;
-  out.root = { ...rest, pages: refs, total: order.length, order: order.join(''), folders, seq: root.seq + 1, updatedAt: opts.now };
+  out.root = { ...root, pages: refs, total: order.length, order: order.join(''), folders, seq: root.seq + 1, updatedAt: opts.now };
   return out;
 }
 

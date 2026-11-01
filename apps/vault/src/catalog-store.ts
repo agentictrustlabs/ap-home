@@ -14,11 +14,12 @@
 //           stamped into the root, and collects page generations no root names.
 import { projectFields } from '@agenticprimitives/vault';
 import { CATALOG_RECORD } from './catalog-codec.js';
-import { CATALOG_ROOT_RECORD, CatalogIntegrityError, isPagedCatalogRecord, isVersionedPageRecord, parseCatalogRoot, readCatalog, rootState, type CatalogRoot, type StoredRecord } from './catalog-pages.js';
+import { expandCatalog } from './catalog-codec.js';
+import { CATALOG_ROOT_RECORD, CatalogIntegrityError, catalogDigest, isPagedCatalogRecord, isVersionedPageRecord, parseCatalogRoot, readCatalog, rootDigest, rootState, type CatalogRoot, type StoredRecord } from './catalog-pages.js';
 import { VaultRevConflictError } from './db.js';
 import { VAULT_RECORD_PREFIX, type DemoVault } from './vault.js';
 
-type Store = Pick<DemoVault, 'read' | 'write' | 'readStored' | 'writeGuarded' | 'live' | 'tombstone' | 'revOf'>;
+type Store = Pick<DemoVault, 'read' | 'write' | 'readStored' | 'writeGuarded' | 'live' | 'tombstone' | 'revOf' | 'livePrefix'>;
 export type CatalogResult = ({ ok: true } & Record<string, unknown>) | { ok: false; error: string; detail?: string };
 
 const R = (recordType: string): string => `${VAULT_RECORD_PREFIX}${recordType}`;
@@ -58,6 +59,9 @@ export async function writeVaultRecord(v: Store, owner: string, recordType: stri
   let state;
   try { state = rootState(rootRec); } catch (e) { return refuse('catalog_integrity', (e as Error).message); }
   if (state.kind === 'active') return refuse('catalog_paged', "this Library index is stored in pages — write it through the owner's interactions object, never as the single legacy record");
+  // A tombstone stays a tombstone (as before the paged index). It is not guarded by the root, but a switch that races it
+  // fails: the legacy record's version becomes "deleted", which no activation names.
+  if (data === null) { await v.write({ owner, resource: CATALOG, data: null }); return { ok: true }; }
   try {
     await v.writeGuarded(owner, CATALOG, data, { guard: { resource: ROOT, rev: rootRec ? rootRec.rev : -1 } });
   } catch (e) {
@@ -93,34 +97,7 @@ export async function commitCatalog(v: Store, owner: string, args: Record<string
       }
       return { ok: true, written: writes.length };
     }
-    if (op === 'root') {
-      let root: CatalogRoot;
-      try { root = parseCatalogRoot(args.data); } catch (e) { return refuse('catalog_integrity', (e as Error).message); }
-      const expectRootRev = Number(args.expectRootRev);
-      if (!Number.isInteger(expectRootRev)) return refuse('expectRootRev required');
-      const before = await stored(v, owner, CATALOG_ROOT_RECORD);
-      if ((before ? before.rev : -1) !== expectRootRev) return refuse('catalog_conflict', 'the root moved since it was read');
-      let wasActive = true; // a stored root that does not parse is treated as active: any change of state then needs the legacy check
-      try { wasActive = rootState(before).kind === 'active'; } catch { /* stays true */ }
-      const transition = wasActive !== root.active;
-      const expectLegacyRev = args.expectLegacyRev === undefined ? undefined : Number(args.expectLegacyRev);
-      if (transition) {
-        if (expectLegacyRev === undefined || !Number.isInteger(expectLegacyRev)) return refuse('catalog_switch_unchecked', 'switching an owner on or off names the legacy record version it checked');
-        if (root.active && root.activation?.legacyRev !== expectLegacyRev) return refuse('catalog_switch_unchecked', 'the activation names a different legacy version');
-        if (!root.active && root.migratedFrom?.legacyRev !== expectLegacyRev) return refuse('catalog_switch_unchecked', 'the deactivation names a different legacy version');
-      }
-      const named = root.pages.filter((p) => p.gen).map((p) => R(`content.catalog.p${p.k}.g${p.gen}`));
-      const live = await v.live(owner, named);
-      const missing = named.filter((r) => !live.has(r));
-      if (missing.length) return refuse('catalog_page_missing', `the root names ${missing.length} page record(s) that do not exist: ${missing.slice(0, 3).join(', ')}`);
-      try {
-        await v.writeGuarded(owner, ROOT, root, { expectRev: expectRootRev, ...(transition ? { guard: { resource: CATALOG, rev: expectLegacyRev! } } : {}) });
-      } catch (e) {
-        if (e instanceof VaultRevConflictError) return refuse('catalog_conflict', transition ? 'the root or the legacy record moved since they were checked' : 'the root moved since it was read');
-        throw e;
-      }
-      return { ok: true, rev: await v.revOf(owner, ROOT) };
-    }
+    if (op === 'root') return await commitRoot(v, owner, args);
     if (op === 'restore') {
       const before = await stored(v, owner, CATALOG_ROOT_RECORD);
       const state = rootState(before);
@@ -130,17 +107,30 @@ export async function commitCatalog(v: Store, owner: string, args: Record<string
       if (!stamp || nonce.length < 16 || stamp.nonce !== nonce || !(stamp.expiresAt >= now)) return refuse('catalog_restore_refused', 'no live restore stamp matches this nonce');
       if (!isList(args.data)) return refuse('catalog_restore_refused', 'the restored index is a list');
       const expectLegacyRev = Number(args.expectLegacyRev);
-      if (!Number.isInteger(expectLegacyRev)) return refuse('expectLegacyRev required');
-      // The frozen record must be exactly what the switch left: a legacy record that moved while paged is reported for a
-      // manual merge, never overwritten.
-      if (state.root.activation?.legacyRev !== expectLegacyRev) return refuse('catalog_legacy_moved', 'the legacy record is not the one the switch froze — nothing was written');
+      // The restore lands over exactly the rev the stamp names — the rev the switch froze, or the one an earlier
+      // restore of this rollback produced (the vault accepted that stamp only on that chain). A legacy record that
+      // moved any other way is reported for a manual merge, never overwritten.
+      if (expectLegacyRev !== stamp.fromRev) return refuse('catalog_legacy_moved', 'the legacy record is not the one this rollback is restoring over — nothing was written');
       try {
-        await v.writeGuarded(owner, CATALOG, args.data, { expectRev: expectLegacyRev, guard: { resource: ROOT, rev: state.rev } });
+        await v.writeGuarded(owner, CATALOG, args.data, { expectRev: stamp.fromRev, guard: { resource: ROOT, rev: state.rev } });
       } catch (e) {
-        if (e instanceof VaultRevConflictError) return refuse('catalog_conflict', 'the legacy record or the root moved since deactivate checked them — nothing was written');
+        if (e instanceof VaultRevConflictError) return refuse('catalog_conflict', 'the legacy record or the root moved since the stamp — nothing was written');
         throw e;
       }
       return { ok: true, legacyRev: await v.revOf(owner, CATALOG) };
+    }
+    if (op === 'sweep') {
+      // Every page record the CURRENT root does not name (as a generation or as the kept previous one) is a leak — a
+      // collection lost to an eviction, or a commit that died before its root swap. With no root, every page is one.
+      const state = rootState(await stored(v, owner, CATALOG_ROOT_RECORD));
+      const named = new Set<string>();
+      if (state.kind !== 'legacy') for (const p of state.root.pages) for (const g of [p.gen, p.prevGen]) if (g) named.add(`content.catalog.p${p.k}.g${g}`);
+      const swept: string[] = [];
+      for (const resource of await v.livePrefix(owner, R('content.catalog.p'))) {
+        const rt = resource.slice(VAULT_RECORD_PREFIX.length);
+        if (isVersionedPageRecord(rt) && !named.has(rt)) { await v.tombstone(owner, resource); swept.push(rt); }
+      }
+      return { ok: true, swept };
     }
     if (op === 'collect') {
       const rts = Array.isArray(args.recordTypes) ? (args.recordTypes as unknown[]).filter((r): r is string => typeof r === 'string') : [];
@@ -151,9 +141,81 @@ export async function commitCatalog(v: Store, owner: string, args: Record<string
       for (const rt of rts) if (isVersionedPageRecord(rt) && !named.has(rt)) { await v.tombstone(owner, R(rt)); collected.push(rt); }
       return { ok: true, collected };
     }
-    return refuse('op: pages | root | restore | collect');
+    return refuse('op: pages | root | restore | collect | sweep');
   } catch (e) {
     if (e instanceof CatalogIntegrityError) return refuse('catalog_integrity', e.message);
     throw e;
   }
+}
+
+const sameStamp = (a: CatalogRoot['restore'], b: CatalogRoot['restore']): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/**
+ * THE ROOT SWAP — a compare-and-set on the stored root, and the switch's guarantees, enforced HERE whatever the caller says:
+ *
+ *   no root            → only an INACTIVE root (prepare); a deleted or unparseable stored root → refused (repair by hand)
+ *   inactive → active  → the activation names the legacy rev it checked; the legacy record is still at that rev (same
+ *                        statement) and its digest is the new root's digest
+ *   active → active    → the activation is unchanged; the restore stamp is kept, or a NEW stamp restores over the rev
+ *                        the switch froze or the rev the previous stamp's restore produced, while the legacy record is
+ *                        at that rev (same statement)
+ *   active → inactive  → only after a restore: the stored root carries a stamp, the legacy record is at the stamp's
+ *                        `toRev` (same statement), its digest is the paged catalog's, and the new root keeps the pages
+ *   inactive → inactive→ a re-prepare
+ */
+async function commitRoot(v: Store, owner: string, args: Record<string, unknown>): Promise<CatalogResult> {
+  let root: CatalogRoot;
+  try { root = parseCatalogRoot(args.data); } catch (e) { return refuse('catalog_integrity', (e as Error).message); }
+  const expectRootRev = Number(args.expectRootRev);
+  if (!Number.isInteger(expectRootRev)) return refuse('expectRootRev required');
+  const before = await stored(v, owner, CATALOG_ROOT_RECORD);
+  if ((before ? before.rev : -1) !== expectRootRev) return refuse('catalog_conflict', 'the root moved since it was read');
+  let prev;
+  try { prev = rootState(before); } catch (e) { return refuse('catalog_integrity', `${(e as Error).message} — the stored root must be repaired by hand before it is written again`); }
+  const expectLegacyRev = args.expectLegacyRev === undefined ? undefined : Number(args.expectLegacyRev);
+  const legacyNow = async () => stored(v, owner, CATALOG_RECORD);
+  const legacyDigest = async (rec: StoredRecord | null): Promise<string | null> => {
+    if (!rec || rec.deleted) return null;
+    const list = expandCatalog(rec.data);
+    return Array.isArray(list) ? catalogDigest(list, root.pageCount) : null;
+  };
+  let guardRev: number | undefined;
+  if (prev.kind === 'legacy') {
+    if (root.active) return refuse('catalog_switch_unchecked', 'a first root is written inactive (prepare), then activated');
+  } else if (prev.kind === 'inactive' && root.active) {
+    if (expectLegacyRev === undefined || root.activation?.legacyRev !== expectLegacyRev || root.restore) return refuse('catalog_switch_unchecked', 'an activation names the legacy rev it checked, and carries no restore stamp');
+    const leg = await legacyNow();
+    if (!leg || leg.rev !== expectLegacyRev) return refuse('catalog_conflict', 'the legacy record moved since activate checked it');
+    if (await legacyDigest(leg) !== await rootDigest(root)) return refuse('catalog_switch_mismatch', 'the pages are not the legacy record — not switching');
+    guardRev = expectLegacyRev;
+  } else if (prev.kind === 'active' && root.active) {
+    if (JSON.stringify(root.activation ?? null) !== JSON.stringify(prev.root.activation ?? null)) return refuse('catalog_switch_unchecked', 'an active root keeps its activation');
+    if (!sameStamp(root.restore, prev.root.restore)) {
+      const st = root.restore;
+      const allowedFrom = [prev.root.activation?.legacyRev, prev.root.restore?.toRev].filter((r): r is number => typeof r === 'number');
+      if (!st || typeof st.nonce !== 'string' || st.nonce.length < 16 || !allowedFrom.includes(st.fromRev) || st.toRev !== st.fromRev + 1) {
+        return refuse('catalog_restore_refused', 'a restore stamp restores over the rev the switch froze, or the rev the previous restore produced — and is never removed while the owner is paged');
+      }
+      guardRev = st.fromRev;
+    }
+  } else if (prev.kind === 'active' && !root.active) {
+    const st = prev.root.restore;
+    if (!st || expectLegacyRev !== st.toRev || root.migratedFrom?.legacyRev !== st.toRev || root.restore) return refuse('catalog_switch_unchecked', 'an owner is switched off only after its legacy record was restored (the stamp, its toRev, and the new root naming it)');
+    const leg = await legacyNow();
+    if (!leg || leg.rev !== st.toRev) return refuse('catalog_conflict', 'the legacy record is not the restored one');
+    const pagedDigest = await rootDigest(prev.root);
+    if (await legacyDigest(leg) !== pagedDigest || (await rootDigest(root)) !== pagedDigest) return refuse('catalog_switch_mismatch', 'the restored legacy record is not the paged catalog — the owner stays paged');
+    guardRev = st.toRev;
+  }
+  const named = root.pages.filter((p) => p.gen).map((p) => R(`content.catalog.p${p.k}.g${p.gen}`));
+  const live = await v.live(owner, named);
+  const missing = named.filter((r) => !live.has(r));
+  if (missing.length) return refuse('catalog_page_missing', `the root names ${missing.length} page record(s) that do not exist: ${missing.slice(0, 3).join(', ')}`);
+  try {
+    await v.writeGuarded(owner, ROOT, root, { expectRev: expectRootRev, ...(guardRev !== undefined ? { guard: { resource: CATALOG, rev: guardRev } } : {}) });
+  } catch (e) {
+    if (e instanceof VaultRevConflictError) return refuse('catalog_conflict', guardRev !== undefined ? 'the root or the legacy record moved since they were checked' : 'the root moved since it was read');
+    throw e;
+  }
+  return { ok: true, rev: await v.revOf(owner, ROOT) };
 }

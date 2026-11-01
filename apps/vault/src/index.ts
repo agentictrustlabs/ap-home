@@ -5,6 +5,7 @@
 
 import { CATALOG_RECORD } from './catalog-codec.js';
 import { commitCatalog, getStoredCatalogRecords, readVaultRecordData, writeVaultRecord } from './catalog-store.js';
+import { CATALOG_PAGED_FORMAT } from './catalog-pages.js';
 import { Hono } from 'hono';
 import {
   withDelegation,
@@ -755,7 +756,9 @@ interface Variables {
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 app.get('/health', (c) =>
-  c.json({ ok: true, service: 'demo-mcp', runtime: 'cloudflare-workers' }),
+  // `catalogDoor` — the paged Library index's tools (`get_catalog_records` / `catalog_commit`) are served here. The
+  // agent-runtime's deploy preflight refuses to deploy against a vault that does not say so (docs/design/library-paged-catalog.md).
+  c.json({ ok: true, service: 'demo-mcp', runtime: 'cloudflare-workers', catalogDoor: CATALOG_PAGED_FORMAT }),
 );
 
 // ─── Service-MAC verification middleware (audit C1) ───────────────────

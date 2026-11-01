@@ -33,6 +33,7 @@ import {
   getVaultObjectRowAny,
   putVaultObjectRowGuarded,
   liveVaultResources,
+  liveVaultResourcesWithPrefix,
   revToken,
   type VaultObjectRow,
 } from './db.js';
@@ -82,6 +83,8 @@ export interface CatalogVaultExt {
   tombstone(owner: string, resource: string): Promise<void>;
   /** The record's version (`revToken`) without opening it. */
   revOf(owner: string, resource: string): Promise<number>;
+  /** Live resources starting with `prefix`. */
+  livePrefix(owner: string, prefix: string): Promise<string[]>;
 }
 export type DemoVault = Vault & CatalogVaultExt;
 
@@ -127,6 +130,9 @@ export function createDemoVault(db: D1Database, wrapper: DekWrapper): DemoVault 
     },
     async revOf(owner: string, resource: string): Promise<number> {
       return revToken(await getVaultObjectRowAny(db, owner, resource));
+    },
+    async livePrefix(owner: string, prefix: string): Promise<string[]> {
+      return liveVaultResourcesWithPrefix(db, owner, prefix);
     },
     async read<T = unknown>(req: VaultReadRequest): Promise<VaultObject<T> | null> {
       const owner = req.owner;

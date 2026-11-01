@@ -20,7 +20,7 @@ import {
   catalogView, effectiveAccessPolicy, findEntries, indexOnly, isEntry, pathOf, recordOf, releaseCore, upsertEntry,
   type LibraryAccessPolicy, type LibraryEntry, type LibraryRelease, type LibraryToolDeps,
 } from './library-tools.js';
-import { CATALOG_ROOT_RECORD, activeCatalogRoot, pageOf, pageRecordOf, pageRows, positionsOf, type CatalogRoot } from './catalog-pages.js';
+import { CATALOG_ROOT_RECORD, activeCatalogRoot, isPageMissing, pageOf, pageRecordOf, pageRows, positionsOf, type CatalogRoot } from './catalog-pages.js';
 
 /** How many documents a PAGED Library indexes. The legacy single record stays at CATALOG_MAX (its size is the limit). */
 export const PAGED_CATALOG_MAX = 10_000;
@@ -50,6 +50,20 @@ export async function pagedRootOf(deps: Pick<LibraryToolDeps, 'catalogStore' | '
 interface Placed { e: LibraryEntry; pos: number }
 
 export async function libraryWritePaged(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], root: CatalogRoot): Promise<Record<string, unknown>> {
+  const progress = { committed: false };
+  try {
+    return await libraryWritePagedOnce(deps, owner, toolId, args, ctx, root, progress);
+  } catch (e) {
+    // A page this root named was collected by later commits (a Home write landing during a long scan): before anything
+    // was written, read the root once more and, only if it moved, run the act again against it.
+    if (progress.committed || !isPageMissing(e)) throw e;
+    const fresh = await pagedRootOf(deps, owner);
+    if (!fresh || fresh.seq === root.seq) throw e;
+    return libraryWritePagedOnce(deps, owner, toolId, args, ctx, fresh, progress);
+  }
+}
+
+async function libraryWritePagedOnce(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], root: CatalogRoot, progress: { committed: boolean }): Promise<Record<string, unknown>> {
   const store = deps.catalogStore!;
   const write = deps.writeSubjectRecord!;
   const P = root.pageCount;
@@ -75,6 +89,7 @@ export async function libraryWritePaged(deps: LibraryToolDeps, owner: string, to
     const withRecord = (e: LibraryEntry) => !e.isFolder && ((e === entry && opts.recordForEntry !== false) || typeof e.bytesB64 === 'string');
     const carrying = [...(entry && !rows.includes(entry) ? [entry] : []), ...rows].filter(withRecord);
     const upserts = indexOnly([...(entry ? [entry] : []), ...carrying.filter((e) => e !== entry)]);
+    progress.committed = true; // from here on, something may have been written: never re-run the act
     const edit = async () => {
       const out = await store.edit(owner, upserts, ctx.operationId);
       if (!out.ok) throw new Error(out.error ?? 'the Library index could not be written');
@@ -97,6 +112,11 @@ export async function libraryWritePaged(deps: LibraryToolDeps, owner: string, to
 
   /** The indexer hint: the document, or (a folder) up to ANNOUNCE_MAX documents under it in list order. */
   const announce = async (entry: LibraryEntry): Promise<void> => {
+    if (!deps.announce) return;
+    // A hint is never fatal: the act is done; a scan that cannot be read costs the public tier's freshness, nothing else.
+    try { await announceNow(entry); } catch { /* the indexer re-reads on the next hint */ }
+  };
+  const announceNow = async (entry: LibraryEntry): Promise<void> => {
     if (!deps.announce) return;
     let ids = [entry.id];
     if (entry.isFolder) {

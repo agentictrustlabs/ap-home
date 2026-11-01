@@ -49,6 +49,10 @@ describe('liveness and unknown paths', () => {
     expect((await call(app, '/health')).status).toBe(200);
   });
 
+  it("names the paged Library index's door on /health (the agent-runtime's deploy preflight requires it)", async () => {
+    expect(await (await call(app, '/health')).json()).toMatchObject({ catalogDoor: 'ap.catalog.paged.v2' });
+  });
+
   it('404s an unknown path rather than falling through', async () => {
     expect((await call(app, '/not/a/route')).status).toBe(404);
   });

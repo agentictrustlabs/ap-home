@@ -7,7 +7,10 @@
  *   activate    switch the owner to the pages — only if verify passes NOW and the legacy record is unchanged since prepare
  *   deactivate  the rollback: write the CURRENT pages (saves since the switch included) back into the legacy record,
  *               read it back, verify, and only then switch the owner back
- *   status      what is there
+ *   status      what is there (and, mid-rollback, whether the restore landed)
+ *   sweep       tombstone page records no root names (a lost collection)
+ *
+ * deactivate is RESUMABLE: after any failure, run it again.
  *
  * DRY RUN BY DEFAULT: without --execute only `status` is sent (read-only) and the action is printed, not run.
  * `activate --execute` runs `verify` first and refuses unless it passes and the legacy record is unchanged since prepare
@@ -28,7 +31,7 @@ const owner = (flag('owner') ?? '').toLowerCase();
 const action = flag('action') ?? 'status';
 const secret = process.env.A2A_CUSTODY_BRIDGE_SECRET ?? '';
 
-const ACTIONS = ['status', 'prepare', 'verify', 'activate', 'deactivate'];
+const ACTIONS = ['status', 'prepare', 'verify', 'activate', 'deactivate', 'sweep'];
 if (!base) throw new Error('--base <agent-runtime URL> (or AGENT_RUNTIME_URL) required');
 if (!/^0x[0-9a-f]{40}$/.test(owner)) throw new Error('--owner <0x address> required');
 if (!ACTIONS.includes(action)) throw new Error(`--action must be one of ${ACTIONS.join(' | ')}`);
