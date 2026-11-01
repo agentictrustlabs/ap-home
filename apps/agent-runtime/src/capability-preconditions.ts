@@ -17,6 +17,7 @@
 // again, and the chain is the one that finally refuses.
 import { erc20Abi, formatUnits, type Address } from 'viem';
 import { fundingAmount, type HarnessDeps, type HarnessEnv } from './harness-run.js';
+import { libraryGrantPlan, libraryGrantTargetRefusal, rawCatalogOf, LIBRARY_GRANT_ISSUE, LIBRARY_GRANT_REVOKE, type LibraryEntry } from './library-tools.js';
 
 export interface PreconditionInput {
   capability: string;
@@ -87,8 +88,38 @@ async function paymentPrecondition(input: PreconditionInput): Promise<string | n
 
 const deps_hasResolver = (d: HarnessDeps): boolean => typeof d.resolveName === 'function';
 
+/**
+ * Slice S4 — a Library read grant that cannot be issued (no such document or folder, a delegate that is not an agent or is
+ * the owner, a window out of range) is refused BEFORE the owner is asked to sign a mandate for it. The addressee is the
+ * owner; the owner is the one asking (or her steward), so naming what is missing is fine. The invoker checks again.
+ */
+async function libraryGrantIssuePrecondition(input: PreconditionInput): Promise<string | null> {
+  const owner = String(input.addressee ?? '').toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(owner)) return null;
+  const plan = libraryGrantPlan(owner, input.args);
+  if ('refused' in plan) return `No grant was issued: ${plan.refused}. Nothing was authorized.`;
+  if (!input.deps.readSubjectRecord) return null;
+  const list = await rawCatalogOf({ readSubjectRecord: input.deps.readSubjectRecord }, owner);
+  const missing = libraryGrantTargetRefusal(list, plan);
+  return missing ? `No grant was issued: ${missing}. Nothing was authorized.` : null;
+}
+
+/** Slice S4 — a revoke names a grant this Library recorded; one it never issued is said before any signature. */
+async function libraryGrantRevokePrecondition(input: PreconditionInput): Promise<string | null> {
+  const owner = String(input.addressee ?? '').toLowerCase();
+  const hash = String(input.args.delegationHash ?? '').trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(owner)) return null;
+  if (!/^0x[0-9a-f]{64}$/.test(hash)) return `Nothing was revoked: a grant is named by its digest (0x and 64 hex, from library.grants.list). Nothing was authorized.`;
+  if (!input.deps.readSubjectRecord) return null;
+  const list: LibraryEntry[] = await rawCatalogOf({ readSubjectRecord: input.deps.readSubjectRecord }, owner);
+  const known = list.some((e) => (e.grants ?? []).some((g) => String((g as { delegationHash?: unknown }).delegationHash ?? '').toLowerCase() === hash));
+  return known ? null : `Nothing was revoked: no grant ${hash.slice(0, 14)}… was issued from this Library. Nothing was authorized.`;
+}
+
 const CHECKS: Record<string, (i: PreconditionInput) => Promise<string | null>> = {
   'treasury.payment.execute': paymentPrecondition,
+  [LIBRARY_GRANT_ISSUE]: libraryGrantIssuePrecondition,
+  [LIBRARY_GRANT_REVOKE]: libraryGrantRevokePrecondition,
 };
 
 /** The reason this cannot work, or null when nothing known makes it impossible. */

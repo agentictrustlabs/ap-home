@@ -66,7 +66,7 @@ import { WEB_TOOLS, webReadInvoker } from './web-read.js';
 import { WEB_SEARCH_TOOLS, webSearchInvoker } from './web-search.js';
 import { BUILD_TOOLS, BUILD_ACTS, buildInvoker } from './build-tools.js';
 import { executorInvokeInvoker, readExecutors, type ExecutorSessionSeam } from './executor-invoke.js';
-import { LIBRARY_TOOLS, LIBRARY_ACTS, libraryInvoker, stewardshipOver, type LibraryGrantChecks } from './library-tools.js';
+import { LIBRARY_TOOLS, LIBRARY_ACTS, LIBRARY_GRANT_ACTS, LIBRARY_GRANT_ISSUE, LIBRARY_GRANT_REVOKE, LIBRARY_GRANTS_LIST, libraryInvoker, libraryGrantPlan, libraryGrantFor, stewardshipOver, type LibraryGrantChecks, type LibraryGrantWire } from './library-tools.js';
 import { PUBLISHER_TOOLS, publisherRead } from './publisher-contract.js';
 import { MCP_CONNECTOR_PREFIX, MCP_CONNECTORS_LIST, MCP_CONNECTORS_LIST_TOOL, isMcpTool, isMcpConnectorRecord, mcpConnectorTools, mcpConnectorInvoker, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
 import { PREFERENCES_TOOLS, PREFERENCES_ACTS, PREFERENCES_GET, preferencesInvoker } from './preferences-tools.js';
@@ -508,6 +508,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   ...SECURITY_ACT_TOOLS,
   // Spec 412 W5 — her Library, written by her agent: save / visibility / publish, self-acting (her own records).
   ...LIBRARY_TOOLS.filter((t) => LIBRARY_ACTS.has(t.id)),
+  // Slice S4 — a read grant from her Library, issued / revoked: CONSEQUENTIAL, so under her mandate (never self-acting).
+  ...LIBRARY_TOOLS.filter((t) => LIBRARY_GRANT_ACTS.has(t.id)),
   // Spec 402 W3 — a routine of the person's own, from a sentence: declare / remove, self-acting (her own clock).
   ...ROUTINE_TOOLS.filter((t) => ROUTINE_ACTS.has(t.id)),
   // Spec 403 W2/W4 — her preferences (how her agent answers and reaches her), self-acting.
@@ -1411,6 +1413,9 @@ export function harnessReconcilePort(deps: HarnessDeps, env: HarnessEnv, present
  * delegator's signature through the UniversalSignatureValidator (ERC-1271 / 6492) — the same reads the mandate verifier
  * below makes. No validator configured ⇒ no signature verifies ⇒ every grant is refused (fail closed).
  */
+/** ERC-1271 `isValidSignature(bytes32,bytes)` — asked with the 0x03 sentinel: did the account APPROVE this digest? */
+const ERC1271_IS_VALID_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }] as const;
+
 function libraryGrantChecks(env: HarnessEnv, deps: Pick<HarnessDeps, 'readContract'>): LibraryGrantChecks {
   const chainId = Number(env.CHAIN_ID);
   const dm = env.DELEGATION_MANAGER as Address;
@@ -1965,27 +1970,39 @@ export function accessRevokeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
     const grant = found.wire as unknown as { delegator: string; delegate: string; authority: string; caveats: Array<{ enforcer: string; terms: string; args?: string }>; salt: string; signature: string };
     if (grant.delegator.toLowerCase() !== holder) throw new Error('that grant was issued by someone else — it is not yours to revoke');
 
-    const inner = encodeFunctionData({
-      abi: REVOKE_BY_OWNER_ABI, functionName: 'revokeDelegationByOwner',
-      args: [{
-        delegator: grant.delegator as Address, delegate: grant.delegate as Address, authority: grant.authority as Hex,
-        caveats: grant.caveats.map((c) => ({ enforcer: c.enforcer as Address, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex })),
-        salt: BigInt(grant.salt), signature: grant.signature as Hex,
-      }],
-    });
-    const dm = env.DELEGATION_MANAGER as Address;
-    const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
-    const digest = intentDigest(ctx.intent);
-    const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
-      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, ctx.step.idempotencyKey ?? ctx.step.id ?? `s${ctx.index}`, ctx.planDigest as Hex | undefined, contractsGenerationOf({ contractsGeneration: env.CONTRACTS_GENERATION }))) }
-      : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
-    // The person's own SA makes the call (the DelegationManager only lets the owner revoke), reached by
-    // redeeming their mandate — the same shape a payment uses, with the target being the manager itself.
-    const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], dm, 0n, inner] });
-    const callData = encodeFunctionData({ abi: EXECUTE_ABI, functionName: 'execute', args: [dm, 0n, redeem] });
-    const { txHash } = await deps.executeAsServiceSa(serviceSa, callData);
+    const { txHash } = await revokeByOwnerUnderMandate(deps, env, presented, grant, args, ctx);
     return { revoked: true, app, grantHash: found.hash, txHash, holder };
   };
+}
+
+/**
+ * REVOKE ONE DELEGATION ON CHAIN AS ITS OWNER (`DelegationManager.revokeDelegationByOwner`, the full struct): the owner's
+ * own SA makes the call (the manager lets only the delegator revoke), reached by REDEEMING the owner's mandate — the same
+ * shape a payment uses, with the target being the manager itself. Shared by access.grant.revoke and library.grant.revoke.
+ */
+export async function revokeByOwnerUnderMandate(
+  deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation,
+  grant: { delegator: string; delegate: string; authority: string; caveats: Array<{ enforcer: string; terms: string; args?: string }>; salt: string; signature: string },
+  args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2],
+): Promise<{ txHash: string }> {
+  const wire = presented.wire as Delegation;
+  const inner = encodeFunctionData({
+    abi: REVOKE_BY_OWNER_ABI, functionName: 'revokeDelegationByOwner',
+    args: [{
+      delegator: grant.delegator as Address, delegate: grant.delegate as Address, authority: grant.authority as Hex,
+      caveats: grant.caveats.map((c) => ({ enforcer: c.enforcer as Address, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex })),
+      salt: BigInt(grant.salt), signature: grant.signature as Hex,
+    }],
+  });
+  const dm = env.DELEGATION_MANAGER as Address;
+  const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
+  const digest = intentDigest(ctx.intent);
+  const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
+    ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, ctx.step.idempotencyKey ?? ctx.step.id ?? `s${ctx.index}`, ctx.planDigest as Hex | undefined, contractsGenerationOf({ contractsGeneration: env.CONTRACTS_GENERATION }))) }
+    : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
+  const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], dm, 0n, inner] });
+  const callData = encodeFunctionData({ abi: EXECUTE_ABI, functionName: 'execute', args: [dm, 0n, redeem] });
+  return deps.executeAsServiceSa(serviceSa, callData);
 }
 
 /**
@@ -2368,7 +2385,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (canonicalCapabilityId(toolId) !== toolId) { args = canonicalArgs(toolId, args); toolId = canonicalCapabilityId(toolId); }
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || BUILD_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || MAIL_DRIVE_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === MEMBER_ROLE_SET_CAPABILITY || toolId === CREDENTIAL_ISSUE_CAPABILITY || toolId === FRIEND_ADD_TOOL.id || toolId === FRIEND_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || BUILD_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || MAIL_DRIVE_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === MEMBER_ROLE_SET_CAPABILITY || toolId === CREDENTIAL_ISSUE_CAPABILITY || toolId === FRIEND_ADD_TOOL.id || toolId === FRIEND_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY || LIBRARY_GRANT_ACTS.has(toolId))) throw new Error(`${toolId} requires a mandate and none was presented`);
     if (toolId === ASK_CLARIFY_TOOL.id) {
       const ids = Array.isArray(args.options) ? (args.options as unknown[]).map(String).slice(0, 2) : [];
       const purposes = Array.isArray(args.purposes) ? (args.purposes as unknown[]).map(String) : [];
@@ -2489,7 +2506,20 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // The publisher contract, read by the owner's own agent over the whole Library (the private lane): the reader's
     // workspace asks it as the person for her marks at a verse; a stranger gets the public lane at the A2A door instead.
     if (PUBLISHER_TOOLS.some((t) => t.id === toolId)) { if (!deps.readSubjectRecord) throw new Error('the private tier is not configured'); return publisherRead({ readSubjectRecord: deps.readSubjectRecord }, (addressee ?? person) as string, 'private', toolId, args); }
-    if (LIBRARY_TOOLS.some((t) => t.id === toolId)) { if (!deps.readSubjectRecord) throw new Error('the private tier is not configured'); return libraryInvoker({ readSubjectRecord: deps.readSubjectRecord, ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}), ...(deps.signAsAgent ? { signAsOwner: deps.signAsAgent } : {}), ...(deps.announceShelf ? { announce: deps.announceShelf } : {}), ...(deps.holdCatalog ? { holdCatalog: deps.holdCatalog } : {}), grantChecks: libraryGrantChecks(env, deps), stewardOf: (who, owner) => stewardshipOver({ readSubjectRecord: deps.readSubjectRecord!, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}) }, who, owner) }, addressee, person)(toolId, args, ctx); }
+    if (LIBRARY_TOOLS.some((t) => t.id === toolId)) {
+      if (!deps.readSubjectRecord) throw new Error('the private tier is not configured');
+      // Slice S4 — the grant acts carry the presented mandate (whose, and when its window opens: the grant is derived from
+      // it), the one-prompt approval read on the owner's account, and the on-chain revoke under that mandate. The release
+      // signer (`signAsOwner`, the session leaf) is NEVER used for a grant — see library-tools' S4 note.
+      const grantAct = LIBRARY_GRANT_ACTS.has(toolId) && presented ? presented : null;
+      const ts = grantAct ? (grantAct.wire as Delegation).caveats.find((c) => c.enforcer.toLowerCase() === harnessEnforcers(env).timestamp.toLowerCase()) : undefined;
+      return libraryInvoker({
+        readSubjectRecord: deps.readSubjectRecord, ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}), ...(deps.signAsAgent ? { signAsOwner: deps.signAsAgent } : {}), ...(deps.announceShelf ? { announce: deps.announceShelf } : {}), ...(deps.holdCatalog ? { holdCatalog: deps.holdCatalog } : {}), grantChecks: libraryGrantChecks(env, deps), stewardOf: (who, owner) => stewardshipOver({ readSubjectRecord: deps.readSubjectRecord!, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}) }, who, owner),
+        ...(grantAct && ts ? { mandate: { delegator: (grantAct.wire as Delegation).delegator, validAfter: Number(decodeTimestampTerms(ts.terms as Hex).validAfter) } } : {}),
+        approvedHash: (owner, digest) => verifyAllowingSettle(async () => (await deps.readContract({ address: owner as Address, abi: ERC1271_IS_VALID_ABI, functionName: 'isValidSignature', args: [digest, '0x03'] }).catch(() => null)) === '0x1626ba7e', '0x03'),
+        ...(grantAct ? { revokeOnChain: (grant: LibraryGrantWire, a: Record<string, unknown>, c: Parameters<ToolInvoker>[2]) => revokeByOwnerUnderMandate(deps, env, grantAct, grant, a, c) } : {}),
+      }, addressee, person)(toolId, args, ctx);
+    }
     if (isMcpTool(toolId) || toolId === MCP_CONNECTORS_LIST) return mcpConnectorInvoker({ env: env as never, readConnectors: (h) => mcpConnectorsOf(deps, h), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
     if (BUILD_TOOLS.some((t) => t.id === toolId)) return buildInvoker({ env: env as never, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}), ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}), ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
     if (GITHUB_TOOLS.some((t) => t.id === toolId)) return githubInvoker({ env: env as unknown as Record<string, unknown>, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
@@ -2933,6 +2963,8 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'build.run': 'run a build task for the workspace in a sandbox',
   'build.promote': 'promote a build — merge its pull request under a signature over the exact commit',
   'access.grant.revoke': 'revoke an app\'s access on chain',
+  [LIBRARY_GRANT_ISSUE]: 'grant another agent a read of your Library',
+  [LIBRARY_GRANT_REVOKE]: 'revoke a read grant on your Library',
   'profile.contact.update': 'change your own contact details',
   'household.member.record': 'record who is in your household',
 };
@@ -3221,6 +3253,10 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   // calldata. The caveat bounds the contract; the invoker bounds the grant to one the person issued.
   'access.grant.revoke': 'manager',
   'person.friend.remove': 'manager',
+  // Slice S4 — a Library grant's mandate is bounded by WHO is granted the read (the grant names the documents); its revoke
+  // is a call to the DelegationManager, exactly as access.grant.revoke's.
+  [LIBRARY_GRANT_ISSUE]: 'delegate',
+  [LIBRARY_GRANT_REVOKE]: 'manager',
   'profile.contact.update': 'record',
   'household.member.record': 'record',
 };
@@ -4219,7 +4255,11 @@ export async function resolveStepArgs(
     out.record = String(env.AGENT_RELATIONSHIP).toLowerCase();
   }
 
-  if ((where?.capabilityId === ACCESS_REVOKE_CAPABILITY || where?.capabilityId === FRIEND_REMOVE_TOOL.id) && env.DELEGATION_MANAGER) {
+  // Slice S4 — WHOSE grant: the Library is the ADDRESSEE's, so a grant from it (or its revoke) is the addressee's act and
+  // its mandate the addressee's — the person for her own Library, the publisher service for its own. Never filled from the
+  // acting-party default (which can fall to the person asking) and never from the planner's words.
+  if ((where?.capabilityId === LIBRARY_GRANT_ISSUE || where?.capabilityId === LIBRARY_GRANT_REVOKE) && where.addressee) out.holder = where.addressee.toLowerCase();
+  if ((where?.capabilityId === ACCESS_REVOKE_CAPABILITY || where?.capabilityId === FRIEND_REMOVE_TOOL.id || where?.capabilityId === LIBRARY_GRANT_REVOKE) && env.DELEGATION_MANAGER) {
     // Spec 401 §10 — removing a friend IS a revocation: the call's target is the DelegationManager; WHICH grant travels in
     // the calldata (the friend names it), so the caveat bounds the contract, never the friend.
     out.manager = String(env.DELEGATION_MANAGER).toLowerCase();
@@ -4413,6 +4453,18 @@ async function askReplyForInner(env: HarnessEnv, input: {
         requirement.validAfter ??= Math.floor(Date.now() / 1000) - 60;
         const g = friendGrantFor({ env, enforcers: harnessEnforcers(env), vaultServerId: vaultServerId(env) }, person as Address, friend as Address, { intentDigest: requirement.intentDigest, validAfter: requirement.validAfter }, r.required.stepRef);
         alsoApprove.push({ purpose: `your friendship grant ${person.slice(0, 10)}… → ${friend.slice(0, 10)}… (they may see your profile)`, digest: g.digest });
+      }
+    }
+    // Slice S4 — the same for a Library read grant: owner → delegate, approved in the mandate's own prompt, so the step
+    // that acts finds it already approved (0x03) and records it. Only when the args make a grant at all; a refusal waits
+    // for the step (and the precondition above has already refused what it could see).
+    if (r.required.capability.id === LIBRARY_GRANT_ISSUE) {
+      const owner = String(input.addressee ?? '').toLowerCase();
+      const plan = /^0x[0-9a-f]{40}$/.test(owner) ? libraryGrantPlan(owner, args) : { refused: 'no owner' };
+      if (!('refused' in plan)) {
+        requirement.validAfter ??= Math.floor(Date.now() / 1000) - 60;
+        const g = libraryGrantFor(libraryGrantChecks(env, { readContract: async () => null }), owner, plan, { intentDigest: requirement.intentDigest, validAfter: requirement.validAfter }, r.required.stepRef);
+        alsoApprove.push({ purpose: `your read grant ${owner.slice(0, 10)}… → ${plan.delegate.slice(0, 10)}… (it may read ${'id' in plan.scope ? `the document ${plan.scope.id}` : `everything under ${plan.scope.folder}/`} until ${new Date(g.validUntil * 1000).toISOString().slice(0, 10)})`, digest: g.digest });
       }
     }
     if (r.required.capability.id === ORG_INVITE_CAPABILITY) {
@@ -4813,6 +4865,8 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'resolution.invitation.request': ['signature'],   // the mandate — asking is an act of yours too
   'treasury.primary.declare': ['signature'],        // the mandate — a public statement of yours
   'access.grant.revoke': ['signature'],             // the mandate — taking authority back is an act too
+  [LIBRARY_GRANT_ISSUE]: ['signature'],              // slice S4 — the owner's mandate, and the owner's signature on the grant
+  [LIBRARY_GRANT_REVOKE]: ['signature'],             // slice S4 — the owner's mandate for the on-chain revoke
   'person.credential.add': ['signature'],          // spec 422 — a credential that signs for her is added under one that already does; a surface that cannot sign cannot add
   'organization.membership.accept': ['signature'], // spec 421 — joining SIGNS her membership (at her Home, the Join ceremony); a surface that cannot sign cannot join
 };
@@ -4839,6 +4893,8 @@ const ONCHAIN_CALLS_FOR: Record<string, readonly Hex[]> = {
   [ACCESS_REVOKE_CAPABILITY]: [methodSelectorOf('revokeDelegationByOwner((address,address,bytes32,(address,bytes,bytes)[],uint256,bytes))')],
   // Spec 401 §10 — removing a friend IS that same revocation, of the grant the person gave the friend.
   [FRIEND_REMOVE_TOOL.id]: [methodSelectorOf('revokeDelegationByOwner((address,address,bytes32,(address,bytes,bytes)[],uint256,bytes))')],
+  // Slice S4 — revoking a Library read grant is that same revocation, of the grant the Library's owner signed.
+  [LIBRARY_GRANT_REVOKE]: [methodSelectorOf('revokeDelegationByOwner((address,address,bytes32,(address,bytes,bytes)[],uint256,bytes))')],
 };
 
 /** Ceremonies every surface is assumed to render: it is a conversation, so it can ask and be answered. */
@@ -5973,7 +6029,10 @@ step is then handed to that agent under authority the person grants; leave it ou
     // Spec 405 — the addressee's own Library, read as evidence, wherever the playbook carries the contracts.
     // The W5 acts (save / visibility / publish) are ACTION tools above — listed here too they reached the planner twice,
     // and Gemini refused the whole offer ("Duplicate function declaration found: library_file_save", live 2026-09-21).
-    ...(deps.readSubjectRecord ? LIBRARY_TOOLS.filter((t) => !LIBRARY_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])) : []),
+    ...(deps.readSubjectRecord ? LIBRARY_TOOLS.filter((t) => !LIBRARY_ACTS.has(t.id) && !LIBRARY_GRANT_ACTS.has(t.id) && t.id !== LIBRARY_GRANTS_LIST).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])) : []),
+    // Slice S4 — the grants a Library issued, read by its owner (or a steward): offered wherever the private tier is, because
+    // the app that asked for a grant reads it back from here once the owner approved at Home (no playbook names it yet).
+    ...(deps.readSubjectRecord ? LIBRARY_TOOLS.filter((t) => t.id === LIBRARY_GRANTS_LIST).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     // Spec 403 W3 — a web search as evidence, wherever the playbook carries the contract.
     ...WEB_SEARCH_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     // The person's own reads, under their CONTRACTS when the playbook carries them (the result app a contract names
