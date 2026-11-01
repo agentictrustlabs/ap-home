@@ -208,6 +208,16 @@ write goes to the vault, which guards it. All catalog writes, edits and switch a
 - `record.put` drops the held copy of a Library record it writes. It bypassed `writeDoc`, so the runtime's next read
   got a copy up to a minute old.
 
+**Read grants (S4) are catalog writes too.** `library.grant.issue` and `library.grant.revoke` record on a catalog entry's
+`grants[]`. For a paged owner they take the same one-page edit, by id, under the lease:
+
+- **Issue on a document:** reads the root and that document's page.
+- **Issue on a folder:** writes the root alone; a new folder entry is appended to the root bucket.
+- **Revoke:** finds the grant page by page.
+
+A legacy owner is written as before, and a side-by-side test holds the two equal. The other S2/S4/S5 readers
+(`library.grants.list`, `library.granted.read`, the grant preconditions) read the whole list through the seam.
+
 **The runtime save** (`library-paged.ts`) reads the root and the document's page through `catalogStore`, which bypasses
 the run's memo. It runs the same pure rules, writes the document's record, and then calls `catalogEdit`. A differential
 test runs ten acts on both the paged and the whole-list path, and the answers, the index and every artifact record come
