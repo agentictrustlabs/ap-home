@@ -32,7 +32,7 @@ import { selectVaultKeyProvider, akcsVaultKeyRef, AKCS_KEY_REF_PREFIX } from '@a
 import { agenticKmsConfig, isAgenticKms, type AkcsEnv } from './akcs.js';
 import { cachingDekWrapper } from './dek-cache';
 import { canonicalize, sha256Hex, type Sha256 } from '@agenticprimitives/key-authorization';
-import { createDemoVault } from './vault.js';
+import { createDemoVault, type DemoVault } from './vault.js';
 import { getVaultKeyBindingRow, putVaultKeyBindingRow, type VaultKeyBindingRow } from './db.js';
 // The UniversalSignatureValidator ABI lives in `chain-state-viem` — ONE declaration, so a
 // signature check here cannot drift from the one the authority reader makes.
@@ -128,7 +128,7 @@ function bindingFromRow(row: VaultKeyBindingRow): VaultKeyBindingV1 {
 export interface PersonVault {
   binding: VaultKeyBindingV1;
   authorization: Delegation;
-  vault: Vault;
+  vault: DemoVault;
 }
 
 // Delegation `salt` is a bigint, which JSON can't represent — it travels + persists as a

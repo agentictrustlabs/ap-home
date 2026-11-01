@@ -17,6 +17,7 @@ import { delegationOfWire, type DelegationWireLike, type SkillHandler } from '@a
 import { keccak256, toBytes, type Hex } from 'viem';
 import { requirePersonsTurn } from './persons-turn.js';
 import { ADAPTER } from './adapter-declarations.js';
+import { libraryWritePaged, pagedRootOf, PAGED_CATALOG_MAX, type CatalogStore } from './library-paged.js';
 
 export const LIBRARY_FILES_LIST = 'library.files.list' as const;
 export const LIBRARY_FILE_READ = 'library.file.read' as const;
@@ -204,6 +205,12 @@ export interface LibraryToolDeps {
   /** Slice S5 — SEND a granted read to the publisher's agent AS `sender` (the A2A delegated-task rail, signed under the
    *  sender's own signing wire) and collect the publisher's artifact. Absent ⇒ library.granted.fetch is refused. */
   fetchGranted?: GrantedReadSender;
+  /** The same read as `readSubjectRecord`, with whether it WORKED: a save refuses to write an index it could not read
+   *  (a failed read is not an empty Library). Absent ⇒ the bare read, as before. */
+  readSubjectRecordStatus?: (subject: string, recordType: string) => Promise<{ ok: boolean; data: unknown; error?: string }>;
+  /** The PAGED index (catalog-pages.ts, library-paged.ts): a save of a paged owner reads the root and one page and edits
+   *  that page. Absent ⇒ a paged owner is saved through the whole list, which the owner's DO pages on write. */
+  catalogStore?: CatalogStore;
 }
 
 /** Slice S5 — what the outbound rail answers for one granted read: the publisher's artifact body, or why there is none. */
@@ -236,12 +243,12 @@ const isText = (e: LibraryEntry): boolean => TEXT_KINDS.has(e.kind) || /^text\/|
 const decode = (b64: string): string => { try { return new TextDecoder('utf-8', { fatal: false }).decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), (c) => c.charCodeAt(0))); } catch { return ''; } };
 /** A Library body's text, as the reads decode it (shared with the publisher contract's index). */
 export const decodeLibraryText = decode;
-const pathOf = (e: LibraryEntry): string => (e.folder ? `${e.folder}/${e.name}` : e.name);
+export const pathOf = (e: LibraryEntry): string => (e.folder ? `${e.folder}/${e.name}` : e.name);
 // The owner's view of an entry: never the body; the declared policy, the commitment and the release chain (ids,
 // versions, signed-or-not) ride along so an app acting as the owner can verify what it saved without a second read.
 const view = (e: LibraryEntry) => ({ id: e.id, name: e.name, kind: e.kind, folder: e.folder ?? '', path: pathOf(e), contentType: e.contentType ?? null, size: e.size ?? null, version: e.version ?? null, ...(e.createdAt ? { createdAt: new Date(e.createdAt).toISOString() } : {}), text: isText(e), accessPolicy: e.accessPolicy ?? null, commitment: e.contentCommitment ?? e.commitment ?? null, releases: (e.releases ?? []).map((r) => ({ releaseId: r.releaseId, version: r.version, signed: r.signed, ...(r.signature ? { signature: r.signature } : {}), owner: r.owner, publisher: r.publisher, canonicalId: r.canonicalId, bundleRoot: r.bundleRoot, riskTier: r.riskTier, publishedAt: r.publishedAt })) });
 
-const isEntry = (e: unknown): e is LibraryEntry => !!e && typeof e === 'object' && typeof (e as LibraryEntry).id === 'string' && typeof (e as LibraryEntry).name === 'string';
+export const isEntry = (e: unknown): e is LibraryEntry => !!e && typeof e === 'object' && typeof (e as LibraryEntry).id === 'string' && typeof (e as LibraryEntry).name === 'string';
 
 /** The whole catalog (folders included), as the Home wrote it. */
 export async function rawCatalogOf(deps: LibraryToolDeps, owner: string): Promise<LibraryEntry[]> {
@@ -339,9 +346,9 @@ export function findEntries(entries: LibraryEntry[], q: { id?: string; name?: st
 }
 
 // ── the writes ─────────────────────────────────────────────────────────────────────────────────────────────────────
-const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/i;
+export const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/i;
 const KINDS = new Set(['skill', 'ttl', 'md', 'json-ld', 'image']);
-const PUBLISHABLE = new Set(['skill', 'md', 'json-ld']);
+export const PUBLISHABLE = new Set(['skill', 'md', 'json-ld']);
 /**
  * HOW MANY DOCUMENTS A PERSON'S LIBRARY INDEXES. Was 200 with a bare `.slice(0, CATALOG_MAX)` on every write: a save
  * past it was answered `saved` and then cut off the index, so the next step naming it found "no document named …"
@@ -350,7 +357,7 @@ const PUBLISHABLE = new Set(['skill', 'md', 'json-ld']);
  * carries bytes inline for a person, so a very full Library can also meet the record's size ceiling; that write then
  * fails loudly too (writeSubjectRecord answers not ok).
  */
-export const CATALOG_MAX = 2000;
+export const CATALOG_MAX = 3000;
 const BYTES_MAX = 2_000_000;
 const defaultMime = (kind: string): string => ({ skill: 'text/markdown', md: 'text/markdown', ttl: 'text/turtle', 'json-ld': 'application/ld+json', image: 'image/png' } as Record<string, string>)[kind] ?? 'application/octet-stream';
 const encodeText = (s: string): string => btoa(unescape(encodeURIComponent(s)));
@@ -410,12 +417,12 @@ export function releaseCore(art: LibraryEntry, list: LibraryEntry[], owner: stri
   return { canonicalId, version, bundleRoot, owner, publisher: owner, riskTier: 'low', releaseId };
 }
 
-const catalogView = (e: LibraryEntry) => ({ ...view(e), isFolder: e.isFolder === true });
+export const catalogView = (e: LibraryEntry) => ({ ...view(e), isFolder: e.isFolder === true });
 
 /** The three writes, as the owner. `person` is the run's principal; the addressee must be that same agent. */
 /** Spec 413 — the hint after an act, for the document (or, for a folder, every document under it, bounded). NEVER fatal:
  *  the act happened; a lost hint costs the public tier's freshness, never the owner's record or her privacy. */
-const ANNOUNCE_MAX = 50;
+export const ANNOUNCE_MAX = 50;
 async function announceAfter(deps: LibraryToolDeps, owner: string, entry: LibraryEntry, list: LibraryEntry[]): Promise<void> {
   if (!deps.announce) return;
   const ids = entry.isFolder ? list.filter((e) => !e.isFolder && ((e.folder ?? '') === pathOf(entry) || (e.folder ?? '').startsWith(`${pathOf(entry)}/`))).map((e) => e.id).slice(0, ANNOUNCE_MAX) : [entry.id];
@@ -423,7 +430,7 @@ async function announceAfter(deps: LibraryToolDeps, owner: string, entry: Librar
 }
 
 /** How many document records a migrating save writes at once. */
-const RECORD_WRITE_CONCURRENCY = 8;
+export const RECORD_WRITE_CONCURRENCY = 8;
 
 /** The catalog as written: every entry without its inline bytes (size and commitment stay). */
 export const indexOnly = (list: LibraryEntry[]): LibraryEntry[] =>
@@ -438,17 +445,27 @@ export async function libraryWrite(deps: LibraryToolDeps, owner: string, toolId:
   }
 }
 
+/** The record a document's bytes live in (`content.artifact.<id>`), as the index entry describes it. */
+export const recordOf = (e: LibraryEntry) => ({ id: e.id, kind: e.kind, name: e.name, source: e.source, contentType: e.contentType, bytesB64: e.bytesB64, commitment: e.contentCommitment, version: e.version, ...(e.accessPolicy ? { accessPolicy: e.accessPolicy } : {}) });
+
 async function libraryWriteHeld(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], person?: string): Promise<Record<string, unknown>> {
   if (!deps.writeSubjectRecord) throw new Error('this agent cannot write its Library (the private tier is not configured)');
+  // A PAGED owner (catalog-pages.ts) is saved one page at a time; everyone else exactly as before.
+  const paged = await pagedRootOf(deps, owner);
+  if (paged && deps.catalogStore) return libraryWritePaged(deps, owner, toolId, args, ctx, paged, person);
+  const CATALOG_CAP = paged ? PAGED_CATALOG_MAX : CATALOG_MAX;
+  if (deps.readSubjectRecordStatus) {
+    const read = await deps.readSubjectRecordStatus(owner, 'content.catalog');
+    if (!read.ok) throw new Error(`the Library index could not be read (${read.error ?? 'the read failed'}) — nothing was saved; try again`);
+  }
   const list = await rawCatalogOf(deps, owner);
   // THE INDEX IS AN INDEX (the Home's rule, server/connect/library.ts `persistIndexOnly`): a document's bytes live in
   // its own record, `content.artifact.<id>`, and the catalog carries only what a listing needs. This writer used to put
   // every document's bytes back into the catalog, so each read and save of ANY document moved the whole Library through
   // the vault (seconds, growing with the Library). Records first, strictly — the saved document's, and any older entry
   // still carrying its bytes inline (a catalog from before the rule migrates on its next save) — then the index.
-  const recordOf = (e: LibraryEntry) => ({ id: e.id, kind: e.kind, name: e.name, source: e.source, contentType: e.contentType, bytesB64: e.bytesB64, commitment: e.contentCommitment, version: e.version, ...(e.accessPolicy ? { accessPolicy: e.accessPolicy } : {}) });
   const write = async (next: LibraryEntry[], entry?: LibraryEntry, opts: { resave?: boolean } = {}) => {
-    if (next.length > CATALOG_MAX) throw new Error(`your Library holds ${list.length} documents, the most it indexes (${CATALOG_MAX}) — remove some before saving more`);
+    if (next.length > CATALOG_CAP) throw new Error(`your Library holds ${list.length} documents, the most it indexes (${CATALOG_CAP}) — remove some before saving more`);
     const carrying = next.filter((e) => !e.isFolder && (e === entry || typeof e.bytesB64 === 'string'));
     // A RE-SAVE of a document the index already names, with nothing older to migrate, writes its record and the index
     // side by side: if the record is refused the index's newer version reads as the previous text (never as nothing),
@@ -493,7 +510,10 @@ async function libraryWriteHeld(deps: LibraryToolDeps, owner: string, toolId: st
     requirePersonsTurn({ ctx, toolId, what: `make ${String(args.name ?? args.id ?? 'a document')} ${policy}` });
     const entry = find();
     entry.accessPolicy = policy;
-    await write(list, entry);
+    // The document's RECORD is written only when the entry still carries its bytes inline (a catalog from before the
+    // index-only rule). An index entry has none, and `recordOf(entry)` written over `content.artifact.<id>` erased the body
+    // the record held: making a document public or private lost its text.
+    await write(list, typeof entry.bytesB64 === 'string' ? entry : undefined);
     await announceAfter(deps, owner, entry, list);
     return { declared: true, owner, file: catalogView(entry), effectiveAccessPolicy: effectiveAccessPolicy(list, entry), answer: `${pathOf(entry)} is now ${policy}${entry.isFolder ? ' — and so is everything under it that says nothing else' : ''}.` };
   }
@@ -943,10 +963,10 @@ const wireOf = (d: Delegation): LibraryGrantWire => ({
   salt: d.salt.toString(), signature: d.signature,
 });
 
-const isGrantRecord = (g: unknown): g is LibraryGrantRecordV1 => !!g && typeof g === 'object' && (g as LibraryGrantRecordV1).type === LIBRARY_GRANT_RECORD && typeof (g as LibraryGrantRecordV1).delegationHash === 'string';
+export const isGrantRecord = (g: unknown): g is LibraryGrantRecordV1 => !!g && typeof g === 'object' && (g as LibraryGrantRecordV1).type === LIBRARY_GRANT_RECORD && typeof (g as LibraryGrantRecordV1).delegationHash === 'string';
 const scopeWords = (r: Pick<LibraryGrantRecordV1, 'scope'>): string => ('id' in r.scope ? `document ${r.scope.id}` : `everything under ${r.scope.folder}/`);
 
-async function issueLibraryGrant(deps: LibraryToolDeps, owner: string, list: LibraryEntry[], args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], person: string | undefined, write: () => Promise<void>): Promise<Record<string, unknown>> {
+export async function issueLibraryGrant(deps: LibraryToolDeps, owner: string, list: LibraryEntry[], args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], person: string | undefined, write: () => Promise<void>): Promise<Record<string, unknown>> {
   const refuse = (why: string) => ({ issued: false, owner, refused: why, answer: `No grant was issued: ${why}.` });
   const checks = deps.grantChecks;
   if (!checks) return refuse('this agent cannot sign or verify a grant here (no chain checks are configured)');
@@ -1036,7 +1056,7 @@ export async function listLibraryGrants(deps: LibraryToolDeps, owner: string, ar
   };
 }
 
-async function revokeLibraryGrant(deps: LibraryToolDeps, owner: string, list: LibraryEntry[], args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], person: string | undefined, write: () => Promise<void>): Promise<Record<string, unknown>> {
+export async function revokeLibraryGrant(deps: LibraryToolDeps, owner: string, list: LibraryEntry[], args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2], person: string | undefined, write: () => Promise<void>): Promise<Record<string, unknown>> {
   const refuse = (why: string) => ({ revoked: false, owner, refused: why, answer: `Nothing was revoked: ${why}.` });
   const hash = String(args.delegationHash ?? '').trim().toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(hash)) return refuse(`a grant is named by its digest (0x and 64 hex, from library.grants.list) — "${String(args.delegationHash ?? '')}" is not one`);

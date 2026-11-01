@@ -30,6 +30,12 @@ import {
   tombstoneVaultObjectRow,
   listVaultObjectRows,
   queryVaultObjectRows,
+  getVaultObjectRowAny,
+  putVaultObjectRowGuarded,
+  liveVaultResources,
+  liveVaultResourcesWithPrefix,
+  revToken,
+  type VaultObjectRow,
 } from './db.js';
 
 export const RESOURCE_PROFILE = 'profile';
@@ -66,21 +72,68 @@ function b64decode(s: string): Uint8Array {
 // Vault is built per-person from that person's KEK via `resolvePersonVault`
 // (src/vault-key.ts), which calls `createDemoVault(db, perPersonWrapper)` below.
 
+/** A record as stored, for the paged Library index: decrypted, never assembled; `rev` is `revToken` (-2 deleted). */
+export interface StoredVaultRecord { data: unknown; rev: number; deleted: boolean }
+/** What the paged Library index needs of the store beyond the `Vault` interface: versions, and writes guarded by them. */
+export interface CatalogVaultExt {
+  readStored(owner: string, resource: string): Promise<StoredVaultRecord | null>;
+  /** Seal and write only if `expectRev` / `guard` hold (one atomic statement); else VaultRevConflictError. */
+  writeGuarded(owner: string, resource: string, data: unknown, cond: { expectRev?: number; guard?: { resource: string; rev: number }; requireLive?: readonly string[] }): Promise<void>;
+  live(owner: string, resources: readonly string[]): Promise<Set<string>>;
+  tombstone(owner: string, resource: string): Promise<void>;
+  /** The record's version (`revToken`) without opening it. */
+  revOf(owner: string, resource: string): Promise<number>;
+  /** Live resources starting with `prefix`, with when each was last written. */
+  livePrefix(owner: string, prefix: string): Promise<Array<{ resource: string; updated_at: string }>>;
+}
+export type DemoVault = Vault & CatalogVaultExt;
+
 /** The encrypted adapter (wrapper injected — testable + KMS-swappable). */
-export function createDemoVault(db: D1Database, wrapper: DekWrapper): Vault {
-  async function seal(owner: string, resource: string, classification: VaultClassification, data: unknown): Promise<void> {
+export function createDemoVault(db: D1Database, wrapper: DekWrapper): DemoVault {
+  async function sealRow(owner: string, resource: string, classification: VaultClassification, data: unknown) {
     const sealed = await sealEnvelope({ owner, resource, classification, data, wrapper });
-    await putVaultObjectRow(db, {
+    return {
       owner_address: owner,
       resource,
       classification,
       ciphertext_b64: b64encode(sealed.ciphertext),
       wrapped_dek_b64: b64encode(sealed.wrappedDek),
       crypto_meta: JSON.stringify(sealed.envelope.crypto),
+    };
+  }
+  async function seal(owner: string, resource: string, classification: VaultClassification, data: unknown): Promise<void> {
+    await putVaultObjectRow(db, await sealRow(owner, resource, classification, data));
+  }
+  async function open(row: VaultObjectRow): Promise<unknown> {
+    return openEnvelope<unknown>({
+      envelope: { owner: row.owner_address, resource: row.resource, classification: row.classification as VaultClassification, crypto: JSON.parse(row.crypto_meta) },
+      ciphertext: b64decode(row.ciphertext_b64),
+      wrappedDek: b64decode(row.wrapped_dek_b64),
+      wrapper,
     });
   }
 
   return {
+    async readStored(owner: string, resource: string): Promise<StoredVaultRecord | null> {
+      const row = await getVaultObjectRowAny(db, owner, resource);
+      if (!row) return null;
+      return row.deleted_at ? { data: null, rev: revToken(row), deleted: true } : { data: await open(row), rev: revToken(row), deleted: false };
+    },
+    async writeGuarded(owner: string, resource: string, data: unknown, cond: { expectRev?: number; guard?: { resource: string; rev: number }; requireLive?: readonly string[] }): Promise<void> {
+      await putVaultObjectRowGuarded(db, await sealRow(owner, resource, classificationFor(resource), data), cond);
+    },
+    async live(owner: string, resources: readonly string[]): Promise<Set<string>> {
+      return liveVaultResources(db, owner, resources);
+    },
+    async tombstone(owner: string, resource: string): Promise<void> {
+      await tombstoneVaultObjectRow(db, owner, resource);
+    },
+    async revOf(owner: string, resource: string): Promise<number> {
+      return revToken(await getVaultObjectRowAny(db, owner, resource));
+    },
+    async livePrefix(owner: string, prefix: string): Promise<Array<{ resource: string; updated_at: string }>> {
+      return liveVaultResourcesWithPrefix(db, owner, prefix);
+    },
     async read<T = unknown>(req: VaultReadRequest): Promise<VaultObject<T> | null> {
       const owner = req.owner;
       const row = await getVaultObjectRow(db, owner, req.resource);

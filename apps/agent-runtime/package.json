@@ -7,7 +7,7 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev --port 8787 --persist-to ../../.wrangler/state-a2a",
-    "deploy": "wrangler deploy",
+    "deploy": "tsx scripts/deploy.mts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },

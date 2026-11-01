@@ -17,6 +17,8 @@
 //   replay    = monotonic publishedAt per subject + tombstones honored by the gate.
 // The VAULT enforces scopes only — never membership (stated so nobody optimizes this gate away).
 // Audit: D1 (spec 322 §7), before commit.
+import { CATALOG_RECORD, compactCatalog, expandCatalog } from './catalog-codec.js';
+import { CATALOG_PAGE_COUNT, CATALOG_ROOT_RECORD, applyCatalogEdit, assembleCatalog, buildPagedCatalog, catalogDigest, compareCatalog, isPageMissing, isPagedCatalogRecord, newGeneration, pageHash, pageRecordOf, pageRows, pagesDigest, planPagedWrite, readCatalogPages, rootState, PAGE_READ_BATCH, type CatalogRoot, type PagedWrite, type StoredRecord } from './catalog-pages.js';
 import { CONTACT_FIELD_ARGS, contactField, precisionOf } from '@agenticprimitives/ontology';
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { chainFor, chainIdOf } from './chain';
@@ -529,13 +531,16 @@ const json = (b: unknown, s = 200): Response => new Response(JSON.stringify(b), 
  * injection point, not a bypass — there is no env flag that reaches it, deliberately, because a
  * runtime switch here would be a way to disable ERC-1271 verification in production.
  */
+/** The vault tools this object calls. `get_catalog_records` / `catalog_commit` are the paged Library index's own door. */
+export type VaultToolName = 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record' | 'get_catalog_records' | 'catalog_commit';
+
 export interface InteractionsDeps {
   /** ERC-1271 verification. Default: a chain read via `env.RPC_URL`. */
   erc1271?(account: Address, digest: Hex, signature: Hex): Promise<boolean>;
   /** One demo-mcp vault tool call. Default: bound-mint transport over `env.MCP_URL`. */
   vaultTool?(
     grant: IncomingDelegation,
-    toolName: 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record',
+    toolName: VaultToolName,
     toolArgs: Record<string, unknown>,
   ): Promise<Response>;
   /** Typed-name resolution for mentions (spec 400 W2). Default: the naming registry over `env.RPC_URL`. */
@@ -549,8 +554,19 @@ export interface InteractionsDeps {
 }
 
 /** The records `libraryDocs` keeps: the Library's index and its documents' records. */
-const LIBRARY_DOC = /^content\.(catalog|artifact\.[A-Za-z0-9_-]+)$/;
+const LIBRARY_DOC = /^content\.(catalog(\.root|\.p\d{1,2}(\.g[0-9a-z]+)?)?|artifact\.[A-Za-z0-9_-]+)$/;
 const LIBRARY_DOC_MS = 60_000;
+/** The holder of the catalog lease while a switch action runs (`internal.library.paged`). */
+const PAGED_MIGRATION_HOLDER = 'paged-catalog-switch';
+/** The most rows one page edit may name (a page at the paged cap holds ~312). */
+const CATALOG_EDIT_MAX_ROWS = 4096;
+/** A document's record bigger than this is not remembered: it is read once per act, and a minute of 1–2 MB bodies is what
+ *  filled the object (2026-10-28 — a publish saves three of them, a retry three more). The catalog is kept, compact. */
+const LIBRARY_DOC_KEEP_MAX = 256_000;
+const libraryDocSize = (data: unknown): number => {
+  const b = (data as { bytesB64?: unknown } | null)?.bytesB64;
+  return typeof b === 'string' ? b.length : 0;
+};
 
 export class InteractionsDO {
   constructor(private state: DurableObjectState, private env: Env, private deps?: InteractionsDeps) {}
@@ -922,7 +938,7 @@ export class InteractionsDO {
 
   private async mcpVaultTool(
     grant: IncomingDelegation,
-    toolName: 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record',
+    toolName: VaultToolName,
     toolArgs: Record<string, unknown>,
   ): Promise<Response> {
     if (this.deps?.vaultTool) return this.deps.vaultTool(grant, toolName, toolArgs);
@@ -1009,8 +1025,47 @@ export class InteractionsDO {
    * and a mismatched one is a loud error instead of a silent no-op.
    */
   private vaultFor(grant: IncomingDelegation): Vault {
-    const callTool = (toolName: 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record', toolArgs: Record<string, unknown>): Promise<Response> =>
+    const raw = this.vaultRaw(grant);
+    // THE LIBRARY INDEX'S SEAM (catalog-pages.ts). Every reader and writer of `content.catalog` in this object — the
+    // runtime's vaultRead/vaultWrite, the Home's record.* and content.*, the org reads — comes through here, so an owner
+    // whose catalog is PAGED is read and written as pages without any of them knowing. The page records themselves are
+    // written only by the catalog paths, never by a caller naming them.
+    return {
+      write: async ({ owner, resource, data }: { owner: string; resource: string; data: unknown; classification?: string }): Promise<void> => {
+        raw.assertOwner(owner);
+        if (resource === CATALOG_RECORD) return this.writeCatalog(raw, data);
+        if (isPagedCatalogRecord(resource)) throw new Error(`${resource} is part of the paged Library index — it is written only through content.catalog`);
+        return raw.writeOne(resource, data);
+      },
+      read: async <T>({ owner, resource }: { owner: string; resource: string }): Promise<{ data: T } | null> => {
+        raw.assertOwner(owner);
+        if (resource === CATALOG_RECORD) {
+          const data = await this.readCatalogRecords(raw, false);
+          return data === null || data === undefined ? null : { data: data as T };
+        }
+        return raw.readOne<T>(resource);
+      },
+      // spec 315 — enumerate the owner's OWN vault record types. demo-mcp's list_vault_record is
+      // record-scope-FILTERED to the interactions grant, so this returns ONLY the Home-managed records
+      // (app-specific records under other grants stay invisible — least-privilege). Bare record types.
+      async list(): Promise<Array<{ resource: string; updatedAt: string }>> {
+        const resp = await raw.callTool('list_vault_record', {});
+        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; records?: Array<{ record_type: string; updated_at: string }>; error?: string };
+        if (!resp.ok || out.ok === false) throw new Error(out.error ?? `vault list failed (${resp.status})`);
+        return (out.records ?? []).map((r) => ({ resource: r.record_type, updatedAt: r.updated_at }));
+      },
+    } as unknown as Vault;
+  }
+
+  /**
+   * ONE RECORD AT A TIME over the grant — the transport under `vaultFor`, with no Library seam: the catalog paths and the
+   * paged-index ops use it to reach the legacy record and the page records as they are stored. Reads of the index or a
+   * page come back plain (catalog-codec.ts); writes of them go compact.
+   */
+  private vaultRaw(grant: IncomingDelegation) {
+    const callTool = (toolName: VaultToolName, toolArgs: Record<string, unknown>): Promise<Response> =>
       this.mcpVaultTool(grant, toolName, toolArgs);
+    const isIndexData = (resource: string): boolean => resource === CATALOG_RECORD || (isPagedCatalogRecord(resource) && resource !== CATALOG_ROOT_RECORD);
     const assertOwner = (owner: string): void => {
       if (!owner) return; // the in-file convention: the grant names the owner
       if (owner.toLowerCase() !== grant.delegator.toLowerCase()) {
@@ -1020,59 +1075,369 @@ export class InteractionsDO {
         );
       }
     };
-    return {
-      async write({ owner, resource, data }: { owner: string; resource: string; data: unknown; classification?: string }): Promise<void> {
-        assertOwner(owner);
-        // A rate-limited write was rejected at verify time (never executed) — same bounded retry as reads.
-        for (let attempt = 0; attempt < 4; attempt++) {
-          const resp = await callTool('set_vault_record', { recordType: resource, data });
-          const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string; code?: string };
-          if (resp.ok && out.ok !== false) return;
+    const writeOne = async (resource: string, data: unknown, extra: Record<string, unknown> = {}): Promise<void> => {
+      // A rate-limited write was rejected at verify time (never executed) — same bounded retry as reads.
+      for (let attempt = 0; attempt < 4; attempt++) {
+        // THE LIBRARY INDEX GOES COMPACT (catalog-codec.ts): the shared signature wire once, not once per document —
+        // the record was 4.7 MB and sending it exhausted this object's memory on every Library save. Its pages too.
+        const resp = await callTool('set_vault_record', { recordType: resource, data: isIndexData(resource) ? compactCatalog(data) : data, ...extra });
+        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string; code?: string; detail?: string };
+        if (resp.ok && out.ok !== false) return;
+        if (isRetryableVaultToolFailure(resp.status, out)) {
+          if (attempt < 3) { await new Promise((r) => setTimeout(r, InteractionsDO.VAULT_THROTTLE_BACKOFF_MS * (attempt + 1))); continue; }
+          throw InteractionsDO.vaultThrottledError('write');
+        }
+        throw new Error([out.error ?? `vault write failed (${resp.status})`, out.detail].filter(Boolean).join(' — '));
+      }
+      throw InteractionsDO.vaultThrottledError('write');
+    };
+    const readOne = async <T>(resource: string): Promise<{ data: T } | null> => {
+      // BOUNDED RETRY (2026-07-11) — cold-cache first read; demo-mcp caches the deterministic vault-key
+      // verdict, so only the first op per isolate touches the chain. A real empty (`ok:true, record:null`)
+      // returns immediately — empty is an answer, an auth error is not (ADR-0013: retry the SAME call).
+      // NOTE: get_vault_record returns the payload under `data` (NOT `record`) — the field-name mismatch
+      // was THE "saved but reads back empty" bug.
+      let lastErr = 'vault read failed';
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const resp = await callTool('get_vault_record', { recordType: resource });
+        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; data?: T | null; error?: string; code?: string };
+        if (!resp.ok) {
+          // Transient throughput reject (stage-2 limiter) ⇒ back off + retry; never an auth verdict.
           if (isRetryableVaultToolFailure(resp.status, out)) {
             if (attempt < 3) { await new Promise((r) => setTimeout(r, InteractionsDO.VAULT_THROTTLE_BACKOFF_MS * (attempt + 1))); continue; }
-            throw InteractionsDO.vaultThrottledError('write');
+            throw InteractionsDO.vaultThrottledError('read');
           }
-          throw new Error(out.error ?? `vault write failed (${resp.status})`);
+          // demo-mcp returns `{ error, detail }` — and `detail` is the only thing that says WHY.
+          // Dropping it turned every server-side vault fault into the word "internal error", which
+          // is indistinguishable from a denial and cost hours of bisecting to get back.
+          throw new Error([out.error ?? `vault read failed (${resp.status})`, (out as { detail?: string }).detail].filter(Boolean).join(' — '));
         }
-        throw InteractionsDO.vaultThrottledError('write');
-      },
-      async read<T>({ owner, resource }: { owner: string; resource: string }): Promise<{ data: T } | null> {
-        assertOwner(owner);
-        // BOUNDED RETRY (2026-07-11) — cold-cache first read; demo-mcp caches the deterministic vault-key
-        // verdict, so only the first op per isolate touches the chain. A real empty (`ok:true, record:null`)
-        // returns immediately — empty is an answer, an auth error is not (ADR-0013: retry the SAME call).
-        // NOTE: get_vault_record returns the payload under `data` (NOT `record`) — the field-name mismatch
-        // was THE "saved but reads back empty" bug.
-        let lastErr = 'vault read failed';
-        for (let attempt = 0; attempt < 4; attempt++) {
-          const resp = await callTool('get_vault_record', { recordType: resource });
-          const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; data?: T | null; error?: string; code?: string };
-          if (!resp.ok) {
-            // Transient throughput reject (stage-2 limiter) ⇒ back off + retry; never an auth verdict.
-            if (isRetryableVaultToolFailure(resp.status, out)) {
-              if (attempt < 3) { await new Promise((r) => setTimeout(r, InteractionsDO.VAULT_THROTTLE_BACKOFF_MS * (attempt + 1))); continue; }
-              throw InteractionsDO.vaultThrottledError('read');
-            }
-            // demo-mcp returns `{ error, detail }` — and `detail` is the only thing that says WHY.
-            // Dropping it turned every server-side vault fault into the word "internal error", which
-            // is indistinguishable from a denial and cost hours of bisecting to get back.
-            throw new Error([out.error ?? `vault read failed (${resp.status})`, (out as { detail?: string }).detail].filter(Boolean).join(' — '));
-          }
-          if (out.ok === false) { lastErr = out.error ?? 'vault read unauthorized'; if (attempt < 3) { await new Promise((r) => setTimeout(r, 120)); continue; } throw new Error(lastErr); }
-          return out.data === null || out.data === undefined ? null : { data: out.data };
+        // A record-scope denial is a verdict, not a blip: said once, not retried.
+        if (out.ok === false && out.error === 'record_scope_denied') throw new Error('record_scope_denied');
+        if (out.ok === false) { lastErr = out.error ?? 'vault read unauthorized'; if (attempt < 3) { await new Promise((r) => setTimeout(r, 120)); continue; } throw new Error(lastErr); }
+        // Whoever stored it, the caller gets the plain index (a compact record from this side, or the vault service's own expansion).
+        return out.data === null || out.data === undefined ? null : { data: (isIndexData(resource) ? expandCatalog(out.data) : out.data) as T };
+      }
+      throw new Error(lastErr);
+    };
+    /** THE PAGED INDEX AS STORED (`get_catalog_records`, service-MAC): the legacy record, the root and pages exactly as
+     *  the vault holds them — never assembled — with their stored versions. */
+    const stored = async (recordTypes: string[]): Promise<Array<StoredRecord | null>> => {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const resp = await callTool('get_catalog_records', { recordTypes });
+        if (resp.status === 404) throw new Error('the vault service predates the paged Library index (no get_catalog_records) — deploy apps/vault first');
+        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; records?: Record<string, StoredRecord | null>; error?: string; code?: string; detail?: string };
+        // A read is safe to repeat: a throttle, and a transient 5xx (a cold vault, a dropped hop), are retried, bounded.
+        // A catalog_integrity answer is not transient (the vault's own check) and is not retried.
+        const transient = resp.status >= 500 && !/catalog_integrity/.test(String(out.detail ?? out.error ?? ''));
+        if (!resp.ok && (isRetryableVaultToolFailure(resp.status, out) || transient)) {
+          if (attempt < 3) { await new Promise((r) => setTimeout(r, InteractionsDO.VAULT_THROTTLE_BACKOFF_MS * (attempt + 1))); continue; }
+          throw InteractionsDO.vaultThrottledError('read');
         }
-        throw new Error(lastErr);
-      },
-      // spec 315 — enumerate the owner's OWN vault record types. demo-mcp's list_vault_record is
-      // record-scope-FILTERED to the interactions grant, so this returns ONLY the Home-managed records
-      // (app-specific records under other grants stay invisible — least-privilege). Bare record types.
-      async list(): Promise<Array<{ resource: string; updatedAt: string }>> {
-        const resp = await callTool('list_vault_record', {});
-        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; records?: Array<{ record_type: string; updated_at: string }>; error?: string };
-        if (!resp.ok || out.ok === false) throw new Error(out.error ?? `vault list failed (${resp.status})`);
-        return (out.records ?? []).map((r) => ({ resource: r.record_type, updatedAt: r.updated_at }));
-      },
-    } as unknown as Vault;
+        if (!resp.ok || out.ok === false || !out.records) throw new Error([out.error ?? `catalog read failed (${resp.status})`, out.detail].filter(Boolean).join(' — '));
+        return recordTypes.map((rt) => out.records![rt] ?? null);
+      }
+      throw InteractionsDO.vaultThrottledError('read');
+    };
+    /** THE PAGED INDEX'S OWN WRITES (`catalog_commit`, service-MAC). A refusal is thrown with the vault's code. */
+    const commit = async (args: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const resp = await callTool('catalog_commit', args);
+        if (resp.status === 404) throw new Error('the vault service predates the paged Library index (no catalog_commit) — deploy apps/vault first');
+        const out = (await resp.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string; code?: string; detail?: string };
+        if (!resp.ok && isRetryableVaultToolFailure(resp.status, out)) {
+          if (attempt < 3) { await new Promise((r) => setTimeout(r, InteractionsDO.VAULT_THROTTLE_BACKOFF_MS * (attempt + 1))); continue; }
+          throw InteractionsDO.vaultThrottledError('write');
+        }
+        if (!resp.ok || out.ok === false) throw new Error([out.error ?? `catalog commit failed (${resp.status})`, out.detail].filter(Boolean).join(' — '));
+        return out;
+      }
+      throw InteractionsDO.vaultThrottledError('write');
+    };
+    return { callTool, assertOwner, writeOne, readOne, stored, commit };
+  }
+
+  /** Paged-index writes and the switch run one at a time in this object (the principal's one instance). */
+  private catalogChain: Promise<unknown> = Promise.resolve();
+  private catalogExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.catalogChain.then(fn, fn);
+    this.catalogChain = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  /** A held Library record, if still fresh. */
+  private heldLibraryDoc(recordType: string): { data: unknown } | null {
+    const held = this.libraryDocs.get(recordType);
+    return held && held.until > Date.now() ? { data: held.data } : null;
+  }
+  private holdLibraryDoc(recordType: string, data: unknown): void {
+    this.libraryDocs.set(recordType, { data, until: Date.now() + LIBRARY_DOC_MS });
+  }
+
+  /** The stored root record (held for a minute only on the runtime's internal read). */
+  private async catalogRootRecord(raw: ReturnType<InteractionsDO['vaultRaw']>, cached: boolean): Promise<StoredRecord | null> {
+    const held = cached ? this.heldLibraryDoc(CATALOG_ROOT_RECORD) : null;
+    if (held) return held.data as StoredRecord | null;
+    const [rec] = await raw.stored([CATALOG_ROOT_RECORD]);
+    if (cached) this.holdLibraryDoc(CATALOG_ROOT_RECORD, rec ?? null);
+    return rec ?? null;
+  }
+
+  /** The runtime's read of the root (null when there is none; an error when it is broken) or of one page generation. */
+  private async readPagedRecord(raw: ReturnType<InteractionsDO['vaultRaw']>, recordType: string): Promise<unknown> {
+    if (recordType === CATALOG_ROOT_RECORD) {
+      const rec = await this.catalogRootRecord(raw, true);
+      rootState(rec);
+      return rec ? rec.data : null;
+    }
+    const held = this.heldLibraryDoc(recordType);
+    if (held) return expandCatalog(held.data);
+    const [rec] = await raw.stored([recordType]);
+    if (!rec || rec.deleted) return null;
+    this.holdLibraryDoc(recordType, rec.data);
+    return expandCatalog(rec.data);
+  }
+
+  /** Pages of a root, as plain rows. A page generation never changes once written, so a held one is always current. */
+  private async catalogPages(raw: ReturnType<InteractionsDO['vaultRaw']>, root: CatalogRoot, ks: number[]): Promise<Map<number, unknown[]>> {
+    const out = new Map<number, unknown[]>();
+    const missing: number[] = [];
+    for (const k of ks) {
+      const name = pageRecordOf(root, k);
+      if (!name) { out.set(k, []); continue; }
+      const held = this.heldLibraryDoc(name);
+      if (held) out.set(k, pageRows(root, k, held.data)); else missing.push(k);
+    }
+    for (let i = 0; i < missing.length; i += PAGE_READ_BATCH) {
+      const chunk = missing.slice(i, i + PAGE_READ_BATCH);
+      const got = await raw.stored(chunk.map((k) => pageRecordOf(root, k)!));
+      chunk.forEach((k, j) => {
+        const rec = got[j];
+        const rows = pageRows(root, k, rec && !rec.deleted ? rec.data : null);
+        this.holdLibraryDoc(pageRecordOf(root, k)!, rec!.data);
+        out.set(k, rows);
+      });
+    }
+    return out;
+  }
+
+  /**
+   * THE CATALOG, READ: the plain array, legacy or paged. No root ⇒ the legacy record as before; an active root ⇒ its
+   * pages (held ones first), assembled; a root that is deleted or does not parse ⇒ an ERROR (never the frozen legacy).
+   */
+  private async readCatalogRecords(raw: ReturnType<InteractionsDO['vaultRaw']>, cached: boolean): Promise<unknown> {
+    try {
+      return await this.readCatalogOnce(raw, cached);
+    } catch (e) {
+      // A page the (held) root named was collected by later commits: once more with the root read fresh — an integrity
+      // error only if the root has not moved.
+      if (!isPageMissing(e)) throw e;
+      const before = this.heldLibraryDoc(CATALOG_ROOT_RECORD)?.data as StoredRecord | null | undefined;
+      this.libraryDocs.delete(CATALOG_ROOT_RECORD);
+      const [fresh] = await raw.stored([CATALOG_ROOT_RECORD]);
+      if (fresh && before && fresh.rev === before.rev) throw e;
+      return this.readCatalogOnce(raw, cached);
+    }
+  }
+  private async readCatalogOnce(raw: ReturnType<InteractionsDO['vaultRaw']>, cached: boolean): Promise<unknown> {
+    const st = rootState(await this.catalogRootRecord(raw, cached));
+    if (st.kind !== 'active') {
+      const held = cached ? this.heldLibraryDoc(CATALOG_RECORD) : null;
+      if (held) return expandCatalog(held.data);
+      const data = (await raw.readOne<unknown>(CATALOG_RECORD))?.data ?? null;
+      if (cached) this.holdLibraryDoc(CATALOG_RECORD, compactCatalog(data));
+      return data;
+    }
+    const pages = await this.catalogPages(raw, st.root, st.root.pages.map((p) => p.k));
+    return assembleCatalog(st.root, st.root.pages.map((p) => pages.get(p.k)!));
+  }
+
+  /**
+   * COMMIT A PAGED WRITE: the new page generations (each written once, never over anything), then the root by
+   * compare-and-set — the one atomic step. A failure before the swap leaves the catalog exactly as it was (the written
+   * generations are unnamed and collected); after it, the previous root's spare generations are collected.
+   */
+  private async commitPagedPlan(raw: ReturnType<InteractionsDO['vaultRaw']>, plan: PagedWrite, rootRev: number, extra: Record<string, unknown> = {}): Promise<number> {
+    let rev: number;
+    try {
+      for (let i = 0; i < plan.pages.length; i += InteractionsDO.PAGES_PER_COMMIT) {
+        await raw.commit({ op: 'pages', writes: plan.pages.slice(i, i + InteractionsDO.PAGES_PER_COMMIT).map((w) => ({ recordType: w.recordType, data: w.data })) });
+      }
+      rev = Number((await raw.commit({ op: 'root', data: plan.root, expectRootRev: rootRev, ...extra })).rev);
+    } catch (e) {
+      this.libraryDocs.delete(CATALOG_ROOT_RECORD);
+      if (plan.pages.length) await raw.commit({ op: 'collect', recordTypes: plan.pages.map((w) => w.recordType) }).catch(() => undefined);
+      throw e;
+    }
+    for (const w of plan.pages) this.holdLibraryDoc(w.recordType, w.data);
+    this.holdLibraryDoc(CATALOG_ROOT_RECORD, { data: plan.root, rev, deleted: false } satisfies StoredRecord);
+    this.libraryDocs.delete(CATALOG_RECORD); // a paged owner's legacy record is not the catalog
+    // Collection is best effort: a failure (or an eviction before this line) leaves records no root names, which the
+    // sweep finds — run here every SWEEP_EVERY root swaps, after a failed collection, and from the operator's door.
+    let swept = plan.root.seq % InteractionsDO.SWEEP_EVERY === 0;
+    if (plan.garbage.length) await raw.commit({ op: 'collect', recordTypes: plan.garbage }).catch((e: unknown) => { swept = true; console.warn(`[catalog] collect failed — the sweep will find them: ${e instanceof Error ? e.message : String(e)}`); });
+    if (swept) await raw.commit({ op: 'sweep' }).catch((e: unknown) => console.warn(`[catalog] sweep failed: ${e instanceof Error ? e.message : String(e)}`));
+    return rev;
+  }
+  private static readonly PAGES_PER_COMMIT = 4;
+  private static readonly SWEEP_EVERY = 16;
+
+  /**
+   * THE CATALOG, WRITTEN (whole list — the Home's record.put / content.put, and any whole-list writer). A legacy owner's
+   * record is written exactly as before (the vault refuses it if the owner is paged by then); a paged owner's list is
+   * split, and only the pages whose content changed get a new generation. One at a time with the switch and the edits.
+   */
+  private writeCatalog(raw: ReturnType<InteractionsDO['vaultRaw']>, data: unknown): Promise<void> {
+    return this.catalogExclusive(async () => {
+      // The root this object holds decides the form (one vault call fewer per write — the per-principal limit is 120
+      // calls a minute). That is safe because the VAULT is the guard: a legacy write over an owner paged meanwhile is
+      // refused (`catalog_paged` / `catalog_switched`), and a paged write planned from a stale root loses its
+      // compare-and-set (`catalog_conflict`). On any of those, once more with the root read fresh.
+      try {
+        await this.writeCatalogOnce(raw, data, true);
+      } catch (e) {
+        if (!/catalog_paged|catalog_switched|catalog_conflict/.test(e instanceof Error ? e.message : String(e))) throw e;
+        this.libraryDocs.delete(CATALOG_ROOT_RECORD);
+        await this.writeCatalogOnce(raw, data, false);
+      }
+    });
+  }
+  private async writeCatalogOnce(raw: ReturnType<InteractionsDO['vaultRaw']>, data: unknown, cachedRoot: boolean): Promise<void> {
+    const rec = await this.catalogRootRecord(raw, cachedRoot);
+    const st = rootState(rec);
+    if (st.kind !== 'active') {
+      try {
+        await raw.writeOne(CATALOG_RECORD, data);
+      } catch (e) {
+        this.libraryDocs.delete(CATALOG_RECORD);
+        this.libraryDocs.delete(CATALOG_ROOT_RECORD);
+        throw e;
+      }
+      this.holdLibraryDoc(CATALOG_RECORD, structuredClone(compactCatalog(data)));
+      return;
+    }
+    if (!Array.isArray(data)) throw new Error('a paged Library index is replaced by a list — it is never deleted or set to anything else');
+    await this.commitPagedPlan(raw, await planPagedWrite(data, st.root, { gen: newGeneration(st.root.seq + 1), now: Date.now() }), st.rev);
+  }
+
+  /** The page edit (`internal.library.catalogEdit`), inside `catalogExclusive`. The root is read FRESH. */
+  private async editCatalog(raw: ReturnType<InteractionsDO['vaultRaw']>, upserts: unknown[]): Promise<Record<string, unknown> & { ok: boolean }> {
+    const st = rootState(await this.catalogRootRecord(raw, false));
+    if (st.kind !== 'active') return { ok: false, code: 'catalog_not_paged', error: 'this Library index is not paged — write content.catalog' };
+    const plan = await applyCatalogEdit(st.root, async (k) => (await this.catalogPages(raw, st.root, [k])).get(k)!, upserts, { gen: newGeneration(st.root.seq + 1), now: Date.now() });
+    const rev = await this.commitPagedPlan(raw, plan, st.rev);
+    return { ok: true, total: plan.root.total, pages: plan.pages.map((w) => w.k), seq: plan.root.seq, rev };
+  }
+
+  /**
+   * One switch action, inside `catalogExclusive`. Every read is FRESH and AS STORED (`get_catalog_records`): the legacy
+   * record here is the record itself, never the pages the vault would assemble for an ordinary read.
+   */
+  private async pagedCatalogAction(raw: ReturnType<InteractionsDO['vaultRaw']>, action: string): Promise<Record<string, unknown> & { ok: boolean }> {
+    const now = Date.now();
+    const [rootRec, legacyRec] = await raw.stored([CATALOG_ROOT_RECORD, CATALOG_RECORD]);
+    const st = rootState(rootRec ?? null);
+    const rootRev = st.kind === 'legacy' ? -1 : st.rev;
+    const legacyRev = legacyRec ? legacyRec.rev : -1;
+    const legacyList = (): unknown[] | null => {
+      if (!legacyRec || legacyRec.deleted) return null;
+      const l = expandCatalog(legacyRec.data);
+      return Array.isArray(l) ? l : null;
+    };
+    const describe = (root: CatalogRoot | null) => (root ? { active: root.active, pageCount: root.pageCount, total: root.total, seq: root.seq, updatedAt: root.updatedAt, pages: root.pages.map((p) => p.count), folders: root.folders.length, ...(root.migratedFrom ? { migratedFrom: root.migratedFrom } : {}), ...(root.activation ? { activation: root.activation } : {}) } : null);
+    const root = st.kind === 'legacy' ? null : st.root;
+    if (action === 'status') {
+      const list = legacyList();
+      return {
+        ok: true, action, paged: st.kind === 'active', root: describe(root),
+        legacy: legacyRec ? { rev: legacyRev, deleted: legacyRec.deleted, total: list?.length ?? null, digest: list ? await catalogDigest(list, root?.pageCount) : null } : null,
+        ...(st.kind === 'inactive' ? { legacyUnchangedSincePrepare: root!.migratedFrom?.legacyRev === legacyRev } : {}),
+        ...(st.kind === 'active' ? { legacyUnchangedSinceActivate: root!.activation?.legacyRev === legacyRev, ...(root!.restore ? { rollbackInProgress: { fromRev: root!.restore.fromRev, toRev: root!.restore.toRev, restoreLanded: legacyRev === root!.restore.toRev } } : {}) } : {}),
+      };
+    }
+    if (action === 'sweep') {
+      const out = await raw.commit({ op: 'sweep' });
+      return { ok: true, action, swept: out.swept ?? [] };
+    }
+    if (action === 'prepare') {
+      if (st.kind === 'active') return { ok: false, action, error: 'this Library is already paged — deactivate first to prepare again' };
+      const list = legacyList();
+      if (!list) return { ok: false, action, error: 'there is no legacy Library index (a list) to copy' };
+      const built = await buildPagedCatalog(list, { gen: newGeneration((root?.seq ?? 0) + 1), active: false, now, pageCount: CATALOG_PAGE_COUNT, migratedFrom: { hash: await catalogDigest(list, CATALOG_PAGE_COUNT), total: list.length, legacyRev, at: now }, previous: root });
+      await this.commitPagedPlan(raw, built, rootRev);
+      return { ok: true, action, root: describe(built.root), pageBytes: built.pages.map((w) => JSON.stringify(w.data).length), legacy: { rev: legacyRev, total: list.length } };
+    }
+    if (!root) return { ok: false, action, error: 'no paged index has been prepared for this Library' };
+    if (action === 'verify' || action === 'activate') {
+      const list = legacyList();
+      if (!list) return { ok: false, action, error: 'the legacy Library index is not a list — nothing to verify against' };
+      // One page held at a time (the legacy list is already the big object here).
+      const cmp = await compareCatalog(list, root, async (k) => {
+        const name = pageRecordOf(root, k);
+        if (!name) return [];
+        const [rec] = await raw.stored([name]);
+        return pageRows(root, k, rec && !rec.deleted ? rec.data : null);
+      });
+      const legacyUnchanged = root.migratedFrom?.legacyRev === legacyRev && root.migratedFrom?.hash === await catalogDigest(list, root.pageCount);
+      if (action === 'verify') return { ...cmp, action, active: root.active, legacyUnchangedSincePrepare: legacyUnchanged, legacyRev, ...(root.active ? { note: 'the owner is paged: saves since the switch are in the pages, not in the frozen legacy record, so differences are expected' } : {}) };
+      // Already switched on — by this activate, if its swap landed and its answer was lost.
+      if (root.active) return root.activation?.legacyRev === legacyRev ? { ok: true, action, already: true, root: describe(root) } : { ok: false, action, error: 'already active' };
+      if (!legacyUnchanged) return { ok: false, action, error: 'the legacy Library index changed after prepare — prepare again, then verify' };
+      if (!cmp.ok) return { ok: false, action, error: 'verify does not pass — not switching', comparison: cmp };
+      const on: CatalogRoot = { ...root, active: true, activation: { legacyRev, at: now }, seq: root.seq + 1, updatedAt: now };
+      // The vault switches the root only if the legacy record is STILL at this rev, in the same statement.
+      const rev = Number((await raw.commit({ op: 'root', data: on, expectRootRev: rootRev, expectLegacyRev: legacyRev })).rev);
+      this.holdLibraryDoc(CATALOG_ROOT_RECORD, { data: on, rev, deleted: false } satisfies StoredRecord);
+      this.libraryDocs.delete(CATALOG_RECORD);
+      return { ok: true, action, root: describe(on), comparison: cmp };
+    }
+    // ── deactivate — the rollback. RESUMABLE: every step can be interrupted (a 5xx, a lost response, an eviction) and
+    // `deactivate` run again picks up where the vault says it stands. Every check comes before any write.
+    if (!root.active) {
+      // Already switched off — by this rollback, if its final swap landed and its answer was lost.
+      return root.migratedFrom?.legacyRev === legacyRev ? { ok: true, action, already: true, root: describe(root), legacyRev } : { ok: false, action, error: 'not active — nothing to roll back' };
+    }
+    const frozen = root.activation?.legacyRev;
+    const stamp = root.restore;
+    // The legacy record may only be at the rev the switch froze, or at the rev THIS rollback's restore produced.
+    if (legacyRev !== frozen && legacyRev !== stamp?.toRev) {
+      return { ok: false, action, code: 'catalog_legacy_moved', error: `the legacy record was written while the Library was paged (stored rev ${legacyRev}; ${frozen ?? 'none'} at the switch${stamp ? `, ${stamp.toRev} after this rollback's restore` : ''}) — nothing was written; merge it by hand before rolling back`, legacyRev, activationLegacyRev: frozen ?? null };
+    }
+    let pages: unknown[][] | null = await readCatalogPages(root, async (rts) => (await raw.stored(rts)).map((r) => (r && !r.deleted ? r.data : null)));
+    for (let k = 0; k < root.pageCount; k++) if (await pageHash(pages[k]!) !== root.pages[k]!.hash) return { ok: false, action, code: 'catalog_integrity', error: `page ${k} does not match the hash its root records — nothing was written` };
+    const digest = await pagesDigest(root, pages);
+    const total = root.total;
+    let restoredRev: number;
+    const current = legacyList();
+    if (stamp && legacyRev === stamp.toRev && current && (await catalogDigest(current, root.pageCount)) === digest) {
+      // This rollback's restore already landed and still matches the pages: straight to the swap.
+      pages = null;
+      restoredRev = legacyRev;
+    } else {
+      let compact: unknown = compactCatalog(assembleCatalog(root, pages));
+      pages = null; // the rows live on in `compact` only as long as the restore needs them
+      // A stamp restoring over the rev the legacy record is at NOW (the frozen one, or an earlier restore's).
+      const nonce = newGeneration(root.seq + 1) + newGeneration(now);
+      const stamped: CatalogRoot = { ...root, restore: { nonce, expiresAt: now + 120_000, fromRev: legacyRev, toRev: legacyRev + 1 }, seq: root.seq + 1, updatedAt: now };
+      await raw.commit({ op: 'root', data: stamped, expectRootRev: rootRev });
+      this.libraryDocs.delete(CATALOG_ROOT_RECORD);
+      restoredRev = Number((await raw.commit({ op: 'restore', nonce, data: compact, expectLegacyRev: legacyRev })).legacyRev);
+      compact = null;
+    }
+    const [back] = await raw.stored([CATALOG_RECORD]);
+    const backList = back && !back.deleted ? expandCatalog(back.data) : null;
+    if (!back || back.rev !== restoredRev || !Array.isArray(backList) || backList.length !== total || (await catalogDigest(backList, root.pageCount)) !== digest) {
+      return { ok: false, action, code: 'catalog_restore_mismatch', error: 'the restored legacy record does not read back as the pages — the owner stays paged (nothing is lost: the pages still hold every save); run deactivate again', restoredRev };
+    }
+    const [rootNow] = await raw.stored([CATALOG_ROOT_RECORD]);
+    const stampedRoot = rootState(rootNow ?? null);
+    if (stampedRoot.kind !== 'active') return { ok: false, action, error: 'the root changed during the rollback — run deactivate again' };
+    const { restore: _stamp, activation: _act, ...rest } = stampedRoot.root;
+    const off: CatalogRoot = { ...rest, active: false, migratedFrom: { hash: digest, total, legacyRev: restoredRev, at: now }, seq: stampedRoot.root.seq + 1, updatedAt: now };
+    const rev = Number((await raw.commit({ op: 'root', data: off, expectRootRev: stampedRoot.rev, expectLegacyRev: restoredRev })).rev);
+    this.holdLibraryDoc(CATALOG_ROOT_RECORD, { data: off, rev, deleted: false } satisfies StoredRecord);
+    this.libraryDocs.delete(CATALOG_RECORD);
+    return { ok: true, action, root: describe(off), restored: total, legacyRev: restoredRev };
   }
 
   /**
@@ -1304,7 +1669,11 @@ export class InteractionsDO {
     }
     // Every write of a Library record passes here (the runtime's `vaultWrite`, the Home's `record.put`): what was
     // written is what the next internal read of it answers, for a minute.
-    if (LIBRARY_DOC.test(resource)) this.libraryDocs.set(resource, { data: structuredClone(data), until: Date.now() + LIBRARY_DOC_MS });
+    // The catalog's own write (`writeCatalog`) holds what it wrote — the legacy record, or the pages and the root.
+    if (LIBRARY_DOC.test(resource) && resource !== CATALOG_RECORD) {
+      if (libraryDocSize(data) <= LIBRARY_DOC_KEEP_MAX) this.libraryDocs.set(resource, { data: structuredClone(data), until: Date.now() + LIBRARY_DOC_MS });
+      else this.libraryDocs.delete(resource);
+    }
     // What admission and naming are derived from changed: the remembered admissions are dropped, never served stale.
     if (resource === DIRECTORY_RESOURCE || resource === LOCAL_NAMES_RESOURCE || resource.startsWith('org.membership:')) this.presenceMemo.clear();
   }
@@ -2365,7 +2734,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.coordination.lease' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.friend.request' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.member.recorded' || op === 'internal.member.role' || op === 'internal.member.setRole' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.getMany' || op === 'content.put' || op === 'issuer.facet.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.coordination.lease' || op === 'internal.library.catalogEdit' || op === 'internal.library.paged' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.friend.request' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.member.recorded' || op === 'internal.member.role' || op === 'internal.member.setRole' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.getMany' || op === 'content.put' || op === 'issuer.facet.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -2637,10 +3006,60 @@ export class InteractionsDO {
           return json({ ok: true, granted: true });
         }
 
+        // THE PAGED LIBRARY INDEX, EDITED ONE PAGE AT A TIME (catalog-pages.ts `applyCatalogEdit`). The runtime's Library
+        // save names the rows it changed; this object reads the root and those rows' pages FRESH, replaces each row by id
+        // (or appends a new one), writes the changed pages and then the root — one at a time with every other catalog
+        // write here, so a save and a whole-list write from the Home can never interleave inside a page.
+        if (op === 'internal.library.catalogEdit') {
+          if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
+          const upserts = Array.isArray(body.upserts) ? body.upserts : [];
+          // Bounded by a page, not by one document: a save also re-files every older row of its page that still carried
+          // its bytes inline (a person's Home writes them that way), so one edit can name a whole page.
+          if (!upserts.length || upserts.length > CATALOG_EDIT_MAX_ROWS) return json({ ok: false, error: `upserts: 1..${CATALOG_EDIT_MAX_ROWS} rows, each with its id` }, 400);
+          try {
+            const out = await this.catalogExclusive(() => this.editCatalog(this.vaultRaw(g!), upserts));
+            if (out.ok) await this.recordOperation(body, 'write', CATALOG_RECORD);
+            return json(out, out.ok ? 200 : 409);
+          } catch (e) {
+            return json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 502);
+          }
+        }
+
+        // THE SWITCH (docs/design/library-paged-catalog.md): copy → verify → switch, never move. `prepare` writes the
+        // pages and an INACTIVE root from the legacy record; `verify` compares them entry by entry; `activate` flips the
+        // root only if verify passes now AND the legacy record is still what prepare copied; `deactivate` writes the
+        // CURRENT paged catalog (saves since the switch included) back into the legacy record, verifies it, and only
+        // then turns the root off. The legacy record is never touched by prepare, verify or activate. In-Worker only
+        // (the internal marker); the operator's door is `/custody/library/paged` (bridge-HMAC).
+        if (op === 'internal.library.paged') {
+          if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
+          const action = String(body.action ?? '');
+          if (!['status', 'prepare', 'verify', 'activate', 'deactivate', 'sweep'].includes(action)) return json({ ok: false, error: 'action: status | prepare | verify | activate | deactivate | sweep' }, 400);
+          const owner = String(body.owner ?? principal).toLowerCase();
+          if (owner !== principal.toLowerCase()) return json({ ok: false, error: `this object is ${principal}'s — it pages no other owner's Library` }, 400);
+          const mutating = action === 'prepare' || action === 'activate' || action === 'deactivate' || action === 'sweep';
+          const lease = this.leases.get(CATALOG_RECORD);
+          if (mutating && lease && lease.holder !== PAGED_MIGRATION_HOLDER && lease.until > Date.now()) return json({ ok: false, code: 'catalog_busy', error: 'a Library save holds the index right now — try again in a few seconds' }, 409);
+          if (mutating) this.leases.set(CATALOG_RECORD, { holder: PAGED_MIGRATION_HOLDER, until: Date.now() + 30_000 });
+          try {
+            const out = await this.catalogExclusive(() => this.pagedCatalogAction(this.vaultRaw(g!), action));
+            return json(out, out.ok ? 200 : 409);
+          } catch (e) {
+            return json({ ok: false, action, error: e instanceof Error ? e.message : String(e) }, 502);
+          } finally {
+            if (mutating && this.leases.get(CATALOG_RECORD)?.holder === PAGED_MIGRATION_HOLDER) this.leases.delete(CATALOG_RECORD);
+          }
+        }
+
         if (op === 'internal.coordination.vaultWrite') {
           const recordType = String(body.recordType ?? '').trim();
           if (!EFFECT_WRITABLE_RECORDS.some((p) => recordType.startsWith(p))) {
             return json({ ok: false, error: `internal.coordination.vaultWrite may not write "${recordType}" — declared-effect artifacts only` }, 403);
+          }
+          // The paged Library index's own records are written by the catalog paths only (a page edit, a whole-list
+          // write of content.catalog, the switch) — `content.catalog` above is a prefix of them, so they are named here.
+          if (isPagedCatalogRecord(recordType)) {
+            return json({ ok: false, error: `${recordType} is part of the paged Library index — write content.catalog, or edit it with internal.library.catalogEdit` }, 403);
           }
           if (body.record === undefined) return json({ ok: false, error: 'record required' }, 400);
           // A COACH SERVICE KEEPS NOTHING OF A CLIENT'S. The person's study records (hand, style, read, note)
@@ -3089,11 +3508,15 @@ export class InteractionsDO {
           if (!recordType) return json({ error: 'recordType required' }, 400);
           if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
           try {
-            const held = this.libraryDocs.get(recordType);
-            if (held && held.until > Date.now()) return json({ ok: true, recordType, data: held.data });
+            // The catalog: legacy or paged, from the pages this object holds (never a held copy of the assembled list).
+            if (recordType === CATALOG_RECORD) return json({ ok: true, recordType, data: await this.readCatalogRecords(this.vaultRaw(g), true) });
+            // The paged index's root (checked: a broken one is an error) and its immutable page generations, as stored.
+            if (isPagedCatalogRecord(recordType)) return json({ ok: true, recordType, data: await this.readPagedRecord(this.vaultRaw(g), recordType) });
+            const held = this.heldLibraryDoc(recordType);
+            if (held) return json({ ok: true, recordType, data: held.data });
             const data = await this.readDoc<unknown>(g, recordType, null);
             console.log(`[334§6 vaultRead] ${recordType} ok hasData=${data !== null && data !== undefined}`);
-            if (LIBRARY_DOC.test(recordType)) this.libraryDocs.set(recordType, { data, until: Date.now() + LIBRARY_DOC_MS });
+            if (LIBRARY_DOC.test(recordType) && libraryDocSize(data) <= LIBRARY_DOC_KEEP_MAX) this.libraryDocs.set(recordType, { data, until: Date.now() + LIBRARY_DOC_MS });
             return json({ ok: true, recordType, data });
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
@@ -4021,6 +4444,7 @@ export class InteractionsDO {
             return json({ ok: true, record: r?.data ?? null });
           }
           if (body.data === undefined) return json({ error: 'data required' }, 400);
+          if (isPagedCatalogRecord(resource)) return json({ error: `${resource} is part of the paged Library index — write content.catalog` }, 400);
           /*
             THE INDEX IS MAINTAINED HERE, NOT REPLACED BY THE CALLER.
 
@@ -6124,8 +6548,17 @@ export class InteractionsDO {
           return json({ ok: true, record: r?.data ?? null });
         }
         if (body.record === undefined) return json({ error: 'record required' }, 400);
+        if (isPagedCatalogRecord(recordType)) return json({ error: `${recordType} is part of the paged Library index — write content.catalog` }, 400);
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.record.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'record', id: recordType } });
-        await this.vaultFor(grant).write({ owner: '', resource: recordType, data: body.record, classification: 'internal' } as never);
+        // This write does not pass through `writeDoc`, so what this object holds of a Library record is dropped before
+        // and after it (the Home's person-scope Library writes come this way): the runtime's next read goes to the vault.
+        // The catalog's own seam holds what it wrote.
+        if (LIBRARY_DOC.test(recordType) && recordType !== CATALOG_RECORD) this.libraryDocs.delete(recordType);
+        try {
+          await this.vaultFor(grant).write({ owner: '', resource: recordType, data: body.record, classification: 'internal' } as never);
+        } finally {
+          if (LIBRARY_DOC.test(recordType) && recordType !== CATALOG_RECORD) this.libraryDocs.delete(recordType);
+        }
         return json({ ok: true });
       }
 
