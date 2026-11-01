@@ -212,6 +212,7 @@ import type { CandidateSource } from '@agenticprimitives/intent-engagement';
 import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
+import { grantedReadSender } from './library-granted-fetch.js';
 import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf, runAnchorRecordKey, type RunExportDeps } from './run-export.js';
 import { vaultProvenanceStore, readCarriedProvenance } from './provenance-bindings.js';
 import { runMeasuresRecordKey } from '@agenticprimitives/evaluation';
@@ -7118,6 +7119,17 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
   const nameRecordsOf = nameRecordsReader(env) ?? (async () => null);
   const parents = (e: Env): string[] => (e.AGENT_NAME_PARENTS ?? e.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
   const subjectAddressEnv = (e: Env): SubjectAddressEnv => ({ ownIngress: e.DEMO_EDGE_URL?.trim() || undefined, ownDomains: a2aBaseDomains(e), parents: parents(e), servesUnpublished: servesUnpublishedNames(e) });
+  // Slice S5 — A WORKSPACE'S GRANTED READ, sent to the publisher's agent over the delegated-task rail as the workspace
+  // (`grantedReadSender`: the workspace's own signing wire, in-Worker to the publisher's task object). Where the publisher
+  // is served is read from its name's records exactly as a hand-off reads it; one served elsewhere is refused by name.
+  deps.fetchGrantedRead = grantedReadSender(env, {
+    where: async (publisher) => {
+      const name = await deps.nameOf?.(publisher).catch(() => null) ?? null;
+      const at = subjectAddress(name, name ? await nameRecordsOf(name) : null, subjectAddressEnv(env));
+      if (at.where === 'here') return { here: true };
+      return { here: false, refused: at.where === 'wire' ? `${name} is served by another deployment (its card at ${at.cardUrl}) — a granted read across deployments is not sent from here` : at.refused };
+    },
+  });
   // Spec 376 — HAND ONE STEP to another agent, in-process inside this deployment (a Worker cannot fetch
   // its own account's hostnames), the caller named by the in-Worker marker as the PARENT agent. The
   // specialist answers with the same artifact a routed ask does; it is read with the same reader.
