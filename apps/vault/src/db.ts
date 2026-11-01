@@ -282,6 +282,62 @@ export async function putVaultObjectRow(
   }
 }
 
+/** Read one encrypted vault object INCLUDING a tombstoned one (the paged Library index must tell "deleted" from
+ *  "never existed"); `null` only if no row was ever written. */
+export async function getVaultObjectRowAny(db: D1Database, owner: string, resource: string): Promise<VaultObjectRow | null> {
+  return (
+    (await db.prepare('SELECT * FROM vault_objects WHERE owner_address = ? AND resource = ?').bind(owner.toLowerCase(), resource).first<VaultObjectRow>()) ?? null
+  );
+}
+
+/** A record's version for a guarded write: its rev when live, -2 when tombstoned, -1 when no row exists. */
+export const revToken = (row: Pick<VaultObjectRow, 'rev' | 'deleted_at'> | null): number => (!row ? -1 : row.deleted_at ? -2 : row.rev);
+
+/**
+ * A GUARDED UPSERT — one SQL statement, so atomic: it writes only if the record's own version is `expectRev` (when given)
+ * AND another record's version is `guard.rev` (when given), both as `revToken` reads them. Either check failing writes
+ * nothing and throws VaultRevConflictError. This is what lets the paged Library index make its root swap a
+ * compare-and-set, make the switch depend on the legacy record not having moved, and make a legacy write depend on the
+ * root not having moved — with no window between the check and the write.
+ */
+export async function putVaultObjectRowGuarded(
+  db: D1Database,
+  row: Pick<VaultObjectRow, 'owner_address' | 'resource' | 'classification' | 'ciphertext_b64' | 'wrapped_dek_b64' | 'crypto_meta'>,
+  cond: { expectRev?: number; guard?: { resource: string; rev: number } },
+): Promise<void> {
+  const owner = row.owner_address.toLowerCase();
+  const TOKEN = (alias: string) => `COALESCE((SELECT CASE WHEN ${alias}.deleted_at IS NULL THEN ${alias}.rev ELSE -2 END FROM vault_objects ${alias} WHERE ${alias}.owner_address = ? AND ${alias}.resource = ?), -1)`;
+  const conds: string[] = [];
+  const params: unknown[] = [];
+  if (cond.expectRev !== undefined) { conds.push(`${TOKEN('s')} = ?`); params.push(owner, row.resource, cond.expectRev); }
+  if (cond.guard) { conds.push(`${TOKEN('g')} = ?`); params.push(owner, cond.guard.resource, cond.guard.rev); }
+  const where = conds.length ? conds.join(' AND ') : '1';
+  const sql = `INSERT INTO vault_objects (owner_address, resource, classification, ciphertext_b64, wrapped_dek_b64, crypto_meta, rev)
+       SELECT ?, ?, ?, ?, ?, ?, 0 WHERE ${where}
+       ON CONFLICT(owner_address, resource) DO UPDATE SET
+         classification = excluded.classification,
+         ciphertext_b64 = excluded.ciphertext_b64,
+         wrapped_dek_b64 = excluded.wrapped_dek_b64,
+         crypto_meta = excluded.crypto_meta,
+         updated_at = CURRENT_TIMESTAMP,
+         deleted_at = NULL,
+         rev = vault_objects.rev + 1`;
+  const res = await db.prepare(sql).bind(owner, row.resource, row.classification, row.ciphertext_b64, row.wrapped_dek_b64, row.crypto_meta, ...params).run();
+  if ((res.meta?.changes ?? 0) === 0) throw new VaultRevConflictError(row.resource);
+}
+
+/** Which of these resources hold a live row. */
+export async function liveVaultResources(db: D1Database, owner: string, resources: readonly string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  for (let i = 0; i < resources.length; i += 50) {
+    const chunk = resources.slice(i, i + 50);
+    if (!chunk.length) continue;
+    const res = await db.prepare(`SELECT resource FROM vault_objects WHERE owner_address = ? AND deleted_at IS NULL AND resource IN (${chunk.map(() => '?').join(',')})`).bind(owner.toLowerCase(), ...chunk).all<{ resource: string }>();
+    for (const r of res.results ?? []) out.add(r.resource);
+  }
+  return out;
+}
+
 /** Soft-delete (tombstone) an encrypted vault object. */
 export async function tombstoneVaultObjectRow(db: D1Database, owner: string, resource: string): Promise<void> {
   await db

@@ -4,7 +4,7 @@
 // Production: wrangler deploy + wrangler d1 migrations apply demo-mcp
 
 import { CATALOG_RECORD } from './catalog-codec.js';
-import { catalogIsPaged, readVaultRecordData } from './catalog-read.js';
+import { commitCatalog, getStoredCatalogRecords, readVaultRecordData, writeVaultRecord } from './catalog-store.js';
 import { Hono } from 'hono';
 import {
   withDelegation,
@@ -1453,13 +1453,10 @@ async function setVaultRecordRun(env: Env, principal: Address, args: SetVaultRec
   }
   const gate = await authorizePersonVaultOp(env, principal, resource, 'write', 'internal');
   if (!gate.ok) return { ok: false, error: gate.error, served_by: servedBy };
-  // A PAGED owner's legacy index is the frozen pre-switch backup (docs/design/library-paged-catalog.md): a whole-list
-  // write of it would land where no reader looks. Refused in words; the interactions DO writes the pages. Only the
-  // switch's own rollback (`pagedRestore`) writes it while the owner is paged.
-  if (recordType === CATALOG_RECORD && (args as { pagedRestore?: unknown } | undefined)?.pagedRestore !== true && (await catalogIsPaged(gate.pv.vault, principal))) {
-    return { ok: false, error: 'catalog_paged', detail: 'this Library index is stored in pages — write it through the owner\'s interactions object, never as the single legacy record', served_by: servedBy };
-  }
-  await gate.pv.vault.write({ owner: principal, resource, data: args?.data ?? null });
+  // The Library index's paged family is reserved, and a paged owner's legacy record is the frozen pre-switch backup
+  // (catalog-store.ts): refused in words here, written by the owner's interactions object through `catalog_commit`.
+  const wrote = await writeVaultRecord(gate.pv.vault, principal, recordType, args?.data ?? null);
+  if (!wrote.ok) return { ...wrote, served_by: servedBy };
   return { ok: true, owner: principal, recordType, served_by: servedBy };
 }
 
@@ -1518,6 +1515,45 @@ app.post('/tools/set_vault_record', async (c) => {
     return c.json({ error: 'internal error', detail: String(e) }, 500);
   }
 });
+
+// ─── THE PAGED LIBRARY INDEX'S OWN DOOR (docs/design/library-paged-catalog.md) ─────────────────────────────────
+// `get_catalog_records` (the legacy record, the root and its pages AS STORED, with versions) and `catalog_commit` (new
+// page generations, the root's compare-and-set swap, the authenticated restore, collection). SERVICE-MAC ONLY: they
+// are registered on the `/tools/*` path the interactions DO calls and on no public ingress, and no proxy forwards
+// them. Authorized as a read / write of `vault:content.catalog` — the pages are that record's storage.
+const CATALOG_TOOL_CLASSIFICATION = { '@sa-tool': 'delegation-verified', '@sa-auth': 'session-token', '@sa-risk-tier': 'medium' } as const;
+declareTool({ name: 'get_catalog_records' }, CATALOG_TOOL_CLASSIFICATION);
+declareTool({ name: 'catalog_commit' }, CATALOG_TOOL_CLASSIFICATION);
+for (const [tool, op] of [['get_catalog_records', 'read'], ['catalog_commit', 'write']] as const) {
+  app.post(`/tools/${tool}`, async (c) => {
+    const body = c.get('parsedBody');
+    if (!body?.token) return c.json({ error: 'token required' }, 400);
+    const auditSink = buildAuditSink(c.env);
+    const servedBy = `demo-mcp:${tool}`;
+    try {
+      const handler = withDelegation<{ args?: Record<string, unknown> }>(
+        withProof(c.env, vaultConfig(c.env, body.enforceBinding), body.invocationProof),
+        async ({ principal, args, recordScopes }) => {
+          const resource = `${VAULT_RECORD_PREFIX}${CATALOG_RECORD}`;
+          if (!recordScopeAllows(c.env, recordScopes, resource, op)) return { ok: false, error: 'record_scope_denied', served_by: servedBy };
+          const gate = await authorizePersonVaultOp(c.env, principal, resource, op, 'internal');
+          if (!gate.ok) return { ok: false, error: gate.error, served_by: servedBy };
+          const a = (args ?? {}) as Record<string, unknown>;
+          const out = tool === 'get_catalog_records'
+            ? await getStoredCatalogRecords(gate.pv.vault, principal, Array.isArray(a.recordTypes) ? (a.recordTypes as unknown[]).filter((r): r is string => typeof r === 'string') : [])
+            : await commitCatalog(gate.pv.vault, principal, a);
+          return { ...out, served_by: servedBy };
+        },
+        { toolName: tool, classification: CATALOG_TOOL_CLASSIFICATION, auditSink, correlationId: getCorrelationId(c), environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production' ? 'production' : 'development') },
+      );
+      const result = await handler({ token: body.token, args: body.args ?? {}, invocationProof: body.invocationProof } as Parameters<typeof handler>[0] & { invocationProof?: AgenticInvocationProofV1 });
+      return c.json(result as Record<string, unknown>);
+    } catch (e) {
+      if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
+      return c.json({ error: 'internal error', detail: String(e) }, 500);
+    }
+  });
+}
 
 const LIST_VAULT_RECORD_CLASSIFICATION = {
   '@sa-tool': 'delegation-verified',

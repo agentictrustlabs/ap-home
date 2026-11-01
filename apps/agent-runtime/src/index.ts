@@ -235,7 +235,7 @@ const RUN_ENDING_OF = (outcome: string): AgentRunFactsV1['ending'] =>
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
-import { CATALOG_ROOT_RECORD, CATALOG_MAX_PAGE_COUNT, catalogPageRecord } from './catalog-pages.js';
+import { CATALOG_ROOT_RECORD } from './catalog-pages.js';
 import {
   storeFederatedToken, loadFederatedToken, setYouVersionGrant, getYouVersionGrant,
   YOUVERSION_DATA_SCOPES, type YouVersionDataScope,
@@ -6891,7 +6891,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
         await new Promise((r) => setTimeout(r, Number((out as { retryInMs?: number }).retryInMs) || 200));
       }
       // The read after the wait is fresh — the legacy record's memo, and the paged root's and pages' (catalog-pages.ts).
-      for (const rt of ['content.catalog', CATALOG_ROOT_RECORD, ...Array.from({ length: CATALOG_MAX_PAGE_COUNT }, (_, k) => catalogPageRecord(k))]) forgetMemo(owner, rt);
+      for (const rt of ['content.catalog', CATALOG_ROOT_RECORD]) forgetMemo(owner, rt);
       return async () => { await lease({ release: true }).catch(() => undefined); };
     },
     // THE PAGED LIBRARY INDEX (library-paged.ts): the root and a page read straight from the owner's DO — NOT through the
@@ -10438,7 +10438,7 @@ async function verifyDelegation(
  */
 async function forwardMcpToken(args: {
   env: Env;
-  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record' | 'issue_org_entitlement' | 'revoke_org_entitlement' | 'list_org_entitlements' | 'get_entitled_record' | 'manage_entitlement_group';
+  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record' | 'get_catalog_records' | 'catalog_commit' | 'issue_org_entitlement' | 'revoke_org_entitlement' | 'list_org_entitlements' | 'get_entitled_record' | 'manage_entitlement_group';
   token: string;
   toolArgs?: Record<string, unknown>;
   /** spec 270 v4 W3 — per-source binding: set true ONLY on the client-mint path so demo-mcp enforces the
@@ -10607,7 +10607,7 @@ function toDelegationStruct(w: IncomingDelegation): Delegation {
  *  callMcpToolViaDelegation — no server-mint, no DEMO_ALLOW_SERVER_MINT. */
 export async function callMcpToolBound(args: {
   env: Env;
-  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record' | 'issue_org_entitlement' | 'revoke_org_entitlement' | 'list_org_entitlements' | 'get_entitled_record' | 'manage_entitlement_group';
+  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record' | 'get_catalog_records' | 'catalog_commit' | 'issue_org_entitlement' | 'revoke_org_entitlement' | 'list_org_entitlements' | 'get_entitled_record' | 'manage_entitlement_group';
   grant: IncomingDelegation;        // principal SA → INTERACTIONS_SERVICE_SA (the custodied st.grant)
   sessionLeaf: IncomingDelegation;  // principal SA → interactions-session key (PRINCIPAL-signed DEL-001 leaf)
   toolArgs?: Record<string, unknown>;

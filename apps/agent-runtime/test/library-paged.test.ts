@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { libraryWrite, CATALOG_MAX, type LibraryEntry, type LibraryToolDeps } from '../src/library-tools.js';
 import { PAGED_CATALOG_MAX } from '../src/library-paged.js';
 import { compactCatalog } from '../src/catalog-codec.js';
-import { CATALOG_ROOT_RECORD, applyCatalogEdit, buildPagedCatalog, catalogPageRecord, pageOf, pageRows, readCatalog, type CatalogRoot } from '../src/catalog-pages.js';
+import { expandCatalog } from '../src/catalog-codec.js';
+import { CATALOG_ROOT_RECORD, applyCatalogEdit, buildPagedCatalog, newGeneration, pageOf, pageRecordOf, pageRows, readCatalog, type CatalogRoot } from '../src/catalog-pages.js';
 
 const OWNER = '0x' + 'cd'.repeat(20);
 const ctx = (i: number) => ({ step: { id: `s${i}` }, index: 0, supplied: [{ stepRef: `s${i}`, data: { keep: 'yes' } }], intent: { goal: 'save it' }, operationId: `op-${i}` }) as never;
@@ -24,8 +25,8 @@ const bytes = (v: unknown): number => (v === undefined ? 0 : JSON.stringify(v ??
 /** A switched owner: the stored records, a CatalogStore over them, and a ledger of every record read and written. */
 async function pagedOwner(list: LibraryEntry[]) {
   const records = new Map<string, unknown>();
-  const built = await buildPagedCatalog(list, { active: true, now: 1 });
-  for (const w of built.writes) records.set(w.recordType, w.data);
+  const built = await buildPagedCatalog(list, { gen: newGeneration(1), active: true, now: 1 });
+  for (const w of built.pages) records.set(w.recordType, w.data);
   records.set(CATALOG_ROOT_RECORD, built.root);
   const ledger = { reads: [] as string[], writes: [] as string[], readBytes: 0, writeBytes: 0 };
   const failRead = new Set<string>();
@@ -44,22 +45,26 @@ async function pagedOwner(list: LibraryEntry[]) {
         if (failRead.has(rt)) return { ok: false, data: null, error: 'vault unavailable' };
         const data = records.get(rt) ?? null;
         ledger.readBytes += bytes(data);
-        return { ok: true, data: rt === CATALOG_ROOT_RECORD ? structuredClone(data) : pageRows(root(), Number(rt.slice('content.catalog.p'.length)), structuredClone(data)) };
+        return { ok: true, data: rt === CATALOG_ROOT_RECORD ? structuredClone(data) : expandCatalog(structuredClone(data)) };
       },
       // The DO's page edit, as the object runs it: root and pages FRESH, changed pages then the root.
       edit: async (_o, upserts) => {
         ledger.reads.push(`edit:${CATALOG_ROOT_RECORD}`);
         ledger.readBytes += bytes(records.get(CATALOG_ROOT_RECORD));
-        const plan = await applyCatalogEdit(root(), async (k) => { ledger.reads.push(`edit:${catalogPageRecord(k)}`); ledger.readBytes += bytes(records.get(catalogPageRecord(k))); return pageRows(root(), k, records.get(catalogPageRecord(k))); }, structuredClone(upserts), 2);
-        for (const w of plan.writes) { ledger.writes.push(w.recordType); ledger.writeBytes += bytes(w.data); records.set(w.recordType, w.data); }
+        const r0 = root();
+        const plan = await applyCatalogEdit(r0, async (k) => { const n = pageRecordOf(r0, k); ledger.reads.push(`edit:page${k}`); ledger.readBytes += bytes(n ? records.get(n) : []); return pageRows(r0, k, n ? records.get(n) : null); }, structuredClone(upserts), { gen: newGeneration(r0.seq + 1), now: 2 });
+        for (const w of plan.pages) { if (records.has(w.recordType)) throw new Error('page generation exists'); ledger.writes.push(`page${w.k}`); ledger.writeBytes += bytes(w.data); records.set(w.recordType, w.data); }
         ledger.writes.push(CATALOG_ROOT_RECORD); ledger.writeBytes += bytes(plan.root); records.set(CATALOG_ROOT_RECORD, plan.root);
+        for (const g of plan.garbage) records.delete(g);
         return { ok: true };
       },
     },
   };
-  const catalog = async () => (await readCatalog(async (rts) => rts.map((rt) => records.get(rt) ?? null))) as LibraryEntry[];
+  const catalog = async () => (await readCatalog({ root: async () => ({ data: records.get(CATALOG_ROOT_RECORD), rev: 0, deleted: false }), legacy: async () => null, records: async (rts) => rts.map((rt) => records.get(rt) ?? null) })) as LibraryEntry[];
+  /** The page record a root names for k, under the current root. */
+  const pageName = (k: number) => pageRecordOf(root(), k) ?? `(empty page ${k})`;
   const reset = () => { ledger.reads = []; ledger.writes = []; ledger.readBytes = 0; ledger.writeBytes = 0; };
-  return { records, deps, ledger, catalog, reset, failRead, root };
+  return { records, deps, ledger, catalog, reset, failRead, root, pageName };
 }
 
 /** The same Library as one legacy record, saved by the whole-list path. */
@@ -87,11 +92,13 @@ describe('a save by id reads the root and ONE page, and writes ONE page and the 
   it('a re-save of an existing document', async () => {
     const o = await pagedOwner(library(300));
     o.reset();
+    const name = o.pageName(pageOf('doc-42'));
     const out = (await libraryWrite(o.deps, OWNER, 'library.file.save', { id: 'doc-42', name: 'n42.md', folder: 'works/2', text: 'v2', kind: 'md' }, ctx(1))) as { saved: boolean; file: { version: number } };
     expect(out).toMatchObject({ saved: true, file: { version: 2 } });
     const k = pageOf('doc-42');
-    expect(o.ledger.reads).toEqual([CATALOG_ROOT_RECORD, catalogPageRecord(k), `edit:${CATALOG_ROOT_RECORD}`, `edit:${catalogPageRecord(k)}`]);
-    expect(o.ledger.writes.sort()).toEqual(['content.artifact.doc-42', catalogPageRecord(k), CATALOG_ROOT_RECORD].sort());
+    expect(o.ledger.reads).toEqual([CATALOG_ROOT_RECORD, name, `edit:${CATALOG_ROOT_RECORD}`, `edit:page${k}`]);
+    expect(o.ledger.writes.sort()).toEqual(['content.artifact.doc-42', `page${k}`, CATALOG_ROOT_RECORD].sort());
+    expect(o.pageName(k)).not.toBe(name); // a new generation: the page it read was never written over
     const saved = (await o.catalog()).find((e) => e.id === 'doc-42')!;
     expect(saved).toMatchObject({ version: 2, releases: library(1)[2]!.releases ? expect.any(Array) : undefined });
     expect(saved.bytesB64).toBeUndefined();
@@ -102,12 +109,12 @@ describe('a save by id reads the root and ONE page, and writes ONE page and the 
     const o = await pagedOwner(library(300));
     o.reset();
     await libraryWrite(o.deps, OWNER, 'library.file.visibility', { id: 'doc-7', accessPolicy: 'public' }, ctx(2));
-    expect(o.ledger.writes.sort()).toEqual([catalogPageRecord(pageOf('doc-7')), CATALOG_ROOT_RECORD].sort());
+    expect(o.ledger.writes.sort()).toEqual([`page${pageOf('doc-7')}`, CATALOG_ROOT_RECORD].sort());
     o.reset();
     const pub = (await libraryWrite(o.deps, OWNER, 'library.file.publish', { id: 'doc-7' }, ctx(3))) as { published: boolean; release: { version: string } };
     expect(pub).toMatchObject({ published: true, release: { version: '2.0.0' } });
-    expect(o.ledger.writes.sort()).toEqual([catalogPageRecord(pageOf('doc-7')), CATALOG_ROOT_RECORD].sort());
-    expect(o.ledger.reads.filter((r) => r.startsWith('content.catalog.p'))).toEqual([catalogPageRecord(pageOf('doc-7')), catalogPageRecord(pageOf('doc-7'))]);
+    expect(o.ledger.writes.sort()).toEqual([`page${pageOf('doc-7')}`, CATALOG_ROOT_RECORD].sort());
+    expect(o.ledger.reads.filter((r) => r.startsWith('content.catalog.p'))).toHaveLength(2);
     const e = (await o.catalog()).find((x) => x.id === 'doc-7')!;
     expect(e.accessPolicy).toBe('public');
     expect(e.releases).toHaveLength(2);
@@ -127,8 +134,8 @@ describe('a save that names no id walks the pages one at a time and matches as b
     o.reset();
     const out = (await libraryWrite(o.deps, OWNER, 'library.file.save', { name: 'n9.md', folder: 'works/9', text: 'again' }, ctx(6))) as { file: { id: string; version: number } };
     expect(out.file).toMatchObject({ id: 'doc-9', version: 2 });
-    expect(o.ledger.reads.filter((r) => /^content\.catalog\.p\d+$/.test(r))).toHaveLength(32 + 1);
-    expect(o.ledger.writes.filter((w) => w.startsWith('content.catalog.p'))).toEqual([catalogPageRecord(pageOf('doc-9'))]);
+    expect(o.ledger.reads.filter((r) => /^content\.catalog\.p\d+\.g/.test(r)).length).toBeGreaterThanOrEqual(30);
+    expect(o.ledger.writes.filter((w) => w.startsWith('page'))).toEqual([`page${pageOf('doc-9')}`]);
     expect((await o.catalog()).filter((e) => e.name === 'n9.md')).toHaveLength(1);
   });
 
@@ -200,7 +207,7 @@ describe('the cap', () => {
 
   it('a paged owner saved without the page store goes through the whole list (the DO pages it) under the paged cap', async () => {
     const list = Array.from({ length: CATALOG_MAX + 5 }, (_, i) => ({ id: `d-${i}`, kind: 'md', name: `d${i}.md`, folder: 'f' })) as LibraryEntry[];
-    const records = new Map<string, unknown>([['content.catalog', list], [CATALOG_ROOT_RECORD, (await buildPagedCatalog(list, { active: true, now: 1 })).root]]);
+    const records = new Map<string, unknown>([['content.catalog', list], [CATALOG_ROOT_RECORD, (await buildPagedCatalog(list, { gen: newGeneration(1), active: true, now: 1 })).root]]);
     const deps: LibraryToolDeps = { readSubjectRecord: async (_s, t) => structuredClone(records.get(t) ?? null), writeSubjectRecord: async (_s, t, r) => (records.set(t, r), { ok: true }) };
     await expect(libraryWrite(deps, OWNER, 'library.file.save', { name: 'x.md', folder: 'f', text: 'x' }, ctx(23))).resolves.toMatchObject({ saved: true });
     expect((records.get('content.catalog') as unknown[]).length).toBe(CATALOG_MAX + 6);
@@ -218,7 +225,7 @@ describe('a read that failed is never an empty Library', () => {
 
   it('a page that cannot be read refuses the save and writes nothing', async () => {
     const o = await pagedOwner(library(20));
-    o.failRead.add(catalogPageRecord(pageOf('doc-1')));
+    o.failRead.add(o.pageName(pageOf('doc-1')));
     o.reset();
     await expect(libraryWrite(o.deps, OWNER, 'library.file.save', { id: 'doc-1', name: 'n1.md', text: 'x' }, ctx(31))).rejects.toThrow(/page \d+ could not be read/);
     expect(o.ledger.writes).toEqual([]);
@@ -226,7 +233,7 @@ describe('a read that failed is never an empty Library', () => {
 
   it('a page the root counts but that is gone refuses the save', async () => {
     const o = await pagedOwner(library(20));
-    o.records.delete(catalogPageRecord(pageOf('doc-1')));
+    o.records.delete(o.pageName(pageOf('doc-1')));
     await expect(libraryWrite(o.deps, OWNER, 'library.file.save', { id: 'doc-1', name: 'n1.md', text: 'x' }, ctx(32))).rejects.toThrow(/is missing/);
   });
 
@@ -261,6 +268,6 @@ describe('the budget', () => {
     // The whole-list save moved `whole` in and `whole` out — at least 2 × whole.
     process.stderr.write(`[paged budget] catalog ${whole} B compact; one save moved ${moved} B (${(moved / (2 * whole) * 100).toFixed(1)}% of a whole-list save)\n`);
     expect(moved).toBeLessThan((2 * whole) / 8);
-    expect(o.ledger.writes.filter((w) => w.startsWith('content.catalog.p'))).toHaveLength(1);
+    expect(o.ledger.writes.filter((w) => w.startsWith('page'))).toHaveLength(1);
   });
 });

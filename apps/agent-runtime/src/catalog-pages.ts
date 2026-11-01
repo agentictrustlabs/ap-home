@@ -1,56 +1,65 @@
-// THE LIBRARY INDEX, STORED IN PAGES (2026-11-01).
+// THE LIBRARY INDEX, STORED IN PAGES (2026-11-01; copy-on-write since the data-safety review).
 //
 // `content.catalog` is one vault record listing every document in a Library. Every save read the whole record, expanded
 // it, changed one entry and wrote the whole record back; at 3,001 entries (6.1 MB of ciphertext on the Demo Admin
 // publisher) that is what ran the interactions Durable Object out of memory and what CATALOG_MAX was holding back. A
 // PAGED owner keeps the same list as
 //
-//   content.catalog.root   { format: 'ap.catalog.paged.v1', active, pageCount: P, pages: [{k, count, hash}], total,
-//                            order, folders: [...], migratedFrom?, rev, updatedAt }
-//   content.catalog.p<k>   k = 0..P-1 — the document rows whose page is fnv1a32(id) mod P, in list order, compact-coded
-//                          (catalog-codec.ts), so a save that touches one document reads and writes ONE page.
+//   content.catalog.root          { format: 'ap.catalog.paged.v2', active, pageCount: P, pages: [{k, gen, count, hash,
+//                                   prevGen}], total, order, folders: [...], migratedFrom?, activation?, restore?, seq,
+//                                   updatedAt }
+//   content.catalog.p<k>.g<gen>   the document rows whose page is fnv1a32(id) mod P, in list order, compact-coded
+//                                 (catalog-codec.ts). A page record is written ONCE and never overwritten.
+//
+// COPY-ON-WRITE. A write puts each changed page under a NEW generation name, then swaps the root — the single atomic
+// commit (a compare-and-set on the root's stored rev at the vault). Until the root swaps, no reader can see the new
+// pages; after it, none can see the old ones. A write torn anywhere before the swap is invisible, a row moved between a
+// page and the root bucket moves in the swap, and a late write can never roll a page back under a newer root (the root
+// names the generation). The generation the previous root named is kept until the next successful write (`prevGen`),
+// then collected.
 //
 // THE ROOT BUCKET. Folder rows — and any row that is not a document (no string id or name) — stay in the root itself
 // (`folders`): the effective-policy rule needs every folder on every save, and there are few of them.
 //
 // ORDER IS KEPT EXACTLY. `order` is one symbol per row of the assembled list — the page the row lives in (`0-9a-zA-Z-_`)
 // or `~` for the root bucket. Each bucket keeps its rows in their relative list order, so the symbol sequence is the
-// whole merge: the assembled array reproduces the original array, position for position (10 KB at 10,000 rows, against
-// ~250 KB for a list of ids, and no field added to an entry that a reader would see).
+// whole merge: the assembled array reproduces the original array, position for position.
 //
-// THE SWITCH IS PER OWNER. Only a root with `active: true` makes an owner paged; otherwise — no root, a prepared but
-// inactive root, or a root that does not parse — the single legacy record is the catalog, exactly as before. Once an
-// owner is paged the legacy record is never written by the paged path: it stays as the frozen pre-switch backup, and
-// only the explicit rollback (`deactivate`) writes it again, carrying every save made since the switch back into it.
+// THE SWITCH IS PER OWNER, AND STRICT. No root record at all ⇒ the single legacy record is the catalog, exactly as
+// before; a root that parses and is inactive ⇒ still the legacy record; an active root ⇒ the pages. A root record that
+// EXISTS but does not parse, or was deleted, is an ERROR on every read and write — never a quiet return to the frozen
+// legacy record. Once an owner is paged the legacy record is the frozen pre-switch backup.
 //
-// PAGES ARE THE TRUTH, THE ROOT IS THEIR INDEX. A write puts the changed pages first and the root last. A write torn
-// between the two leaves a page the root does not describe; assembly never drops such rows (rows past the order are
-// appended, in bucket order), a page-local edit re-derives the page's order from the page it read, and a missing page
-// that the root says holds rows is an ERROR, never an empty page — a partial catalog must not read as a small one.
-//
-// THIS FILE EXISTS TWICE (apps/agent-runtime/src and apps/vault/src), byte for byte — a test holds them equal. The vault
-// service uses the read half (`readCatalog`); the interactions DO uses all of it.
+// THIS FILE EXISTS TWICE (apps/agent-runtime/src and apps/vault/src), byte for byte — a test holds them equal.
 import { CATALOG_RECORD, compactCatalog, expandCatalog } from './catalog-codec.js';
 
-export const CATALOG_PAGED_FORMAT = 'ap.catalog.paged.v1';
+export const CATALOG_PAGED_FORMAT = 'ap.catalog.paged.v2';
 export const CATALOG_ROOT_RECORD = 'content.catalog.root';
 /**
  * PAGES PER OWNER. A constant today; the root records the count it was split with (`pageCount`) and every reader uses
- * that, so a later rebalance is a re-split under a new count (prepare → verify → activate, as for the first switch) and
- * needs no change here beyond the symbol table (64 pages at most).
+ * that, so a later rebalance is a re-split under a new count (prepare → verify → activate) — 64 pages at most.
  */
 export const CATALOG_PAGE_COUNT = 32;
 const SYMBOLS = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_';
 export const CATALOG_ROOT_BUCKET = '~';
 export const CATALOG_MAX_PAGE_COUNT = SYMBOLS.length;
-const PAGE_RE = /^content\.catalog\.p(\d{1,2})$/;
+const GEN_RE = /^[0-9a-z]{1,40}$/;
+/** Every record of the paged family — the versioned pages, and the unversioned names reserved with them. */
+const PAGE_RE = /^content\.catalog\.p(\d{1,2})(?:\.g([0-9a-z]{1,40}))?$/;
+const VERSIONED_PAGE_RE = /^content\.catalog\.p(\d{1,2})\.g([0-9a-z]{1,40})$/;
 
-export const catalogPageRecord = (k: number): string => `content.catalog.p${k}`;
-/** The records the paged form is made of — written only by the paged path, never by an app or a caller directly. */
+export const catalogPageRecord = (k: number, gen: string): string => `content.catalog.p${k}.g${gen}`;
+/** The records the paged form is made of — written only by the interactions DO's catalog path, never by naming them. */
 export const isPagedCatalogRecord = (recordType: string): boolean => recordType === CATALOG_ROOT_RECORD || PAGE_RE.test(recordType);
-export const pageOfRecord = (recordType: string): number | null => { const m = PAGE_RE.exec(recordType); return m ? Number(m[1]) : null; };
+export const isVersionedPageRecord = (recordType: string): boolean => VERSIONED_PAGE_RE.test(recordType);
+/** A fresh generation name: the root's next sequence number and 48 random bits, so two writers never share one. */
+export function newGeneration(seq: number): string {
+  const r = new Uint8Array(6);
+  crypto.getRandomValues(r);
+  return `${Math.max(0, Math.floor(seq)).toString(36)}${[...r].map((b) => b.toString(36).padStart(2, '0')).join('')}`.slice(0, 40);
+}
 
-export interface CatalogPageRef { k: number; count: number; hash: string }
+export interface CatalogPageRef { k: number; gen: string | null; count: number; hash: string; prevGen?: string | null }
 export interface CatalogRoot {
   format: typeof CATALOG_PAGED_FORMAT;
   /** The switch. Only `true` makes the pages the catalog. */
@@ -63,10 +72,25 @@ export interface CatalogRoot {
   order: string;
   /** The root bucket: folder rows and any row that is not a document, in list order. */
   folders: unknown[];
-  /** What `prepare` copied: the sha256 of the legacy record's plaintext then. `activate` requires it unchanged. */
-  migratedFrom?: { hash: string; total: number; at: number };
-  rev: number;
+  /** What `prepare` copied: the legacy record's digest and its STORED rev then. */
+  migratedFrom?: { hash: string; total: number; legacyRev: number; at: number };
+  /** Set by `activate`: the legacy record's stored rev at the switch. `deactivate` requires it unchanged. */
+  activation?: { legacyRev: number; at: number };
+  /** Set by `deactivate` just before it restores the legacy record: the vault accepts that one write only with this nonce. */
+  restore?: { nonce: string; expiresAt: number };
+  /** The root's own write counter (the vault's stored rev is the compare-and-set). */
+  seq: number;
   updatedAt: number;
+}
+
+/** A record as the vault stores it: the decrypted value (compact or plain — never assembled), its rev, and whether it is deleted. */
+export interface StoredRecord { data: unknown; rev: number; deleted: boolean }
+/** What the root record says about the owner. */
+export type RootState = { kind: 'legacy' } | { kind: 'inactive' | 'active'; root: CatalogRoot; rev: number };
+
+/** The paged index is not in a state any reader may trust. Never answered as "not paged". */
+export class CatalogIntegrityError extends Error {
+  constructor(message: string) { super(`catalog_integrity: ${message}`); this.name = 'CatalogIntegrityError'; }
 }
 
 type Json = Record<string, unknown>;
@@ -100,20 +124,16 @@ export function splitCatalog(list: readonly unknown[], pageCount: number = CATAL
   return { pages, folders, order };
 }
 
-/** The list, in its original order, from the root and its pages. Rows the order does not reach are appended, never dropped. */
+/** The list, in its original order, from a root and its pages (counts already checked by `pageRows`). */
 export function assembleCatalog(root: Pick<CatalogRoot, 'order' | 'folders' | 'pageCount'>, pages: ReadonlyArray<readonly unknown[]>): unknown[] {
   const cursor = new Map<string, number>();
-  const bucket = (sym: string): readonly unknown[] => (sym === CATALOG_ROOT_BUCKET ? root.folders : pages[SYMBOLS.indexOf(sym)] ?? []);
   const out: unknown[] = [];
   for (const sym of root.order) {
     const i = cursor.get(sym) ?? 0;
-    const b = bucket(sym);
-    if (i < b.length) out.push(b[i]);
+    const b = sym === CATALOG_ROOT_BUCKET ? root.folders : pages[SYMBOLS.indexOf(sym)] ?? [];
+    if (i >= b.length) throw new CatalogIntegrityError(`the order names more rows in bucket ${sym} than it holds`);
+    out.push(b[i]);
     cursor.set(sym, i + 1);
-  }
-  for (const sym of [CATALOG_ROOT_BUCKET, ...pages.map((_, k) => symbolOf(k))]) {
-    const b = bucket(sym);
-    for (let i = cursor.get(sym) ?? 0; i < b.length; i++) out.push(b[i]);
   }
   return out;
 }
@@ -135,16 +155,23 @@ export async function sha256Hex(s: string): Promise<string> {
 /** A page's content hash: over the plain (expanded) rows, exactly as a reader receives them. */
 export const pageHash = (rows: readonly unknown[]): Promise<string> => sha256Hex(JSON.stringify(rows));
 
+const digestOf = async (pageCount: number, order: string, folders: readonly unknown[], hashes: readonly string[]) =>
+  sha256Hex(`${CATALOG_PAGED_FORMAT}|${pageCount}|${order}|${await pageHash(folders)}|${hashes.join(',')}`);
 /**
  * A DIGEST OF A WHOLE LIST without serializing it whole: the order, the root bucket and every page's hash. Any change to
- * any row changes its page's hash (or the order, or the root bucket), so two lists with the same digest are the same
- * list. `prepare` records it of the legacy record and `activate` requires it unchanged.
+ * any row changes its page's hash (or the order, or the root bucket), so two lists with the same digest are the same list.
  */
 export async function catalogDigest(list: readonly unknown[], pageCount: number = CATALOG_PAGE_COUNT): Promise<string> {
   const split = splitCatalog(list, pageCount);
   const hashes: string[] = [];
   for (const rows of split.pages) hashes.push(await pageHash(rows));
-  return sha256Hex(`${CATALOG_PAGED_FORMAT}|${pageCount}|${split.order}|${await pageHash(split.folders)}|${hashes.join(',')}`);
+  return digestOf(pageCount, split.order, split.folders, hashes);
+}
+/** The same digest, of the list a root and its pages assemble to — computed from the pages, the list never built. */
+export async function pagesDigest(root: CatalogRoot, pages: ReadonlyArray<readonly unknown[]>): Promise<string> {
+  const hashes: string[] = [];
+  for (let k = 0; k < root.pageCount; k++) hashes.push(await pageHash(pages[k] ?? []));
+  return digestOf(root.pageCount, root.order, root.folders, hashes);
 }
 
 /** JSON with sorted keys, for comparing rows by value. */
@@ -154,125 +181,164 @@ export function canonicalJson(v: unknown): string {
   return JSON.stringify(v) ?? 'null';
 }
 
-/** A root that parses, active or not. */
-export function asCatalogRoot(raw: unknown): CatalogRoot | null {
-  if (!isObj(raw) || raw.format !== CATALOG_PAGED_FORMAT) return null;
-  const { pageCount, pages, order, folders } = raw;
-  if (typeof pageCount !== 'number' || !Number.isInteger(pageCount) || pageCount < 1 || pageCount > CATALOG_MAX_PAGE_COUNT) return null;
-  if (!Array.isArray(pages) || typeof order !== 'string' || !Array.isArray(folders)) return null;
+/** A root, checked whole: shape, every page ref, the order against the counts. Anything else throws. */
+export function parseCatalogRoot(raw: unknown): CatalogRoot {
+  const bad = (why: string): never => { throw new CatalogIntegrityError(`the paged index root does not parse — ${why}`); };
+  if (!isObj(raw)) return bad('not an object');
+  if (raw.format !== CATALOG_PAGED_FORMAT) return bad(`format ${JSON.stringify(raw.format)}`);
+  if (typeof raw.active !== 'boolean') return bad('active is not a boolean');
+  const P = raw.pageCount;
+  if (typeof P !== 'number' || !Number.isInteger(P) || P < 1 || P > CATALOG_MAX_PAGE_COUNT) return bad('pageCount');
+  if (!Array.isArray(raw.pages) || raw.pages.length !== P) return bad('pages');
+  if (typeof raw.order !== 'string' || !Array.isArray(raw.folders) || typeof raw.total !== 'number' || typeof raw.seq !== 'number') return bad('order, folders, total or seq');
+  const counts = new Map<string, number>();
+  for (const s of raw.order) counts.set(s, (counts.get(s) ?? 0) + 1);
+  let total = raw.folders.length;
+  for (const [i, p] of (raw.pages as unknown[]).entries()) {
+    if (!isObj(p) || p.k !== i || typeof p.count !== 'number' || !Number.isInteger(p.count) || p.count < 0 || typeof p.hash !== 'string') return bad(`page ${i}`);
+    if (p.gen !== null && (typeof p.gen !== 'string' || !GEN_RE.test(p.gen))) return bad(`page ${i} generation`);
+    if (p.gen === null && p.count !== 0) return bad(`page ${i} holds rows and names no record`);
+    if ((counts.get(symbolOf(i)) ?? 0) !== p.count) return bad(`page ${i}: the order says ${counts.get(symbolOf(i)) ?? 0} rows, the page ${p.count}`);
+    counts.delete(symbolOf(i));
+    total += p.count;
+  }
+  if ((counts.get(CATALOG_ROOT_BUCKET) ?? 0) !== raw.folders.length) return bad('the order and the root bucket disagree');
+  counts.delete(CATALOG_ROOT_BUCKET);
+  if (counts.size) return bad('the order names a bucket that does not exist');
+  if (raw.total !== total || raw.order.length !== total) return bad(`total ${raw.total}, rows ${total}`);
   return raw as unknown as CatalogRoot;
 }
-/** The root iff it switches the owner to pages. */
+
+/** The owner's state from the stored root record: no record ⇒ legacy; a deleted or unparseable one ⇒ an ERROR. */
+export function rootState(rec: StoredRecord | null): RootState {
+  if (!rec) return { kind: 'legacy' };
+  if (rec.deleted) throw new CatalogIntegrityError('the paged index root was deleted — refusing to fall back to the legacy record');
+  const root = parseCatalogRoot(rec.data);
+  return { kind: root.active ? 'active' : 'inactive', root, rev: rec.rev };
+}
+/** The root iff it switches the owner to pages; null when there is none; throws on anything that does not parse. */
 export function activeCatalogRoot(raw: unknown): CatalogRoot | null {
-  const root = asCatalogRoot(raw);
-  return root && root.active === true ? root : null;
+  if (raw === null || raw === undefined) return null;
+  const root = parseCatalogRoot(raw);
+  return root.active ? root : null;
 }
 
-/** How many rows the root says page k holds. */
-export const pageCountOf = (root: CatalogRoot, k: number): number => root.pages.find((p) => p.k === k)?.count ?? 0;
+/** The record that holds page k under this root, or null for an empty page. */
+export const pageRecordOf = (root: CatalogRoot, k: number): string | null => { const g = root.pages[k]?.gen; return g ? catalogPageRecord(k, g) : null; };
 
-/** One stored page as plain rows. A page the root says holds rows but that is not there is an error, never empty. */
+/** One stored page as plain rows, checked against the root: a missing page, or one whose count differs, is an ERROR. */
 export function pageRows(root: CatalogRoot, k: number, stored: unknown): unknown[] {
-  const rows = expandCatalog(stored ?? null);
-  if (Array.isArray(rows)) return rows;
-  if (stored === null || stored === undefined) {
-    const want = pageCountOf(root, k);
-    if (want === 0) return [];
-    throw new Error(`the Library index page ${k} is missing (the root says it holds ${want} entries) — refusing to read a partial catalog`);
-  }
-  throw new Error(`the Library index page ${k} is not a list`);
+  const ref = root.pages[k];
+  if (!ref) throw new CatalogIntegrityError(`the root has no page ${k}`);
+  if (ref.gen === null) return [];
+  if (stored === null || stored === undefined) throw new CatalogIntegrityError(`page ${k} (generation ${ref.gen}) is missing — refusing to read a partial catalog`);
+  const rows = expandCatalog(stored);
+  if (!Array.isArray(rows)) throw new CatalogIntegrityError(`page ${k} is not a list`);
+  if (rows.length !== ref.count) throw new CatalogIntegrityError(`page ${k} holds ${rows.length} rows, the root says ${ref.count}`);
+  return rows;
 }
 
-/** Read several records at once; each answer is the record's data or null. */
+/** Read several records at once, AS STORED; each answer is the record's data or null. */
 export type ReadRecords = (recordTypes: string[]) => Promise<unknown[]>;
 /** Pages read per round trip. */
 export const PAGE_READ_BATCH = 8;
 
-/** Every page of a root, as plain rows, `batch` records per read. */
+/** Every page of a root, as plain rows, `batch` records per read; empty pages are not read. */
 export async function readCatalogPages(root: CatalogRoot, readMany: ReadRecords, batch: number = PAGE_READ_BATCH): Promise<unknown[][]> {
-  const pages: unknown[][] = [];
-  for (let k0 = 0; k0 < root.pageCount; k0 += batch) {
-    const ks = Array.from({ length: Math.min(batch, root.pageCount - k0) }, (_, i) => k0 + i);
-    const got = await readMany(ks.map(catalogPageRecord));
-    ks.forEach((k, i) => { pages[k] = pageRows(root, k, got[i]); });
+  const pages: unknown[][] = Array.from({ length: root.pageCount }, () => []);
+  const ks = root.pages.filter((p) => p.gen !== null).map((p) => p.k);
+  for (let i = 0; i < ks.length; i += batch) {
+    const chunk = ks.slice(i, i + batch);
+    const got = await readMany(chunk.map((k) => pageRecordOf(root, k)!));
+    chunk.forEach((k, j) => { pages[k] = pageRows(root, k, got[j]); });
   }
   return pages;
 }
 
+/** Where a reader gets the records from. */
+export interface CatalogSource {
+  root(): Promise<StoredRecord | null>;
+  /** The legacy record as stored (compact or plain). */
+  legacy(): Promise<unknown>;
+  records: ReadRecords;
+}
 /**
- * THE CATALOG AS EVERY READER SEES IT: the plain array, whichever form the owner keeps. The root is read first; an
- * active root's pages are assembled, anything else reads the legacy record (expanded) exactly as before.
+ * THE CATALOG AS EVERY READER SEES IT: the plain array, whichever form the owner keeps. No root ⇒ the legacy record
+ * (expanded), an inactive root ⇒ the same, an active root ⇒ its pages assembled, anything else ⇒ an error.
  */
-export async function readCatalog(readMany: ReadRecords, batch: number = PAGE_READ_BATCH): Promise<unknown> {
-  const [rootRaw] = await readMany([CATALOG_ROOT_RECORD]);
-  const root = activeCatalogRoot(rootRaw);
-  if (!root) return expandCatalog((await readMany([CATALOG_RECORD]))[0] ?? null);
-  return assembleCatalog(root, await readCatalogPages(root, readMany, batch));
+export async function readCatalog(src: CatalogSource, batch: number = PAGE_READ_BATCH): Promise<unknown> {
+  const st = rootState(await src.root());
+  if (st.kind !== 'active') return expandCatalog((await src.legacy()) ?? null);
+  return assembleCatalog(st.root, await readCatalogPages(st.root, src.records, batch));
 }
 
 // ── the write half (the interactions DO) ────────────────────────────────────────────────────────────────────────────
 
-export interface PagedWrite { writes: Array<{ recordType: string; data: unknown; k: number; rows: unknown[] }>; root: CatalogRoot }
+export interface PagedWrite {
+  /** New page records, each under a fresh generation name — written before the root, never over anything. */
+  pages: Array<{ recordType: string; data: unknown; k: number; rows: unknown[] }>;
+  root: CatalogRoot;
+  /** Generations no root names after this one commits (the previous root's `prevGen`s): collect AFTER the root swap. */
+  garbage: string[];
+}
 
-/** A fresh paged form of `list`: every page written, the root last. `prepare` uses it (inactive) and nothing else. */
-export async function buildPagedCatalog(list: readonly unknown[], opts: { active: boolean; now: number; pageCount?: number; migratedFrom?: CatalogRoot['migratedFrom']; rev?: number }): Promise<PagedWrite> {
+/** One page's new ref, and what it writes and frees. */
+async function nextRef(old: CatalogPageRef | undefined, k: number, rows: unknown[], gen: string, out: PagedWrite, force = false): Promise<CatalogPageRef> {
+  const hash = await pageHash(rows);
+  if (!force && old && old.hash === hash && old.count === rows.length) return old;
+  const g = rows.length ? gen : null;
+  if (g) out.pages.push({ recordType: catalogPageRecord(k, g), data: compactCatalog(rows), k, rows });
+  if (old?.prevGen && old.prevGen !== old.gen && old.prevGen !== g) out.garbage.push(catalogPageRecord(k, old.prevGen));
+  return { k, gen: g, count: rows.length, hash, prevGen: old?.gen ?? null };
+}
+
+/** A fresh paged form of `list` (prepare). Every non-empty page is written; a previous root's pages become garbage. */
+export async function buildPagedCatalog(list: readonly unknown[], opts: { gen: string; active: boolean; now: number; pageCount?: number; migratedFrom?: CatalogRoot['migratedFrom']; previous?: CatalogRoot | null }): Promise<PagedWrite> {
   const pageCount = opts.pageCount ?? CATALOG_PAGE_COUNT;
   const split = splitCatalog(list, pageCount);
+  const out: PagedWrite = { pages: [], root: null as unknown as CatalogRoot, garbage: [] };
   const refs: CatalogPageRef[] = [];
-  const writes: PagedWrite['writes'] = [];
   for (let k = 0; k < pageCount; k++) {
     const rows = split.pages[k]!;
-    refs.push({ k, count: rows.length, hash: await pageHash(rows) });
-    writes.push({ recordType: catalogPageRecord(k), data: compactCatalog(rows), k, rows });
-  }
-  return {
-    writes,
-    root: { format: CATALOG_PAGED_FORMAT, active: opts.active, pageCount, pages: refs, total: list.length, order: split.order, folders: split.folders, ...(opts.migratedFrom ? { migratedFrom: opts.migratedFrom } : {}), rev: opts.rev ?? 1, updatedAt: opts.now },
-  };
-}
-
-/** A WHOLE-LIST write onto an existing root: only the pages whose content changed are written; the root carries the rest. */
-export async function planPagedWrite(list: readonly unknown[], root: CatalogRoot, now: number): Promise<PagedWrite> {
-  const split = splitCatalog(list, root.pageCount);
-  const refs: CatalogPageRef[] = [];
-  const writes: PagedWrite['writes'] = [];
-  for (let k = 0; k < root.pageCount; k++) {
-    const rows = split.pages[k]!;
     const hash = await pageHash(rows);
-    const before = root.pages.find((p) => p.k === k);
-    refs.push({ k, count: rows.length, hash });
-    if (!before || before.hash !== hash || before.count !== rows.length) writes.push({ recordType: catalogPageRecord(k), data: compactCatalog(rows), k, rows });
+    const gen = rows.length ? opts.gen : null;
+    if (gen) out.pages.push({ recordType: catalogPageRecord(k, gen), data: compactCatalog(rows), k, rows });
+    refs.push({ k, gen, count: rows.length, hash, prevGen: null });
   }
-  return { writes, root: { ...root, pages: refs, total: list.length, order: split.order, folders: split.folders, rev: (root.rev ?? 0) + 1, updatedAt: now } };
+  for (const p of opts.previous?.pages ?? []) for (const g of [p.gen, p.prevGen]) if (g) out.garbage.push(catalogPageRecord(p.k, g));
+  out.root = { format: CATALOG_PAGED_FORMAT, active: opts.active, pageCount, pages: refs, total: list.length, order: split.order, folders: split.folders, ...(opts.migratedFrom ? { migratedFrom: opts.migratedFrom } : {}), seq: (opts.previous?.seq ?? 0) + 1, updatedAt: opts.now };
+  return out;
 }
 
-/** Bring a bucket's symbols in `order` to the rows it actually holds (a torn write): extra symbols go, missing ones are appended. */
-function fitBucket(order: string[], sym: string, rows: number): void {
-  let have = 0;
-  for (const s of order) if (s === sym) have++;
-  for (let i = order.length - 1; have > rows && i >= 0; i--) if (order[i] === sym) { order.splice(i, 1); have--; }
-  for (; have < rows; have++) order.push(sym);
+/** A WHOLE-LIST write onto an existing root: only the pages whose content changed get a new generation. */
+export async function planPagedWrite(list: readonly unknown[], root: CatalogRoot, opts: { gen: string; now: number }): Promise<PagedWrite> {
+  const split = splitCatalog(list, root.pageCount);
+  const out: PagedWrite = { pages: [], root: null as unknown as CatalogRoot, garbage: [] };
+  const refs: CatalogPageRef[] = [];
+  for (let k = 0; k < root.pageCount; k++) refs.push(await nextRef(root.pages[k], k, split.pages[k]!, opts.gen, out));
+  const { restore: _r, ...rest } = root;
+  out.root = { ...rest, pages: refs, total: list.length, order: split.order, folders: split.folders, seq: root.seq + 1, updatedAt: opts.now };
+  return out;
 }
+
 const nthOf = (order: readonly string[], sym: string, n: number): number => { let seen = 0; for (let i = 0; i < order.length; i++) if (order[i] === sym && seen++ === n) return i; return -1; };
 const countBefore = (order: readonly string[], sym: string, end: number): number => { let c = 0; for (let i = 0; i < end; i++) if (order[i] === sym) c++; return c; };
 
 /**
- * A PAGE-LOCAL EDIT: each upsert replaces the FIRST row with its id (where it would sit in the assembled list — the
- * legacy `findIndex` rule) in place, or is appended at the end when no row has that id. A row whose bucket changes (a
- * document re-saved as a folder) moves buckets and keeps its position. Only the pages touched are loaded and written.
+ * A PAGE-LOCAL EDIT: each upsert replaces the FIRST row with its id (where it sits in the assembled list — the legacy
+ * `findIndex` rule) in place, or is appended at the end when no row has that id. A row whose bucket changes (a document
+ * re-saved as a folder) moves buckets and keeps its position — the page and the root change in ONE commit (the swap).
  */
-export async function applyCatalogEdit(root: CatalogRoot, loadPage: (k: number) => Promise<unknown[]>, upserts: readonly unknown[], now: number): Promise<PagedWrite> {
+export async function applyCatalogEdit(root: CatalogRoot, loadPage: (k: number) => Promise<unknown[]>, upserts: readonly unknown[], opts: { gen: string; now: number }): Promise<PagedWrite> {
   const P = root.pageCount;
   const order = root.order.split('');
   const folders = root.folders.slice();
-  fitBucket(order, CATALOG_ROOT_BUCKET, folders.length);
   const loaded = new Map<number, unknown[]>();
   const page = async (k: number): Promise<unknown[]> => {
     let rows = loaded.get(k);
-    if (!rows) { rows = (await loadPage(k)).slice(); fitBucket(order, symbolOf(k), rows.length); loaded.set(k, rows); }
+    if (!rows) { rows = (await loadPage(k)).slice(); loaded.set(k, rows); }
     return rows;
   };
-  const touched = new Set<number>();
   for (const u of upserts) {
     if (!isObj(u) || typeof u.id !== 'string' || !u.id) throw new Error('a catalog edit names each row by its id');
     const homeK = pageOf(u.id, P);
@@ -284,28 +350,23 @@ export async function applyCatalogEdit(root: CatalogRoot, loadPage: (k: number) 
     if (jp >= 0) at.push({ k: homeK, j: jp, pos: nthOf(order, symbolOf(homeK), jp) });
     const target = bucketOf(u, P);
     const tSym = target < 0 ? CATALOG_ROOT_BUCKET : symbolOf(target);
-    const tRows = target < 0 ? folders : await page(target);
-    if (target >= 0) touched.add(target);
+    const tRows = target < 0 ? folders : rows;
     if (!at.length) { tRows.push(u); order.push(tSym); continue; }
     const first = at.sort((a, b) => a.pos - b.pos)[0]!;
     if (first.k === target) { tRows[first.j] = u; continue; }
     (first.k < 0 ? folders : rows).splice(first.j, 1);
-    if (first.k >= 0) touched.add(first.k);
     order[first.pos] = tSym;
     tRows.splice(countBefore(order, tSym, first.pos), 0, u);
   }
-  const refs = root.pages.map((p) => ({ ...p }));
-  const writes: PagedWrite['writes'] = [];
-  for (const k of [...touched].sort((a, b) => a - b)) {
-    const rows = loaded.get(k)!;
-    const hash = await pageHash(rows);
-    const ref = refs.find((p) => p.k === k);
-    if (ref) { ref.count = rows.length; ref.hash = hash; } else refs.push({ k, count: rows.length, hash });
-    writes.push({ recordType: catalogPageRecord(k), data: compactCatalog(rows), k, rows });
+  const out: PagedWrite = { pages: [], root: null as unknown as CatalogRoot, garbage: [] };
+  const refs: CatalogPageRef[] = [];
+  for (let k = 0; k < P; k++) {
+    const rows = loaded.get(k);
+    refs.push(rows ? await nextRef(root.pages[k], k, rows, opts.gen, out) : root.pages[k]!);
   }
-  refs.sort((a, b) => a.k - b.k);
-  const total = folders.length + refs.reduce((n, p) => n + (loaded.get(p.k)?.length ?? p.count), 0);
-  return { writes, root: { ...root, pages: refs, total, order: order.join(''), folders, rev: (root.rev ?? 0) + 1, updatedAt: now } };
+  const { restore: _r, ...rest } = root;
+  out.root = { ...rest, pages: refs, total: order.length, order: order.join(''), folders, seq: root.seq + 1, updatedAt: opts.now };
+  return out;
 }
 
 export interface CatalogMismatch { bucket: number; index: number; id: string | null; reason: string }
@@ -342,3 +403,5 @@ export async function compareCatalog(expected: readonly unknown[], root: Catalog
   if (root.total !== expected.length) miss({ bucket: -2, index: -1, id: null, reason: `the root counts ${root.total} rows, ${expected.length} expected` });
   return { ok: count === 0 && pagedTotal === expected.length, total: expected.length, pagedTotal, orderExact, mismatches, mismatchCount: count };
 }
+
+export { CATALOG_RECORD };

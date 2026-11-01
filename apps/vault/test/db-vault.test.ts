@@ -17,7 +17,7 @@
 // any future logic regression that also fails in standard SQLite; authentic D1-quirk coverage would
 // need vitest-pool-workers against a real D1 (a heavier follow-up).
 import { describe, it, expect, beforeEach } from 'vitest';
-import { putVaultObjectRow, getVaultObjectRow, VaultRevConflictError } from '../src/db';
+import { putVaultObjectRow, getVaultObjectRow, VaultRevConflictError, putVaultObjectRowGuarded, getVaultObjectRowAny, revToken, tombstoneVaultObjectRow } from '../src/db';
 
 // node:sqlite is stable in Node 24 / experimental in 22.5+ / absent in ≤ 22.4. Guard the import so
 // the suite SKIPS (not hard-fails) on older Node instead of crashing the file at load.
@@ -95,5 +95,34 @@ describe.skipIf(!DatabaseSync)('putVaultObjectRow — writes must stick (read-ba
     const back = await getVaultObjectRow(db, OWNER, RESOURCE);
     expect(back?.ciphertext_b64).toBe('v2'); // the conflicting write did NOT clobber
     expect(back?.rev).toBe(1);
+  });
+});
+
+describe.skipIf(!DatabaseSync)('putVaultObjectRowGuarded — one statement, both checks', () => {
+  let db: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const OTHER = 'vault:content.catalog.root';
+  const other = (ct: string) => ({ ...row(ct), resource: OTHER });
+  beforeEach(() => {
+    const sqlite = new DatabaseSync!(':memory:');
+    sqlite.exec(SCHEMA);
+    db = makeD1(sqlite);
+  });
+
+  it('expectRev -1 writes only when no row exists — a second write of the same name is a conflict', async () => {
+    await putVaultObjectRowGuarded(db, row('v1'), { expectRev: -1 });
+    await expect(putVaultObjectRowGuarded(db, row('v2'), { expectRev: -1 })).rejects.toBeInstanceOf(VaultRevConflictError);
+    expect((await getVaultObjectRow(db, OWNER, RESOURCE))?.ciphertext_b64).toBe('v1');
+  });
+
+  it('a guard on ANOTHER record: writes only while that record is at the named version (absent = -1, deleted = -2)', async () => {
+    await putVaultObjectRowGuarded(db, row('v1'), { guard: { resource: OTHER, rev: -1 } });
+    await putVaultObjectRow(db, other('r0'));
+    await expect(putVaultObjectRowGuarded(db, row('v2'), { guard: { resource: OTHER, rev: -1 } })).rejects.toBeInstanceOf(VaultRevConflictError);
+    await putVaultObjectRowGuarded(db, row('v2'), { guard: { resource: OTHER, rev: 0 } });
+    await tombstoneVaultObjectRow(db, OWNER, OTHER);
+    expect(revToken(await getVaultObjectRowAny(db, OWNER, OTHER))).toBe(-2);
+    await expect(putVaultObjectRowGuarded(db, row('v3'), { guard: { resource: OTHER, rev: 0 } })).rejects.toBeInstanceOf(VaultRevConflictError);
+    await putVaultObjectRowGuarded(db, row('v3'), { expectRev: 1, guard: { resource: OTHER, rev: -2 } });
+    expect((await getVaultObjectRow(db, OWNER, RESOURCE))).toMatchObject({ ciphertext_b64: 'v3', rev: 2 });
   });
 });

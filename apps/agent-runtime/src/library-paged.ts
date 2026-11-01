@@ -20,7 +20,7 @@ import {
   catalogView, effectiveAccessPolicy, findEntries, indexOnly, isEntry, pathOf, recordOf, releaseCore, upsertEntry,
   type LibraryAccessPolicy, type LibraryEntry, type LibraryRelease, type LibraryToolDeps,
 } from './library-tools.js';
-import { CATALOG_ROOT_RECORD, activeCatalogRoot, catalogPageRecord, pageOf, pageRows, positionsOf, type CatalogRoot } from './catalog-pages.js';
+import { CATALOG_ROOT_RECORD, activeCatalogRoot, pageOf, pageRecordOf, pageRows, positionsOf, type CatalogRoot } from './catalog-pages.js';
 
 /** How many documents a PAGED Library indexes. The legacy single record stays at CATALOG_MAX (its size is the limit). */
 export const PAGED_CATALOG_MAX = 10_000;
@@ -57,7 +57,9 @@ export async function libraryWritePaged(deps: LibraryToolDeps, owner: string, to
   const folderPos = positionsOf(root.order, -1);
   const placedFolders: Placed[] = root.folders.map((e, j) => ({ e: e as LibraryEntry, pos: folderPos[j] ?? Number.MAX_SAFE_INTEGER })).filter((x) => isEntry(x.e));
   const page = async (k: number): Promise<LibraryEntry[]> => {
-    const r = await store.read(owner, catalogPageRecord(k));
+    const name = pageRecordOf(root, k);
+    if (!name) return [];
+    const r = await store.read(owner, name);
     if (!r.ok) throw new Error(`the Library index page ${k} could not be read (${r.error ?? 'the read failed'}) — nothing was saved; try again`);
     return pageRows(root, k, r.data).filter(isEntry) as LibraryEntry[];
   };

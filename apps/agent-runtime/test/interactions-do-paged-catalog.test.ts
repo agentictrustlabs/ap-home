@@ -1,12 +1,15 @@
-// THE LIBRARY INDEX'S SEAM IN THE PRINCIPAL'S OBJECT (catalog-pages.ts, interactions-do.ts). Every reader and writer of
-// `content.catalog` passes through the DO's vault client, so an owner switched to pages is read and written as pages
-// with none of them knowing — and an owner who is not switched is read and written exactly as before. The switch itself
-// (`internal.library.paged`) copies, verifies and only then flips; the rollback carries every later save back.
+// THE LIBRARY INDEX'S SEAM IN THE PRINCIPAL'S OBJECT (catalog-pages.ts, interactions-do.ts), driven against the VAULT'S
+// OWN CODE — its encrypted store and SQL on node:sqlite and the record semantics its tools apply (apps/vault
+// catalog-store.ts) — never a mock that reimplements them. An owner switched to pages is read and written as pages; an
+// owner who is not is read and written exactly as before; the switch copies, verifies and only then flips; the rollback
+// carries every later save back and refuses rather than overwrite a legacy record that moved.
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { InteractionsDO, type InteractionsDeps, REQUIRED_SCOPES } from '../src/interactions-do.js';
 import { buildVaultRecordScopeCaveat } from '@agenticprimitives/delegation';
 import { compactCatalog, expandCatalog } from '../src/catalog-codec.js';
-import { CATALOG_ROOT_RECORD, activeCatalogRoot, catalogPageRecord, pageOf, type CatalogRoot } from '../src/catalog-pages.js';
+import { CATALOG_ROOT_RECORD, pageOf, pageRecordOf, type CatalogRoot } from '../src/catalog-pages.js';
+import { sqliteAvailable, sqliteVault, vaultTools } from '../../vault/test/support/sqlite-vault.js';
+import { writeVaultRecord } from '../../vault/src/catalog-store.js';
 
 const PERSON = '0x1111111111111111111111111111111111111111';
 const MARKER = 'test-internal-marker';
@@ -17,57 +20,50 @@ const KID = 'paged-key-1';
 
 const doc = (i: number, extra: Record<string, unknown> = {}) => ({ id: `doc-${i}`, kind: 'md', name: `n${i}.md`, folder: 'shelf', size: i, version: 1, createdAt: 1000 + i, ...(i % 4 === 0 ? { releases: [{ releaseId: `0xr${i}`, version: '1.0.0', signature: '0x51' + 'ab'.repeat(400) + i.toString(16).padStart(8, '0'), signed: true }] } : {}), ...extra });
 const folder = { id: 'f-shelf', kind: 'md', name: 'shelf', folder: '', isFolder: true };
-const catalog = (n: number) => [folder, ...Array.from({ length: n }, (_, i) => doc(i))];
+const catalog = (n: number): Array<Record<string, unknown>> => [folder, ...Array.from({ length: n }, (_, i) => doc(i))];
+
+type Fail = (tool: string, args: Record<string, unknown>) => boolean;
 
 function world() {
-  const records = new Map<string, unknown>();
-  const log: Array<{ op: 'read' | 'write'; recordType: string }> = [];
-  const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  const { vault, exec } = sqliteVault();
+  const tools = vaultTools(vault, PERSON);
+  const log: Array<{ tool: string; args: Record<string, unknown> }> = [];
+  const fail: { when: Fail | null } = { when: null };
   const deps: InteractionsDeps = {
     async erc1271() { return true; },
     async vaultTool(_g, tool, args) {
-      const a = args as { recordType?: string; recordTypes?: string[]; data?: unknown; pagedRestore?: boolean };
-      if (tool === 'set_vault_record') {
-        const rt = String(a.recordType);
-        // The vault service's own guard: a paged owner's legacy record is written only by the rollback.
-        if (rt === 'content.catalog' && a.pagedRestore !== true && activeCatalogRoot(records.get(CATALOG_ROOT_RECORD))) return ok({ ok: false, error: 'catalog_paged' });
-        log.push({ op: 'write', recordType: rt });
-        records.set(rt, structuredClone(a.data));
-        return ok({ ok: true });
-      }
-      if (tool === 'get_vault_record') {
-        const rt = String(a.recordType);
-        log.push({ op: 'read', recordType: rt });
-        // The vault expands a compact catalog for its callers.
-        const data = records.get(rt) ?? null;
-        return ok({ ok: true, data: rt === 'content.catalog' ? expandCatalog(structuredClone(data)) : structuredClone(data) });
-      }
-      if (tool === 'get_vault_records') {
-        const out: Record<string, unknown> = {};
-        for (const rt of a.recordTypes ?? []) { log.push({ op: 'read', recordType: rt }); out[rt] = structuredClone(records.get(rt) ?? null); }
-        return ok({ ok: true, records: out });
-      }
-      return ok({ ok: true, records: [] });
+      const a = args as Record<string, unknown>;
+      log.push({ tool, args: a });
+      if (fail.when?.(tool, a)) return new Response(JSON.stringify({ error: 'internal error', detail: 'injected failure' }), { status: 500 });
+      const out = await tools(tool, a);
+      return new Response(JSON.stringify(out.body), { status: out.status, headers: { 'Content-Type': 'application/json' } });
     },
   };
   const cav = buildVaultRecordScopeCaveat([{ server: 'demo-mcp', resources: [...REQUIRED_SCOPES, 'vault:content.*'], ops: ['read', 'write'] }] as never);
   const grant = { delegator: PERSON, delegate: '0x4444444444444444444444444444444444444444', authority: `0x${'0'.repeat(64)}`, caveats: [{ enforcer: cav.enforcer, terms: cav.terms, args: '0x' }], salt: '0', signature: `0x${'ab'.repeat(65)}` };
   const m = new Map<string, unknown>([['state', { grant }]]);
-  const obj = new InteractionsDO(
+  const mkObj = () => new InteractionsDO(
     { storage: { async get(k: string) { return m.get(k); }, async put(k: string, v: unknown) { m.set(k, v); }, async delete(k: string | string[]) { for (const x of [k].flat()) m.delete(x); }, async list() { return new Map(); } } } as never,
     { RPC_URL: 'https://rpc.test', CHAIN_ID: String(CHAIN), MCP_URL: 'https://mcp.test', A2A_INTERNAL_MARKER: MARKER, BROKER_ISS, BROKER_JWKS_URL: `${BROKER_ISS}/.well-known/jwks.json`, DEMO_SSO_AUD: AUD } as never,
     deps,
   );
+  let obj = mkObj();
   const raw = async (name: string, body: Record<string, unknown>, internal = true) => {
     const res = await obj.fetch(new Request(`https://do/interactions/${PERSON}/${name}`, { method: 'POST', headers: { 'content-type': 'application/json', ...(internal ? { 'x-ap-internal': MARKER } : {}) }, body: JSON.stringify(body) }));
     return { status: res.status, body: (await res.json()) as Record<string, unknown> };
   };
   const op = async (name: string, body: Record<string, unknown>) => (await raw(name, body)).body;
-  const writes = () => log.filter((l) => l.op === 'write').map((l) => l.recordType);
-  const reads = () => log.filter((l) => l.op === 'read').map((l) => l.recordType);
+  const stored = async (rt: string) => vault.readStored(PERSON, `vault:${rt}`);
+  const root = async () => (await stored(CATALOG_ROOT_RECORD))?.data as CatalogRoot | undefined;
+  const legacy = async () => expandCatalog((await stored('content.catalog'))?.data ?? null);
+  /** Every page-record write and root swap the object asked the vault for. */
+  const commits = () => log.filter((l) => l.tool === 'catalog_commit').map((l) => (l.args.op === 'pages' ? `pages:${(l.args.writes as unknown[]).length}` : String(l.args.op)));
+  const legacyWrites = () => log.filter((l) => l.tool === 'set_vault_record' && l.args.recordType === 'content.catalog').length;
   const clear = () => { log.length = 0; };
-  const root = () => records.get(CATALOG_ROOT_RECORD) as CatalogRoot | undefined;
-  return { records, log, op, raw, writes, reads, clear, root };
+  /** A fresh object over the same vault (its held minute gone) — what any reader after this one sees. */
+  const restart = () => { obj = mkObj(); };
+  const seedLegacy = async (list: unknown[]) => expect(await writeVaultRecord(vault, PERSON, 'content.catalog', compactCatalog(list))).toEqual({ ok: true });
+  return { vault, exec, log, fail, op, raw, stored, root, legacy, commits, legacyWrites, clear, restart, seedLegacy };
 }
 type World = ReturnType<typeof world>;
 const paged = (w: World, action: string) => w.op('internal.library.paged', { action, owner: PERSON });
@@ -76,188 +72,269 @@ const readCatalog = async (w: World) => (await w.op('internal.coordination.vault
 /** Prepare, verify and activate an owner whose legacy record is `list`. */
 async function switched(list: unknown[]): Promise<World> {
   const w = world();
-  w.records.set('content.catalog', compactCatalog(list));
+  await w.seedLegacy(list);
   expect((await paged(w, 'prepare')).ok).toBe(true);
-  expect((await paged(w, 'activate')).ok).toBe(true);
+  expect(await paged(w, 'activate')).toMatchObject({ ok: true });
   w.clear();
   return w;
 }
 
-describe('an owner who is not switched is read and written exactly as before', () => {
+describe.skipIf(!sqliteAvailable)('an owner who is not switched is read and written exactly as before', () => {
   it('no root: a whole-list write is the one legacy record, compact; no page or root is written', async () => {
     const w = world();
     expect((await w.op('internal.coordination.vaultWrite', { recordType: 'content.catalog', record: catalog(30) })).ok).toBe(true);
-    expect(w.writes()).toEqual(['content.catalog']);
-    expect(expandCatalog(w.records.get('content.catalog'))).toEqual(catalog(30));
+    expect(w.commits()).toEqual([]);
+    expect(await w.legacy()).toEqual(catalog(30));
+    expect(await w.stored(CATALOG_ROOT_RECORD)).toBeNull();
     expect(await readCatalog(w)).toEqual(catalog(30));
   });
 
   it('a PREPARED (inactive) root: reads and writes still go to the legacy record', async () => {
     const w = world();
-    w.records.set('content.catalog', catalog(20));
+    await w.seedLegacy(catalog(20));
     expect((await paged(w, 'prepare')).ok).toBe(true);
     w.clear();
     await w.op('internal.coordination.vaultWrite', { recordType: 'content.catalog', record: catalog(21) });
-    expect(w.writes()).toEqual(['content.catalog']);
+    expect(w.commits()).toEqual([]);
     expect(await readCatalog(w)).toEqual(catalog(21));
   });
 });
 
-describe('the switch: copy → verify → switch', () => {
-  it('prepare writes every page and an inactive root, and leaves the legacy record exactly as it was', async () => {
+describe.skipIf(!sqliteAvailable)('the switch: copy → verify → switch', () => {
+  it('prepare writes the pages and an inactive root, and leaves the legacy record exactly as stored', async () => {
     const w = world();
-    const legacy = compactCatalog(catalog(200));
-    w.records.set('content.catalog', legacy);
-    const before = JSON.stringify(legacy);
-    const out = await paged(w, 'prepare');
-    expect(out.ok).toBe(true);
-    expect(w.writes()).toEqual([...Array.from({ length: 32 }, (_, k) => catalogPageRecord(k)), CATALOG_ROOT_RECORD]);
-    expect(JSON.stringify(w.records.get('content.catalog'))).toBe(before);
-    expect(w.root()!.active).toBe(false);
-    expect(w.root()!.migratedFrom?.total).toBe(201);
-    const v = await paged(w, 'verify');
-    expect(v).toMatchObject({ ok: true, total: 201, pagedTotal: 201, orderExact: true, mismatchCount: 0, legacyUnchangedSincePrepare: true });
+    await w.seedLegacy(catalog(200));
+    const before = await w.stored('content.catalog');
+    expect((await paged(w, 'prepare')).ok).toBe(true);
+    expect(await w.stored('content.catalog')).toEqual(before);
+    expect((await w.root())!.active).toBe(false);
+    expect((await w.root())!.migratedFrom).toMatchObject({ total: 201, legacyRev: before!.rev });
+    expect(await paged(w, 'verify')).toMatchObject({ ok: true, total: 201, pagedTotal: 201, orderExact: true, mismatchCount: 0, legacyUnchangedSincePrepare: true });
   });
 
   it('activate switches only after a passing verify; the assembled read is the legacy list, exactly', async () => {
     const w = await switched(catalog(150));
-    expect(w.root()!.active).toBe(true);
+    expect((await w.root())!.active).toBe(true);
+    w.restart();
     expect(JSON.stringify(await readCatalog(w))).toBe(JSON.stringify(catalog(150)));
-    expect(w.reads().filter((r) => r === 'content.catalog')).toHaveLength(0);
   });
 
   it('activate is REFUSED when the legacy record changed after prepare', async () => {
     const w = world();
-    w.records.set('content.catalog', catalog(10));
+    await w.seedLegacy(catalog(10));
     await paged(w, 'prepare');
-    await w.op('internal.coordination.vaultWrite', { recordType: 'content.catalog', record: catalog(11) }); // a save in between
+    await w.op('internal.coordination.vaultWrite', { recordType: 'content.catalog', record: catalog(11) });
     const out = await paged(w, 'activate');
     expect(out.ok).toBe(false);
     expect(String(out.error)).toMatch(/changed after prepare/);
-    expect(w.root()!.active).toBe(false);
+    expect((await w.root())!.active).toBe(false);
     expect(await readCatalog(w)).toEqual(catalog(11));
   });
 
-  it('activate is REFUSED when the pages do not match (a page altered after prepare)', async () => {
-    const w = world();
-    w.records.set('content.catalog', catalog(40));
-    await paged(w, 'prepare');
-    const k = pageOf('doc-3');
-    const rows = expandCatalog(w.records.get(catalogPageRecord(k))) as Array<Record<string, unknown>>;
-    w.records.set(catalogPageRecord(k), rows.map((r) => (r.id === 'doc-3' ? { ...r, name: 'tampered' } : r)));
-    const out = await paged(w, 'activate');
-    expect(out.ok).toBe(false);
-    expect(w.root()!.active).toBe(false);
+  it('status and verify on an ACTIVE owner report the legacy record AS STORED, not the pages', async () => {
+    const w = await switched(catalog(20));
+    await w.op('internal.library.catalogEdit', { upserts: [doc(500)] });
+    const s = await paged(w, 'status');
+    expect(s).toMatchObject({ paged: true, legacy: { total: 21 }, legacyUnchangedSinceActivate: true });
+    const v = await paged(w, 'verify');
+    expect(v.ok).toBe(false); // the frozen legacy record lacks the post-switch save — and verify can see that
+    expect(v.total).toBe(21);
   });
 
-  it('a switch action is refused while a Library save holds the index', async () => {
+  it('a switch action is refused while a Library save holds the index, and is in-Worker only, and pages no other owner', async () => {
     const w = world();
-    w.records.set('content.catalog', catalog(5));
+    await w.seedLegacy(catalog(5));
     await w.op('internal.coordination.lease', { key: 'content.catalog', holder: 'a-save', ms: 10_000 });
-    const r = await w.raw('internal.library.paged', { action: 'prepare', owner: PERSON });
-    expect(r.status).toBe(409);
-    expect(r.body.code).toBe('catalog_busy');
-  });
-
-  it('pages another owner never', async () => {
-    const w = world();
-    const r = await w.raw('internal.library.paged', { action: 'status', owner: '0x' + '22'.repeat(20) });
-    expect(r.status).toBe(400);
-  });
-
-  it('is in-Worker only', async () => {
-    const w = world();
+    expect((await w.raw('internal.library.paged', { action: 'prepare', owner: PERSON })).body.code).toBe('catalog_busy');
+    expect((await w.raw('internal.library.paged', { action: 'status', owner: '0x' + '22'.repeat(20) })).status).toBe(400);
     expect((await w.raw('internal.library.paged', { action: 'status' }, false)).status).toBe(403);
     expect((await w.raw('internal.library.catalogEdit', { upserts: [doc(1)] }, false)).status).toBe(403);
   });
 });
 
-describe('a switched owner is written as pages', () => {
-  it('a whole-list write of one changed entry writes that page and the root — never the legacy record', async () => {
+describe.skipIf(!sqliteAvailable)('a switched owner is written as pages', () => {
+  it('a whole-list write of one changed entry writes one new page generation and swaps the root — never the legacy record', async () => {
     const w = await switched(catalog(300));
-    const legacyBefore = JSON.stringify(w.records.get('content.catalog'));
+    const legacyBefore = await w.stored('content.catalog');
     const next = catalog(300).map((e) => (e.id === 'doc-17' ? { ...e, version: 2 } : e));
     expect((await w.op('internal.coordination.vaultWrite', { recordType: 'content.catalog', record: next })).ok).toBe(true);
-    expect(w.writes()).toEqual([catalogPageRecord(pageOf('doc-17')), CATALOG_ROOT_RECORD]);
-    expect(JSON.stringify(w.records.get('content.catalog'))).toBe(legacyBefore);
+    expect(w.commits()).toEqual(['pages:1', 'root']);
+    expect(w.legacyWrites()).toBe(0);
+    expect(await w.stored('content.catalog')).toEqual(legacyBefore);
+    w.restart();
     expect(await readCatalog(w)).toEqual(next);
   });
 
-  it('a page edit (the runtime save) reads root + one page fresh and writes one page + the root', async () => {
+  it('a page edit writes one page generation and the root, and the previous generation is collected on the next write', async () => {
     const w = await switched(catalog(300));
-    const out = await w.op('internal.library.catalogEdit', { upserts: [doc(5000)] });
-    expect(out.ok).toBe(true);
-    expect(w.reads()).toEqual([CATALOG_ROOT_RECORD, catalogPageRecord(pageOf('doc-5000'))]);
-    expect(w.writes()).toEqual([catalogPageRecord(pageOf('doc-5000')), CATALOG_ROOT_RECORD]);
-    expect(await readCatalog(w)).toEqual([...catalog(300), doc(5000)]);
+    const k = pageOf('doc-5000');
+    const g0 = (await w.root())!.pages[k]!.gen;
+    expect((await w.op('internal.library.catalogEdit', { upserts: [doc(5000)] })).ok).toBe(true);
+    expect(w.commits()).toEqual(['pages:1', 'root']);
+    expect(await w.stored(`content.catalog.p${k}.g${g0}`)).toMatchObject({ deleted: false }); // kept: the previous generation
+    await w.op('internal.library.catalogEdit', { upserts: [doc(5000, { version: 2 })] });
+    expect(await w.stored(`content.catalog.p${k}.g${g0}`)).toMatchObject({ deleted: true });
+    w.restart();
+    expect(await readCatalog(w)).toEqual([...catalog(300), doc(5000, { version: 2 })]);
   });
 
-  it('one edit may name a whole page of rows (a save re-files every inline-bytes row of its page)', async () => {
+  it('one edit may name a whole page of rows', async () => {
     const w = await switched(catalog(400));
     const k = pageOf('doc-1');
-    const pageRowsNow = catalog(400).filter((e) => !e.isFolder && pageOf(e.id) === k).map((e) => ({ ...e, version: 2 }));
-    expect(pageRowsNow.length).toBeGreaterThan(5);
-    const many = [...pageRowsNow, ...Array.from({ length: 150 }, (_, i) => doc(10_000 + i * 32))];
-    const out = await w.op('internal.library.catalogEdit', { upserts: many });
-    expect(out.ok).toBe(true);
-    expect((await readCatalog(w) as unknown[]).length).toBe(401 + 150);
+    const rows = catalog(400).filter((e) => !e.isFolder && pageOf(String(e.id)) === k).map((e) => ({ ...e, version: 2 }));
+    expect((await w.op('internal.library.catalogEdit', { upserts: [...rows, ...Array.from({ length: 150 }, (_, i) => doc(10_000 + i))] })).ok).toBe(true);
+    expect(((await readCatalog(w)) as unknown[]).length).toBe(551);
   });
 
   it('a page edit for an owner who is not switched is refused, not written', async () => {
     const w = world();
-    w.records.set('content.catalog', catalog(3));
+    await w.seedLegacy(catalog(3));
     const r = await w.raw('internal.library.catalogEdit', { upserts: [doc(9)] });
     expect(r.status).toBe(409);
     expect(r.body.code).toBe('catalog_not_paged');
-    expect(w.writes()).toEqual([]);
+    expect(w.commits()).toEqual([]);
   });
 
-  it('the page records cannot be written by naming them', async () => {
+  it('the page records cannot be written by naming them — here or at the vault', async () => {
     const w = await switched(catalog(10));
-    for (const rt of [CATALOG_ROOT_RECORD, catalogPageRecord(3)]) {
-      const r = await w.raw('internal.coordination.vaultWrite', { recordType: rt, record: { format: 'ap.catalog.paged.v1', active: false } });
-      expect(r.status).toBe(403);
+    const root = (await w.root())!;
+    for (const rt of [CATALOG_ROOT_RECORD, pageRecordOf(root, root.pages.find((p) => p.gen)!.k)!]) {
+      expect((await w.raw('internal.coordination.vaultWrite', { recordType: rt, record: { active: false } })).status).toBe(403);
+      expect(await writeVaultRecord(w.vault, PERSON, rt, null)).toMatchObject({ ok: false, error: 'catalog_record_reserved' });
     }
-    expect(w.root()!.active).toBe(true);
+    expect((await w.root())!.active).toBe(true);
   });
 
-  it('the runtime read is served from held pages after the first read', async () => {
+  it('a held page is served after the first read; the root and the page read singly come back plain', async () => {
     const w = await switched(catalog(100));
+    await readCatalog(w);
     w.clear();
     await readCatalog(w);
-    await readCatalog(w);
-    expect(w.reads()).toEqual([]); // prepare/activate held what they wrote
-  });
-
-  it('a page and the root read singly come back plain (the runtime save reads them this way)', async () => {
-    const w = await switched(catalog(100));
+    expect(w.log).toEqual([]);
+    const root = (await w.op('internal.coordination.vaultRead', { recordType: CATALOG_ROOT_RECORD })).data as CatalogRoot;
     const k = pageOf('doc-4');
-    const page = (await w.op('internal.coordination.vaultRead', { recordType: catalogPageRecord(k) })).data as Array<{ id: string }>;
+    const page = (await w.op('internal.coordination.vaultRead', { recordType: pageRecordOf(root, k)! })).data as Array<{ id: string }>;
     expect(page.find((e) => e.id === 'doc-4')).toEqual(doc(4));
-    expect(((await w.op('internal.coordination.vaultRead', { recordType: CATALOG_ROOT_RECORD })).data as CatalogRoot).active).toBe(true);
   });
 });
 
-describe('the rollback carries every save since the switch back', () => {
-  it('deactivate writes the CURRENT pages into the legacy record, verifies it, and only then switches back', async () => {
+describe.skipIf(!sqliteAvailable)('an interrupted write changes nothing a reader can see', () => {
+  it('a page write failing mid-plan, at every step: the catalog reads as before, and nothing written is left named', async () => {
+    const base = catalog(300);
+    // Changes in many pages + a doc→folder move + a folder rename: the hardest plan.
+    const next = base.map((e) => (e.id === 'doc-10' ? { ...e, isFolder: true } : e.id === 'f-shelf' ? { ...e, name: 'shelf-renamed' } : typeof e.id === 'string' && Number(String(e.id).slice(4)) % 9 === 0 ? { ...e, version: 7 } : e));
+    for (let stop = 0; ; stop++) {
+      const w = await switched(base);
+      let commits = 0;
+      w.fail.when = (tool) => tool === 'catalog_commit' && commits++ === stop;
+      const out = await w.op('internal.coordination.vaultWrite', { recordType: 'content.catalog', record: next });
+      w.fail.when = null;
+      w.restart();
+      if (out.ok) { expect(await readCatalog(w)).toEqual(next); break; } // the failure point is past the root swap (collect) or beyond the plan
+      expect(await readCatalog(w)).toEqual(base);
+      expect(stop).toBeLessThan(20);
+    }
+  });
+
+  it('a doc → folder move interrupted at every vault call: never lost, never doubled', async () => {
+    for (const moved of [{ ...doc(10), isFolder: true }, doc(10)]) {
+      const start = moved.isFolder ? catalog(80) : catalog(80).map((e) => (e.id === 'doc-10' ? { ...e, isFolder: true } : e));
+      for (let stop = 0; stop < 6; stop++) {
+        const w = await switched(start);
+        let n = 0;
+        w.fail.when = () => n++ === stop;
+        await w.op('internal.library.catalogEdit', { upserts: [moved] });
+        w.fail.when = null;
+        w.restart();
+        const got = (await readCatalog(w)) as Array<Record<string, unknown>>;
+        expect(got.filter((e) => e.id === 'doc-10')).toHaveLength(1);
+        expect([JSON.stringify(start), JSON.stringify(start.map((e) => (e.id === 'doc-10' ? moved : e)))]).toContain(JSON.stringify(got));
+      }
+    }
+  });
+
+  it('two interleaved writers: the second root swap is refused (compare-and-set), and the catalog is the first writer’s', async () => {
+    const w = await switched(catalog(50));
+    const rootBefore = (await w.stored(CATALOG_ROOT_RECORD))!;
+    await w.op('internal.library.catalogEdit', { upserts: [doc(700)] });
+    // The racer commits a root it planned from the OLD root: the vault refuses it.
+    const { commitCatalog } = await import('../../vault/src/catalog-store.js');
+    const stale = await commitCatalog(w.vault, PERSON, { op: 'root', data: rootBefore.data, expectRootRev: rootBefore.rev });
+    expect(stale).toMatchObject({ ok: false, error: 'catalog_conflict' });
+    w.restart();
+    expect(await readCatalog(w)).toEqual([...catalog(50), doc(700)]);
+  });
+});
+
+describe.skipIf(!sqliteAvailable)('a broken paged index is an error, never the frozen legacy record', () => {
+  it('a deleted root: reads fail and whole-list writes are refused — the owner is not silently un-paged', async () => {
+    const w = await switched(catalog(20));
+    await w.op('internal.library.catalogEdit', { upserts: [doc(99)] });
+    w.exec(`UPDATE vault_objects SET deleted_at = CURRENT_TIMESTAMP WHERE resource = ?`, 'vault:content.catalog.root');
+    w.restart();
+    expect((await w.op('internal.coordination.vaultRead', { recordType: 'content.catalog' })).ok).toBe(false);
+    expect((await w.op('internal.coordination.vaultWrite', { recordType: 'content.catalog', record: catalog(1) })).ok).toBe(false);
+    expect(w.legacyWrites()).toBe(0);
+  });
+
+  it('a root that does not parse: the same', async () => {
+    const w = await switched(catalog(20));
+    await w.vault.writeGuarded(PERSON, 'vault:content.catalog.root', { format: 'ap.catalog.paged.v2', active: true, pageCount: 32 }, {});
+    w.restart();
+    expect((await w.op('internal.coordination.vaultRead', { recordType: 'content.catalog' })).ok).toBe(false);
+    expect((await w.op('internal.coordination.vaultWrite', { recordType: 'content.catalog', record: catalog(1) })).ok).toBe(false);
+  });
+});
+
+describe.skipIf(!sqliteAvailable)('the rollback carries every save since the switch back — and never overwrites a record that moved', () => {
+  it('deactivate restores the CURRENT pages into the legacy record, reads it back AS STORED, and only then switches back', async () => {
     const w = await switched(catalog(120));
     await w.op('internal.library.catalogEdit', { upserts: [doc(9000), doc(7, { version: 5 })] });
     const now = await readCatalog(w);
-    w.clear();
+    expect(now).not.toEqual(await w.legacy());
     const out = await paged(w, 'deactivate');
-    expect(out.ok).toBe(true);
-    expect(w.writes()).toEqual(['content.catalog', CATALOG_ROOT_RECORD]);
-    expect(w.root()!.active).toBe(false);
-    expect(expandCatalog(w.records.get('content.catalog'))).toEqual(now);
+    expect(out).toMatchObject({ ok: true, restored: 122 });
+    expect((await w.root())!.active).toBe(false);
+    expect(await w.legacy()).toEqual(now);
+    w.restart();
     expect(await readCatalog(w)).toEqual(now);
-    // …and the owner can be switched again straight away: the pages still equal the restored record.
-    expect((await paged(w, 'activate')).ok).toBe(true);
+    expect(await paged(w, 'activate')).toMatchObject({ ok: true }); // the pages still equal the restored record
+  });
+
+  it('deactivate REFUSES, writing nothing, when the legacy record was written while paged', async () => {
+    const w = await switched(catalog(30));
+    await w.op('internal.library.catalogEdit', { upserts: [doc(800)] });
+    // An out-of-band write that bypassed every guard (raw SQL): the frozen record moved.
+    const rec = (await w.stored('content.catalog'))!;
+    w.exec(`UPDATE vault_objects SET rev = rev + 1 WHERE resource = ?`, 'vault:content.catalog');
+    const before = await w.stored('content.catalog');
+    const out = await paged(w, 'deactivate');
+    expect(out).toMatchObject({ ok: false, code: 'catalog_legacy_moved' });
+    expect(await w.stored('content.catalog')).toEqual(before);
+    expect(before!.rev).toBe(rec.rev + 1);
+    expect((await w.root())!.active).toBe(true);
+  });
+
+  it('deactivate interrupted at every vault call: the owner stays paged with nothing lost, or is restored exactly', async () => {
+    for (let stop = 0; stop < 8; stop++) {
+      const w = await switched(catalog(40));
+      await w.op('internal.library.catalogEdit', { upserts: [doc(4242)] });
+      const truth = await readCatalog(w);
+      let n = 0;
+      w.fail.when = () => n++ === stop;
+      await paged(w, 'deactivate');
+      w.fail.when = null;
+      w.restart();
+      expect(await readCatalog(w)).toEqual(truth);
+      const st = await paged(w, 'status');
+      if (st.paged) expect((await paged(w, 'deactivate')).ok, `stop ${stop}`).toBe(true);
+      w.restart();
+      expect(await readCatalog(w)).toEqual(truth);
+    }
   });
 });
 
 // ── the record.put cache fix ────────────────────────────────────────────────────────────────────────────────────────
-// The Home writes a person's Library records through `record.put`, which does not pass through `writeDoc`; the object
-// kept serving its minute-old copy of the record to the runtime's next read.
 const b64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 let signer: CryptoKey;
 let jwks: unknown;
@@ -285,10 +362,10 @@ async function session(sub: string): Promise<string> {
   return `${si}.${b64url(new Uint8Array(sig))}`;
 }
 
-describe('record.put drops what the object held of the record', () => {
+describe.skipIf(!sqliteAvailable)('record.put drops what the object held of the record', () => {
   it("the runtime's read after a Home record.put is the new record, not the held one", async () => {
     const w = world();
-    w.records.set('content.artifact.art-1', { bytesB64: btoa('old') });
+    await w.vault.write({ owner: PERSON, resource: 'vault:content.artifact.art-1', data: { bytesB64: btoa('old') } });
     expect((await w.op('internal.coordination.vaultRead', { recordType: 'content.artifact.art-1' })).data).toEqual({ bytesB64: btoa('old') });
     const put = await w.raw('record.put', { session: await session(`eip155:${CHAIN}:${PERSON}`), recordType: 'content.artifact.art-1', record: { bytesB64: btoa('new') } }, false);
     expect(put.body).toMatchObject({ ok: true });
@@ -301,7 +378,7 @@ describe('record.put drops what the object held of the record', () => {
     const next = [...catalog(50), doc(777)];
     const put = await w.raw('record.put', { session: await session(`eip155:${CHAIN}:${PERSON}`), recordType: 'content.catalog', record: next }, false);
     expect(put.body).toMatchObject({ ok: true });
-    expect(w.writes()).toEqual([catalogPageRecord(pageOf('doc-777')), CATALOG_ROOT_RECORD]);
+    expect(w.commits()).toEqual(['pages:1', 'root']);
     expect(await readCatalog(w)).toEqual(next);
   });
 
@@ -309,6 +386,6 @@ describe('record.put drops what the object held of the record', () => {
     const w = await switched(catalog(5));
     const put = await w.raw('record.put', { session: await session(`eip155:${CHAIN}:${PERSON}`), recordType: CATALOG_ROOT_RECORD, record: { active: false } }, false);
     expect(put.status).toBe(400);
-    expect(w.root()!.active).toBe(true);
+    expect((await w.root())!.active).toBe(true);
   });
 });
