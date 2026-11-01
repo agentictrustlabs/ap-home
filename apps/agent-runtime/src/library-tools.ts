@@ -493,7 +493,10 @@ async function libraryWriteHeld(deps: LibraryToolDeps, owner: string, toolId: st
     requirePersonsTurn({ ctx, toolId, what: `make ${String(args.name ?? args.id ?? 'a document')} ${policy}` });
     const entry = find();
     entry.accessPolicy = policy;
-    await write(list, entry);
+    // The document's RECORD is written only when the entry still carries its bytes inline (a catalog from before the
+    // index-only rule). An index entry has none, and `recordOf(entry)` written over `content.artifact.<id>` erased the body
+    // the record held: making a document public or private lost its text.
+    await write(list, typeof entry.bytesB64 === 'string' ? entry : undefined);
     await announceAfter(deps, owner, entry, list);
     return { declared: true, owner, file: catalogView(entry), effectiveAccessPolicy: effectiveAccessPolicy(list, entry), answer: `${pathOf(entry)} is now ${policy}${entry.isFolder ? ' — and so is everything under it that says nothing else' : ''}.` };
   }
