@@ -901,3 +901,14 @@ service = "skills-mcp"
 name = "imb-approval"
 binding = "HARNESS_WORKFLOW"
 class_name = "HarnessApprovalWorkflow"
+
+# THE VAULT PREFLIGHT ON EVERY DEPLOY (docs/design/library-paged-catalog.md). This runtime reads every owner's Library
+# index through the vault's catalog door; deployed against a vault without it, every Library read and save fails
+# closed. wrangler runs `build.command` before it bundles, so even a bare `wrangler deploy --env <name>` stops here
+# when the environment's vault (`MCP_URL`) does not name `catalogDoor` on /health. Set VAULT_PREFLIGHT_ACK=
+# deploy-without-catalog-door to skip, knowingly. (Local `wrangler dev` at the top level has no build step.)
+[env.faithnet.build]
+command = "npx tsx scripts/deploy.mts --preflight-only --env faithnet"
+
+[env.impact-agent.build]
+command = "npx tsx scripts/deploy.mts --preflight-only --env impact-agent"

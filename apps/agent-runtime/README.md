@@ -27,6 +27,19 @@ its own host and its own Durable Objects.
 - **Runtimes of its own.** A member's runtime is woken when a message is admitted, paired by a single-use code, and
   continues its own parked run under a chain derived from a standing grant.
 
+## Deploy: the vault goes first
+
+This runtime reads every owner's Library index through the vault's catalog door (`get_catalog_records` /
+`catalog_commit`; see `docs/design/library-paged-catalog.md`). **Deploy `apps/vault` first.** Against a vault without
+the door, every owner's Library read and save fails closed. Both deploy routes check this before anything is uploaded:
+
+- `pnpm --filter @ap-home/agent-runtime run deploy -- --env <name>` (`scripts/deploy.mts`)
+- a bare `wrangler deploy --env faithnet|impact-agent` (wrangler.toml `build.command`)
+
+Each one asks the environment's vault (`MCP_URL`) for `/health` and refuses unless the answer names
+`catalogDoor: ap.catalog.paged.v2`. To skip the check knowingly, set `VAULT_PREFLIGHT_ACK=deploy-without-catalog-door`.
+The check does not cover a deploy to a new environment that has no `[env.<name>.build]`.
+
 ## Run it
 
 ```bash

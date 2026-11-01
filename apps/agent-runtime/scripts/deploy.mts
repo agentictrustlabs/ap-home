@@ -9,7 +9,8 @@
  *   pnpm --filter @ap-home/agent-runtime run deploy -- --env faithnet
  *
  * Every argument is passed to `wrangler deploy`. `--skip-vault-preflight` (with VAULT_PREFLIGHT_ACK=deploy-without-catalog-door)
- * skips the check — only for an environment with no vault at all.
+ * skips the check — only for an environment with no vault at all. A BARE `wrangler deploy --env faithnet|impact-agent`
+ * runs the same check too: wrangler.toml gives those environments a `build.command` of `deploy.mts --preflight-only`.
  */
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -52,9 +53,12 @@ export async function vaultPreflight(vaultUrl: string, fetchImpl: typeof fetch =
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const args = process.argv.slice(2);
-  const skip = args.includes('--skip-vault-preflight');
-  const wranglerArgs = args.filter((a) => a !== '--skip-vault-preflight');
-  if (skip && process.env.VAULT_PREFLIGHT_ACK !== 'deploy-without-catalog-door') {
+  // `--preflight-only`: the check alone — what wrangler.toml's per-environment `build.command` runs, so even a bare
+  // `wrangler deploy --env <name>` stops here against a vault without the door.
+  const only = args.includes('--preflight-only');
+  const skip = args.includes('--skip-vault-preflight') || process.env.VAULT_PREFLIGHT_ACK === 'deploy-without-catalog-door';
+  const wranglerArgs = args.filter((a) => a !== '--skip-vault-preflight' && a !== '--preflight-only');
+  if (args.includes('--skip-vault-preflight') && process.env.VAULT_PREFLIGHT_ACK !== 'deploy-without-catalog-door') {
     console.error('--skip-vault-preflight needs VAULT_PREFLIGHT_ACK=deploy-without-catalog-door');
     process.exit(1);
   }
@@ -66,6 +70,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (why) { console.error(`vault preflight FAILED: ${why}. Not deploying.`); process.exit(1); }
     console.log(`vault preflight ok: ${url} serves ${CATALOG_DOOR}`);
   }
+  if (only) process.exit(0);
+  // wrangler runs the per-environment build command (the same preflight) again; it is cheap and passes.
   const r = spawnSync('npx', ['wrangler', 'deploy', ...wranglerArgs], { stdio: 'inherit' });
   process.exit(r.status ?? 1);
 }

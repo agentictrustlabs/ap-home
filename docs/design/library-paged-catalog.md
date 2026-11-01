@@ -58,6 +58,10 @@ swaps the root. The cap rises to 10,000 for a paged owner.
 sequence of bucket symbols is the whole merge, and `assemble(split(x))` reproduces `x` position for position. No field
 is added to an entry, and the string is 1 byte per row.
 
+**Digests use the root's own page count.** Every digest the switch compares (prepare, verify, the resume check, the
+read-back) is taken under the root's own `pageCount`. A test takes a 16-page owner through activate, an edit,
+deactivate and an interrupted-then-resumed deactivate.
+
 **A strict root.**
 
 - No root record at all means a legacy owner.
@@ -82,6 +86,16 @@ A write proceeds in five steps:
    - after a failed collection;
    - every 16th root swap;
    - from the operator's door (`sweep` action).
+
+   **The sweep never takes a page that may be in flight.** The vault enforces two rules:
+   - It never tombstones a generation whose sequence (the base-36 prefix of its name) is greater than the current
+     root's `seq`. Such a page belongs to a writer whose root swap has not landed yet.
+   - It never tombstones a page record written in the last five minutes.
+
+   Separately, the root swap re-checks that every page it names is live **inside its own guarded statement**. A
+   tombstone (from a sweep, a collect, or anything else) that lands between the swap's check and its write fails the
+   swap with `catalog_conflict`; it can never produce a root that names a missing page. The third review's probe is a
+   repo test.
 
 **What a failure at each point does:**
 
@@ -333,10 +347,13 @@ It reads `MCP_URL` for that env from `wrangler.toml` (or `VAULT_URL`), asks the 
 deploy unless the answer names `catalogDoor: ap.catalog.paged.v2`. Only then does it run `wrangler deploy` with the
 same arguments.
 
-- **Skipping it** needs both `--skip-vault-preflight` and `VAULT_PREFLIGHT_ACK=deploy-without-catalog-door`.
-- **Any other deploy path must run the same check first.** That includes a bare `wrangler deploy`, CI, or the estate's
-  deploy scripts. If it is skipped, every Library read and save for every owner fails closed with "deploy apps/vault
-  first".
+- **A bare `wrangler deploy --env faithnet|impact-agent`** runs the same check. `wrangler.toml` gives both environments
+  a `build.command` of `deploy.mts --preflight-only`, which wrangler runs before bundling. Verified with
+  `wrangler deploy --dry-run`: the deploy stops against a vault without the door and passes against one with it.
+  CI and the estate's deploy scripts go through one of these two routes.
+- **Skipping it:** set `VAULT_PREFLIGHT_ACK=deploy-without-catalog-door`.
+- **Not covered:** a deploy to a new environment that has no `[env.<name>.build]`. If the check is skipped, every
+  Library read and save for every owner fails closed with "deploy apps/vault first".
 - **There is no 404→legacy fallback, on purpose.** After a vault rollback, a fallback would serve frozen records and
   accept writes into them.
 
