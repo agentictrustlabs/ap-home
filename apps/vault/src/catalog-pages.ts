@@ -135,6 +135,18 @@ export async function sha256Hex(s: string): Promise<string> {
 /** A page's content hash: over the plain (expanded) rows, exactly as a reader receives them. */
 export const pageHash = (rows: readonly unknown[]): Promise<string> => sha256Hex(JSON.stringify(rows));
 
+/**
+ * A DIGEST OF A WHOLE LIST without serializing it whole: the order, the root bucket and every page's hash. Any change to
+ * any row changes its page's hash (or the order, or the root bucket), so two lists with the same digest are the same
+ * list. `prepare` records it of the legacy record and `activate` requires it unchanged.
+ */
+export async function catalogDigest(list: readonly unknown[], pageCount: number = CATALOG_PAGE_COUNT): Promise<string> {
+  const split = splitCatalog(list, pageCount);
+  const hashes: string[] = [];
+  for (const rows of split.pages) hashes.push(await pageHash(rows));
+  return sha256Hex(`${CATALOG_PAGED_FORMAT}|${pageCount}|${split.order}|${await pageHash(split.folders)}|${hashes.join(',')}`);
+}
+
 /** JSON with sorted keys, for comparing rows by value. */
 export function canonicalJson(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;

@@ -18,7 +18,7 @@
 // The VAULT enforces scopes only — never membership (stated so nobody optimizes this gate away).
 // Audit: D1 (spec 322 §7), before commit.
 import { CATALOG_RECORD, compactCatalog, expandCatalog } from './catalog-codec.js';
-import { CATALOG_ROOT_RECORD, activeCatalogRoot, asCatalogRoot, applyCatalogEdit, assembleCatalog, buildPagedCatalog, catalogPageRecord, compareCatalog, isPagedCatalogRecord, pageRows, planPagedWrite, readCatalogPages, sha256Hex as sha256HexOf, PAGE_READ_BATCH, type CatalogRoot, type PagedWrite } from './catalog-pages.js';
+import { CATALOG_ROOT_RECORD, activeCatalogRoot, asCatalogRoot, applyCatalogEdit, assembleCatalog, buildPagedCatalog, catalogPageRecord, compareCatalog, isPagedCatalogRecord, pageRows, planPagedWrite, readCatalogPages, catalogDigest, PAGE_READ_BATCH, type CatalogRoot, type PagedWrite } from './catalog-pages.js';
 import { CONTACT_FIELD_ARGS, contactField, precisionOf } from '@agenticprimitives/ontology';
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { chainFor, chainIdOf } from './chain';
@@ -1246,7 +1246,9 @@ export class InteractionsDO {
     const rootNow = asCatalogRoot((await raw.readOne<unknown>(CATALOG_ROOT_RECORD))?.data ?? null);
     const legacyNow = async (): Promise<{ list: unknown[] | null; hash: string | null }> => {
       const data = (await raw.readOne<unknown>(CATALOG_RECORD))?.data ?? null;
-      return Array.isArray(data) ? { list: data, hash: await sha256HexOf(JSON.stringify(data)) } : { list: null, hash: null };
+      // Digested page by page (catalog-pages.ts `catalogDigest`), never serialized whole: this is the object that ran out
+      // of memory holding the catalog.
+      return Array.isArray(data) ? { list: data, hash: await catalogDigest(data) } : { list: null, hash: null };
     };
     const freshPage = (root: CatalogRoot) => async (k: number) => pageRows(root, k, (await raw.readOne<unknown>(catalogPageRecord(k)))?.data ?? null);
     const describe = (root: CatalogRoot | null) => (root ? { active: root.active, pageCount: root.pageCount, total: root.total, rev: root.rev, updatedAt: root.updatedAt, pages: root.pages.map((p) => p.count), folders: root.folders.length, ...(root.migratedFrom ? { migratedFrom: root.migratedFrom } : {}) } : null);

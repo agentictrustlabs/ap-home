@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { compactCatalog, expandCatalog, CATALOG_COMPACT_FORMAT } from '../src/catalog-codec.js';
 import {
   CATALOG_PAGED_FORMAT, CATALOG_PAGE_COUNT, CATALOG_ROOT_RECORD, activeCatalogRoot, applyCatalogEdit, asCatalogRoot, assembleCatalog,
-  buildPagedCatalog, catalogPageRecord, compareCatalog, fnv1a32, isPagedCatalogRecord, pageOf, pageRows, planPagedWrite, readCatalog,
+  buildPagedCatalog, catalogDigest, catalogPageRecord, compareCatalog, fnv1a32, isPagedCatalogRecord, pageOf, pageRows, planPagedWrite, readCatalog,
   splitCatalog, type CatalogRoot,
 } from '../src/catalog-pages.js';
 
@@ -243,6 +243,17 @@ describe('comparing the pages to a list', () => {
     const keyOrder = await compareCatalog(changed, built.root, load);
     expect(keyOrder.mismatches).toEqual([expect.objectContaining({ id: 'doc-8', reason: 'key order differs' })]);
   });
+});
+
+it('the digest of a list changes with any row, the order, or a folder — and only then', async () => {
+  const list = catalog(200);
+  const d = await catalogDigest(list);
+  expect(await catalogDigest(structuredClone(list))).toBe(d);
+  const changed = structuredClone(list) as Array<Record<string, unknown>>;
+  changed[10] = { ...changed[10], size: 1 };
+  expect(await catalogDigest(changed)).not.toBe(d);
+  expect(await catalogDigest([list[1], list[0], ...list.slice(2)])).not.toBe(d);
+  expect(await catalogDigest(list.filter((e) => !(e as { isFolder?: boolean }).isFolder))).not.toBe(d);
 });
 
 it('expandCatalog of a page that holds nothing worth sharing is the page itself', () => {
