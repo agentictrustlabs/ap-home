@@ -58,6 +58,14 @@ export async function orgConsultWire(env: Env, org: string): Promise<IncomingDel
   return r.wire ?? null;
 }
 
+/** The agent's own A2A signing wire that COVERS `skill` — its service signing wire (the library-read ceremony,
+ *  `signing.serviceWire`) or its org consult wire (`routing.orgWire`), whichever names the skill's selector; when neither
+ *  does, whichever exists (so the caller's shape check says what is missing); null when the agent holds none. */
+export async function signingWireFor(env: Env, agent: string, skill: string): Promise<IncomingDelegation | null> {
+  const r = (await interactionsInternal(env, agent, 'internal.signing.wire', { skill })) as { wire?: IncomingDelegation | null };
+  return r.wire ?? null;
+}
+
 /** The member's consultability grant to this org, read FRESH (the §8 rule), or null. */
 export async function memberConsultGrant(env: Env, org: string, member: string): Promise<IncomingDelegation | null> {
   const r = (await interactionsInternal(env, org, 'internal.consult.grant', { member: member.toLowerCase() })) as { wire?: IncomingDelegation | null };

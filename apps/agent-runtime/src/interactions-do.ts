@@ -95,6 +95,7 @@ import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hm
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
 import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, interactionsSessionKeyConfigured, fireEndeavorEventTriggers, afterEndeavorCommit, type Env, type IncomingDelegation } from './index.js';
 import { checkSessionWireShape } from '@agenticprimitives/a2a';
+import { SERVICE_SIGNING_WIRE_KEY, SERVICE_SIGNING_WIRE_SKILLS, serviceSigningWireError, wireCovering, type ServiceSigningWireRecord } from './agent-signing-wire.js';
 import { handleEndeavorOp, reduceEventLog, coordinationEventsResource, COORDINATION_REQUESTS_RESOURCE, type CoordinationRequestsDocV1, type EndeavorOpDeps } from './endeavors.js';
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
 import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
@@ -539,6 +540,12 @@ export interface InteractionsDeps {
   ): Promise<Response>;
   /** Typed-name resolution for mentions (spec 400 W2). Default: the naming registry over `env.RPC_URL`. */
   resolveName?(name: string): Promise<Address | null>;
+  /** DelegationManager.isRevoked(digest). Default: a chain read via `env.RPC_URL`. (Used by the service signing wire.) */
+  isRevoked?(digest: Hex): Promise<boolean>;
+  /** The interactions-session key's address. Default: `interactionsSessionAccount(env).address`. */
+  sessionKeyAddress?(): Promise<string>;
+  /** Whether this principal is a service agent. Default: `principalIsService` (derived type, else a `.svc` name). */
+  isService?(principal: string): Promise<boolean>;
 }
 
 /** The records `libraryDocs` keeps: the Library's index and its documents' records. */
@@ -1804,6 +1811,85 @@ export class InteractionsDO {
 
   /** Steward proof: a presented org→person organizationStewardshipDelegation wire, org-verified + unrevoked on-chain, AND
    *  carrying the stewardship caveat shape (SEC-C1 — never a data grant). */
+  /**
+   * THE SERVICE SIGNING WIRE CEREMONY (agent-signing-wire.ts) — the routing-enable store, generalized to a SERVICE principal
+   * and to exactly the library-read method. Before the interactions-grant check on purpose: storing a wire touches no vault.
+   *
+   *   status — { wirePresent, sessionKey, hash?, enabledAt?, validUntil?, skills?, wire? }. The wire is returned because it
+   *            is not a secret (every message signed under it carries it, session-wrapped, to the publisher) and the Home
+   *            needs its full struct to revoke it on chain (`revokeGrantedDelegation`).
+   *   enable — the custodian's signed wire. Admitted when: the principal is a service agent; the wire's shape is exactly the
+   *            library-read wire (`serviceSigningWireError`); its signature verifies ERC-1271 AGAINST THE SERVICE (only the
+   *            service's custodian credential can produce that — this IS the custody test, as `consult.routingEnable`'s is the
+   *            org custody test); it is not already revoked. Stored under `signing.serviceWire`, never `routing.orgWire`.
+   *            Reached only with the person's own Home session (OWNER_ONLY refuses an app's token).
+   *   clear  — removes the stored wire ONLY once it is revoked on chain or past its window: the on-chain revocation is the
+   *            authority kill (every publisher's gate checks `isRevoked` per message), this is the tidy-up after it, so a
+   *            session alone can never strip a custodian's live wire.
+   */
+  private async serviceSigningWireOp(op: string, principal: string, sessionSa: Address, body: Record<string, unknown>): Promise<Response> {
+    const audit = buildAuditSink(this.env);
+    const rec = (await this.state.storage.get(SERVICE_SIGNING_WIRE_KEY)) as ServiceSigningWireRecord | undefined;
+    const sessionKeyOf = async (): Promise<string | null> => {
+      try { return (this.deps?.sessionKeyAddress ? await this.deps.sessionKeyAddress() : (await interactionsSessionAccount(this.env)).address).toLowerCase(); } catch { return null; }
+    };
+    const revoked = async (digest: Hex): Promise<boolean> => (this.deps?.isRevoked
+      ? this.deps.isRevoked(digest)
+      : (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean);
+    const validUntilOf = (w: IncomingDelegation): number | null => {
+      const ts = (w.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === (this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase());
+      try { return ts?.terms ? Number(decodeTimestampTerms(ts.terms as Hex).validUntil) : null; } catch { return null; }
+    };
+    if (op === 'signing.wireStatus') {
+      return json({
+        ok: true, wirePresent: !!rec, sessionKey: await sessionKeyOf(), skills: [...SERVICE_SIGNING_WIRE_SKILLS],
+        ...(rec ? { hash: rec.hash, enabledAt: rec.enabledAt, enabledBy: rec.enabledBy, validUntil: validUntilOf(rec.wire), wire: rec.wire } : {}),
+      });
+    }
+    if (op === 'signing.wireClear') {
+      if (!rec) return json({ ok: true, cleared: false });
+      const until = validUntilOf(rec.wire);
+      const expired = until !== null && Math.floor(Date.now() / 1000) >= until;
+      let gone = expired;
+      if (!gone) {
+        try { gone = await revoked(rec.hash as Hex); } catch { return json({ error: 'revocation check unavailable — the wire is kept (fail-closed)' }, 503); }
+      }
+      if (!gone) return json({ error: 'the signing wire is still live — its custodian revokes it on chain first; then it is cleared here' }, 409);
+      await this.state.storage.delete(SERVICE_SIGNING_WIRE_KEY);
+      await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.signingWire.clear', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'delegation', id: rec.hash } });
+      return json({ ok: true, cleared: true });
+    }
+    // signing.wireEnable
+    const isService = this.deps?.isService ? await this.deps.isService(principal).catch(() => false) : await this.principalIsService(principal);
+    if (!isService) return json({ error: 'a signing wire for library reads is minted for a SERVICE agent (a .svc you chartered) — this agent is not one; an organization signs through member routing' }, 400);
+    const sessionKey = await sessionKeyOf();
+    if (!sessionKey) return json({ error: 'interactions-session key unprovisioned — the signing wire needs AKCS_INTERACTIONS_KEY_ID (agentic-kms)' }, 503);
+    const tsEnf = (this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase();
+    const atEnf = (this.env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase();
+    const amEnf = (this.env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
+    if (![tsEnf, atEnf, amEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))) return json({ error: 'wire enforcers not configured — cannot verify the signing wire\'s shape' }, 503);
+    const incoming = body.delegation as IncomingDelegation | undefined;
+    const shapeErr = serviceSigningWireError(incoming, { principal, sessionKey, enforcers: { timestamp: tsEnf, allowedTargets: atEnf, allowedMethods: amEnf }, nowSec: Math.floor(Date.now() / 1000) });
+    if (shapeErr) return json({ error: shapeErr }, 400);
+    const w = incoming!;
+    if (w.signature.toLowerCase().startsWith('0x51')) return json({ error: 'the signing wire must be signed by the service agent\'s custodian (ERC-1271), never session-wrapped' }, 400);
+    const d: Delegation = { ...w, salt: BigInt(w.salt), caveats: w.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+    const digest = hashDelegation(d, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
+    if (!(await this.erc1271(principal as Address, digest, w.signature as Hex))) {
+      return json({ error: `the signing wire's signature does not verify against ${principal} — only the credential that custodies this service agent can sign it` }, 403);
+    }
+    try {
+      if (await revoked(digest)) return json({ error: 'the signing wire is already revoked on-chain' }, 403);
+    } catch { return json({ error: 'revocation check unavailable — wire not stored (fail-closed)' }, 503); }
+    const next: ServiceSigningWireRecord = { wire: w, hash: digest, sessionKey, skills: [...SERVICE_SIGNING_WIRE_SKILLS], enabledBy: sessionSa.toLowerCase(), enabledAt: new Date().toISOString() };
+    await this.state.storage.put(SERVICE_SIGNING_WIRE_KEY, next);
+    const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
+    st.ledger = [...(st.ledger ?? []), { hash: digest, delegate: sessionKey, resources: ['(signing:library.granted.read)'], storedAt: next.enabledAt }].slice(-50);
+    await this.state.storage.put('state', st);
+    await audit.write({ id: crypto.randomUUID(), timestamp: next.enabledAt, action: 'interactions.signingWire.enable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'delegation', id: digest } });
+    return json({ ok: true, hash: digest, replaced: rec?.hash ?? null, skills: next.skills, validUntil: validUntilOf(w) });
+  }
+
   private async isSteward(principal: string, sessionSa: Address, wire: IncomingDelegation | undefined): Promise<boolean> {
     if (!wire) return false;
     if (wire.delegator.toLowerCase() !== principal.toLowerCase()) return false;
@@ -2256,6 +2342,22 @@ export class InteractionsDO {
         gatewayAdoption: GATEWAY_ADOPTION,
         divergences: this.divergences,
       });
+    }
+
+    // ── THE SIGNING WIRE THAT COVERS A METHOD — handed ONLY in-Worker to this principal's own signer (`signingWireFor` in
+    //    consult-rail.ts; #76's library.granted.fetch). Reads BOTH stored wires — the org consult wire (`routing.orgWire`,
+    //    routing-enable) and the service signing wire (`signing.serviceWire`, the library-read ceremony) — and returns the one
+    //    whose allowedMethods names `skill` (agent-signing-wire.ts `wireCovering`). Needs no interactions grant: a wire is DO
+    //    storage, not a vault record, and a workspace that never enabled discussion storage still signs its granted reads.
+    //    `internal.consult.orgWire` is untouched — the consult and archetype paths read exactly what they always read. ──
+    if (op === 'internal.signing.wire') {
+      if (!isInternalCall(request, this.env)) return json({ error: 'internal op — not authorized' }, 403);
+      const skill = String(body.skill ?? '').trim();
+      if (!skill) return json({ error: 'skill required' }, 400);
+      const svc = (await this.state.storage.get(SERVICE_SIGNING_WIRE_KEY)) as ServiceSigningWireRecord | undefined;
+      const org = (await this.state.storage.get(ROUTING_ORG_WIRE_KEY)) as RoutingOrgWireRecord | undefined;
+      const wire = wireCovering({ service: svc?.wire ?? null, org: org?.wire ?? null }, this.env.ALLOWED_METHODS_ENFORCER ?? '', skill);
+      return json({ ok: true, wire, from: wire && wire === svc?.wire ? SERVICE_SIGNING_WIRE_KEY : wire ? ROUTING_ORG_WIRE_KEY : null });
     }
 
     // ── 1-1 inbox residency (spec 322 W3f) — the Home-server channel + in-Worker delivery. ──
@@ -4174,9 +4276,15 @@ export class InteractionsDO {
       'relationships.get', 'relationships.merge',
       'inbox.assistantEnable', 'inbox.assistantDisable', 'inbox.assistantGet',
       'member.profile.put', 'membership.put', 'grants.list',
+      // A service's signing wire is minted at the custodian's own Home; an app that asked for it sent the person THERE.
+      'signing.wireEnable',
     ]);
     if (skillsClientId && OWNER_ONLY.has(op)) {
       return json({ error: 'this is the owner’s own operation — an app authenticated as them may not perform it', code: 'owner_only' }, 403);
+    }
+
+    if (op === 'signing.wireStatus' || op === 'signing.wireEnable' || op === 'signing.wireClear') {
+      return this.serviceSigningWireOp(op, principal, sessionSa, body);
     }
 
     const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;

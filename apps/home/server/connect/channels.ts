@@ -316,8 +316,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // spec 329 §7 — the steward's member-routing ceremony + per-topic toggle. Pass-through: the
   // org's InteractionsDO verifies the wire (delegate = the interactions-session key, consult
   // selector only, ERC-1271 + unrevoked) and custodies it; this route only adds the steward proof.
-  if (body?.action === 'routingStatus' || body?.action === 'routingEnable' || body?.action === 'routingDisable') {
-    const op = { routingStatus: 'consult.routingStatus', routingEnable: 'consult.routingEnable', routingDisable: 'consult.routingDisable' }[body.action]!;
+  //
+  // The same pass-through carries a SERVICE agent's own A2A signing wire for library.granted.read (src/home/
+  // workspace-read-wire.ts): the agent's InteractionsDO verifies it (service principal; delegate = the interactions-session
+  // key; exactly that one method; ERC-1271 against the service — the custody proof; unrevoked) and keeps it under its own
+  // key, never the org consult wire. Enable is refused there for a relying app's token (OWNER_ONLY) — an app sends the
+  // person to /workspace-read instead. One call site for both (the doctor's bridge ratchet: no new session-RPC sites).
+  if (body?.action === 'routingStatus' || body?.action === 'routingEnable' || body?.action === 'routingDisable' || body?.action === 'signingWireStatus' || body?.action === 'signingWireEnable' || body?.action === 'signingWireClear') {
+    const op = { routingStatus: 'consult.routingStatus', routingEnable: 'consult.routingEnable', routingDisable: 'consult.routingDisable', signingWireStatus: 'signing.wireStatus', signingWireEnable: 'signing.wireEnable', signingWireClear: 'signing.wireClear' }[body.action]!;
     const b = body as { channelId?: string; delegation?: unknown; maxFanout?: number; clearWire?: boolean };
     const r = await callInteractions(env, communityId, op, {
       session: who.token,
