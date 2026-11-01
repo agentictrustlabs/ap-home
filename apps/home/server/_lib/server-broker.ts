@@ -120,6 +120,8 @@ export interface Env {
    *  Its presence enables /connect/demo-personas, /connect/demo-signin and /connect/persona-sign —
    *  demo keys ONLY (see server/_lib/demo-custody.ts). Unset ⇒ all three are inert. */
   DEMO_PERSONA_KEYS?: string;
+  /** Personas added on their own, merged under DEMO_PERSONA_KEYS (additive only — see demo-custody.ts). */
+  DEMO_PERSONA_KEYS_EXTRA?: string;
   /** Shared secret a demo APP presents to `PUT /connect/demo-sign` when it runs a ceremony on a demo
    *  person's behalf (org deploy, vault-key, admissions) — there is no person session in those flows.
    *  Unset ⇒ that route is off (the session-gated /connect/persona-sign is unaffected). */

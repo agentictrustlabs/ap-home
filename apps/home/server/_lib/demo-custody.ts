@@ -63,10 +63,21 @@ function parseRegistry(raw: string | undefined): Map<string, DemoPersona> {
   return out;
 }
 
-let cached: { raw: string | undefined; map: Map<string, DemoPersona> } | null = null;
+/** THE ROSTER IS TWO SECRETS, MERGED (2026-11-01). `DEMO_PERSONA_KEYS` is a hidden Vercel secret: it cannot be read
+ *  back, so adding a persona to it means re-typing every persona — and a roster rebuilt from local files silently drops
+ *  the ones whose keys live elsewhere (seedreader's, for one). `DEMO_PERSONA_KEYS_EXTRA` takes new personas on their
+ *  own, in either shape. It is ADDITIVE ONLY: an address already in `DEMO_PERSONA_KEYS` keeps that entry (the extra
+ *  secret can never replace or re-key an existing persona), and a malformed extra secret adds nothing. */
+export function mergeRegistries(primary: string | undefined, extra: string | undefined): Map<string, DemoPersona> {
+  const out = parseRegistry(primary);
+  for (const [sa, p] of parseRegistry(extra)) if (!out.has(sa)) out.set(sa, p);
+  return out;
+}
+
+let cached: { raw: string | undefined; extra: string | undefined; map: Map<string, DemoPersona> } | null = null;
 function registry(env: Env): Map<string, DemoPersona> {
-  if (!cached || cached.raw !== env.DEMO_PERSONA_KEYS) {
-    cached = { raw: env.DEMO_PERSONA_KEYS, map: parseRegistry(env.DEMO_PERSONA_KEYS) };
+  if (!cached || cached.raw !== env.DEMO_PERSONA_KEYS || cached.extra !== env.DEMO_PERSONA_KEYS_EXTRA) {
+    cached = { raw: env.DEMO_PERSONA_KEYS, extra: env.DEMO_PERSONA_KEYS_EXTRA, map: mergeRegistries(env.DEMO_PERSONA_KEYS, env.DEMO_PERSONA_KEYS_EXTRA) };
   }
   return cached.map;
 }
