@@ -66,7 +66,7 @@ import { WEB_TOOLS, webReadInvoker } from './web-read.js';
 import { WEB_SEARCH_TOOLS, webSearchInvoker } from './web-search.js';
 import { BUILD_TOOLS, BUILD_ACTS, buildInvoker } from './build-tools.js';
 import { executorInvokeInvoker, readExecutors, type ExecutorSessionSeam } from './executor-invoke.js';
-import { LIBRARY_TOOLS, LIBRARY_ACTS, LIBRARY_GRANT_ACTS, LIBRARY_GRANT_ISSUE, LIBRARY_GRANT_REVOKE, LIBRARY_GRANTS_LIST, libraryInvoker, libraryGrantPlan, libraryGrantFor, stewardshipOver, type LibraryGrantChecks, type LibraryGrantWire } from './library-tools.js';
+import { LIBRARY_TOOLS, LIBRARY_ACTS, LIBRARY_GRANT_ACTS, LIBRARY_GRANT_ISSUE, LIBRARY_GRANT_REVOKE, LIBRARY_GRANTS_LIST, LIBRARY_GRANTED_FETCH, libraryInvoker, libraryGrantPlan, libraryGrantFor, stewardshipOver, type GrantedReadSender, type LibraryGrantChecks, type LibraryGrantWire } from './library-tools.js';
 import { PUBLISHER_TOOLS, publisherRead } from './publisher-contract.js';
 import { MCP_CONNECTOR_PREFIX, MCP_CONNECTORS_LIST, MCP_CONNECTORS_LIST_TOOL, isMcpTool, isMcpConnectorRecord, mcpConnectorTools, mcpConnectorInvoker, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
 import { PREFERENCES_TOOLS, PREFERENCES_ACTS, PREFERENCES_GET, preferencesInvoker } from './preferences-tools.js';
@@ -1188,6 +1188,9 @@ export interface HarnessDeps {
   /** Spec 379 — whether an agent address is served by THIS deployment (its harness runs here). Absent ⇒ every
    *  address is treated as served, so only a card URL counts as outside. */
   isServedHere?: (agent: string) => boolean;
+  /** Slice S5 — send a granted Library read to a publisher's agent AS the addressee (the delegated-task rail, in-Worker)
+   *  and collect its artifact (`grantedReadSender`). Absent ⇒ library.granted.fetch is not offered, and refused if named. */
+  fetchGrantedRead?: GrantedReadSender;
   askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; /** Spec 397 — the asker came through a client they authorized (no session): the admission evidence, forwarded verbatim for the receiver to verify itself. */ appCredential?: { authorization: string; body: string }; /** Spec 397 — the agent routing this step when it is not the asker's own (an organization the person asked AT). */ via?: Address; /** Spec 390 W2 — W3C Trace Context for the hop: this run's trace, the routed step as the parent span. */ trace?: { traceparent: string; tracestate?: string }; /** Appendix M8 — the run ref the receiver is to adopt for a fresh ask (named by the sender). */ runRef?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string }; /** Spec 374 W2 — continue the receiver's parked run with what this turn presented/supplied. */ continue?: { runRef: string; presented?: unknown[]; supplied?: unknown[] } }) => Promise<SubjectAnswerV1>;
   /** Appendix M8 — READ the subject agent's own progress lines for a routed run, under the asker's session,
    *  while the hop is in flight. The receiver's DO answers; nothing is copied but the sentences. */
@@ -2518,6 +2521,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
         ...(grantAct && ts ? { mandate: { delegator: (grantAct.wire as Delegation).delegator, validAfter: Number(decodeTimestampTerms(ts.terms as Hex).validAfter) } } : {}),
         approvedHash: (owner, digest) => verifyAllowingSettle(async () => (await deps.readContract({ address: owner as Address, abi: ERC1271_IS_VALID_ABI, functionName: 'isValidSignature', args: [digest, '0x03'] }).catch(() => null)) === '0x1626ba7e', '0x03'),
         ...(grantAct ? { revokeOnChain: (grant: LibraryGrantWire, a: Record<string, unknown>, c: Parameters<ToolInvoker>[2]) => revokeByOwnerUnderMandate(deps, env, grantAct, grant, a, c) } : {}),
+        ...(deps.fetchGrantedRead ? { fetchGranted: deps.fetchGrantedRead } : {}),
       }, addressee, person)(toolId, args, ctx);
     }
     if (isMcpTool(toolId) || toolId === MCP_CONNECTORS_LIST) return mcpConnectorInvoker({ env: env as never, readConnectors: (h) => mcpConnectorsOf(deps, h), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
@@ -6029,10 +6033,14 @@ step is then handed to that agent under authority the person grants; leave it ou
     // Spec 405 — the addressee's own Library, read as evidence, wherever the playbook carries the contracts.
     // The W5 acts (save / visibility / publish) are ACTION tools above — listed here too they reached the planner twice,
     // and Gemini refused the whole offer ("Duplicate function declaration found: library_file_save", live 2026-09-21).
-    ...(deps.readSubjectRecord ? LIBRARY_TOOLS.filter((t) => !LIBRARY_ACTS.has(t.id) && !LIBRARY_GRANT_ACTS.has(t.id) && t.id !== LIBRARY_GRANTS_LIST).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])) : []),
+    ...(deps.readSubjectRecord ? LIBRARY_TOOLS.filter((t) => !LIBRARY_ACTS.has(t.id) && !LIBRARY_GRANT_ACTS.has(t.id) && t.id !== LIBRARY_GRANTS_LIST && t.id !== LIBRARY_GRANTED_FETCH).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])) : []),
     // Slice S4 — the grants a Library issued, read by its owner (or a steward): offered wherever the private tier is, because
     // the app that asked for a grant reads it back from here once the owner approved at Home (no playbook names it yet).
     ...(deps.readSubjectRecord ? LIBRARY_TOOLS.filter((t) => t.id === LIBRARY_GRANTS_LIST).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
+    // Slice S5 — a workspace's granted read, fetched from the publisher by the workspace's own agent: offered the same way
+    // (a read, admitted only for the workspace or its steward), because the gateway asks for it in a supplied plan and no
+    // playbook names it. Only where this deployment can send it.
+    ...(deps.readSubjectRecord && deps.fetchGrantedRead ? LIBRARY_TOOLS.filter((t) => t.id === LIBRARY_GRANTED_FETCH).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     // Spec 403 W3 — a web search as evidence, wherever the playbook carries the contract.
     ...WEB_SEARCH_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     // The person's own reads, under their CONTRACTS when the playbook carries them (the result app a contract names
