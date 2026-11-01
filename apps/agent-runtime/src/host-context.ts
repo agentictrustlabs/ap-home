@@ -226,6 +226,14 @@ export const MOUNTED_PEER_SKILLS: A2aSkill[] = [
     description: 'Read one public document from this agent’s owner’s shelf: text decoded and bounded, an image as bytes, the release beside it. No credential: SendMessage with a data part { "skill": "library.public.read", "id"?: string, "name"?: string }. A document not on the shelf is answered as not on the shelf.',
     tags: ['library', 'public', 'a2a'],
   },
+  // Slice S2 — A GRANTED READ: mounted on every agent's task runtime (`makeLibraryGrantedReadSkill`), so advertising it is
+  // honest for all of them. Learning it exists grants nothing: the owner's own signed grant to the caller is the authority.
+  {
+    id: 'library.granted.read',
+    name: 'Read a document under a grant',
+    description: 'Read ONE document of this agent’s Library (private or public) under a grant its owner signed to you: a delegated task whose delegation is FROM this agent TO you, with a time window, allowedTargets naming this agent, allowedMethods naming library.granted.read, and a VAULT_RECORD_SCOPE caveat naming the document (`vault:content.artifact.<id>`) or a folder (`vault:content.folder:<path>/*`). Input { "id": string, "offset"?: number }; the artifact carries the text in pages of 12,000 characters and the grant read under. Requires a delegation; a document outside it is answered exactly as one that does not exist.',
+    tags: ['library', 'delegated', 'a2a'],
+  },
   // Spec 436 §5.5 — THE DAY'S PULSE a context agent keeps. Mounted for every agent, as the shelf is: an agent
   // that is written no pulse record answers that it has none, which is the true answer and not an error.
   // What comes back is counts, never a person — the records are aggregate by construction.
