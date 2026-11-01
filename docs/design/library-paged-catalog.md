@@ -1,8 +1,16 @@
 # The paged Library catalog
 
-Status: implemented on branch `library-paged-catalog`, on top of the compact-catalog codec (PR #78). Revised after an
-independent data-safety review (copy-on-write pages, as-stored switch reads, vault-side compare-and-set, an
-authenticated restore, and a strict root). Not deployed. **No owner's data changes until an operator runs `activate`
+Status: implemented on branch `library-paged-catalog`, on top of the compact-catalog codec (PR #78). Revised after two
+independent data-safety reviews:
+
+- **First review:** copy-on-write pages, as-stored switch reads, vault-side compare-and-set, an authenticated restore,
+  and a strict root.
+- **Second review:**
+  - a resumable rollback;
+  - the vault refusing to switch an owner off without a restore;
+  - a deploy preflight;
+  - readers that survive collection;
+  - a sweep for leaked generations. Not deployed. **No owner's data changes until an operator runs `activate`
 for that owner.** The deploy alone does change some behaviour for everyone; see "Behaviour changes before any
 `activate`".
 
@@ -38,7 +46,9 @@ swaps the root. The cap rises to 10,000 for a paged owner.
   folders: [...],                   // the root bucket: folder rows and any row that is not a document, in list order
   migratedFrom?: { hash, total, legacyRev, at }, // prepare: catalogDigest(legacy) and the legacy record's STORED rev
   activation?:  { legacyRev, at },  // activate: the legacy record's stored rev at the switch
-  restore?:     { nonce, expiresAt },// deactivate: the one legacy write the vault will accept while paged
+  restore?:     { nonce, expiresAt, fromRev, toRev },
+                                    // deactivate: the one legacy write the vault accepts while paged — over fromRev,
+                                    // landing as toRev = fromRev + 1. Kept until the owner is switched off (resumable).
   seq, updatedAt,
 }
 // content.catalog.p<k>.g<gen>: compactCatalog(rows). Written ONCE (the vault refuses a second write of the same name).
@@ -65,8 +75,13 @@ A write proceeds in five steps:
 2. Write each changed page under a **new generation name** (`newGeneration`: the next seq plus 48 random bits).
 3. Swap the root by **compare-and-set** on its stored rev. This is one guarded SQL statement at the vault.
 4. Read nothing else.
-5. After the swap, collect the generations named by the previous root's `prevGen`. Each page keeps its previous
-   generation until its next successful write.
+5. After the swap, collect the generations named by the previous root's `prevGen`. Each page keeps the generation
+   the previous root named as `prevGen` until its next change. The collection is best effort. A collection lost to
+   a failure or an eviction is found by the **sweep** (`catalog_commit` op `sweep`), which tombstones every page
+   record the current root names neither as `gen` nor as `prevGen`. The DO runs the sweep:
+   - after a failed collection;
+   - every 16th root swap;
+   - from the operator's door (`sweep` action).
 
 **What a failure at each point does:**
 
@@ -76,6 +91,11 @@ A write proceeds in five steps:
   root together, because the page is only reachable through the root.
 - **A late write cannot roll a page back.** The root names the exact generation, and a generation is never rewritten.
 - **A second writer planned against an old root loses** on the compare-and-set and changes nothing.
+- **A reader holding an older root** can find a page missing: two later commits changed that page, and the second
+  collected the generation the reader's root named. It then re-reads the root once. If the root moved, it reads again
+  against the new one. Only if the root is unchanged is the missing page an integrity error. This applies in the
+  vault's read, the DO's read, and the runtime save, which re-runs the whole act once, but only if nothing has been
+  written yet.
 
 Tests cover each of these: a write failing at every step of the plan (including a doc→folder move and a folder rename
 in the same plan), bucket moves interrupted at every vault call, two interleaved writers, and a deactivate interrupted
@@ -94,23 +114,52 @@ at every vault call.
     stored versions.
   - `catalog_commit` has four operations:
     - `pages`: new generations only, written once.
-    - `root`: compare-and-set on the root's rev. Every page the root names must exist. A change of `active` must name
-      the legacy rev it checked (`activation.legacyRev` or `migratedFrom.legacyRev`), and the vault re-checks that rev
-      **in the same statement**. A legacy write that lands between activate's check and its root swap therefore makes
-      the swap fail.
-    - `restore`: the legacy write the vault accepts while paged, and only under all of these:
-      - the live nonce that deactivate stamped into the root;
-      - the legacy rev the switch froze (`activation.legacyRev`), or it is refused with `catalog_legacy_moved`;
-      - a root that has not moved since the stamp.
-    - `collect`: tombstones generations that no root names.
+    - `root`: a compare-and-set on the root's rev, and every page the root names must exist. The switch's guarantees
+      are enforced **here, whatever the caller says**:
+      - **No stored root:** only an *inactive* root can be written (a prepare).
+      - **A stored root that is deleted or does not parse:** refused. It must be repaired by hand. This also covers a
+        revival of a deleted root via `expectRootRev: -2`, which is refused.
+      - **Inactive → active:** the activation names the legacy rev it checked. The legacy record must still be at that
+        rev, re-checked **in the same statement**. Its digest must equal the new root's digest, so the switch is only
+        ever onto an identical copy.
+      - **Active → active:** the activation is unchanged. The restore stamp is either kept as it is, or replaced by a
+        stamp whose `fromRev` is the frozen rev or the previous stamp's `toRev`, while the legacy record is at that rev
+        (same statement). A stamp is never dropped while the owner is paged.
+      - **Active → inactive:** only after a restore. The stored root must carry a stamp. The legacy record must be at
+        the stamp's `toRev` (same statement), and its digest must be the paged catalog's. The new root names that rev
+        and keeps the pages. A swap to inactive without a restore is refused. This was the second review's probe: it
+        would have dropped every edit made since activation.
+    - `restore`: the legacy write the vault accepts while paged, under all of these:
+      - the live nonce in the stored stamp;
+      - over exactly the stamp's `fromRev` (anything else is `catalog_legacy_moved`);
+      - the root not moved since the stamp (one statement).
+    - `collect`: tombstones named generations that no root names.
+    - `sweep`: tombstones every page record the current root names neither as `gen` nor as `prevGen`.
+- **`set_vault_record`** of `content.catalog` with `data: null` is a tombstone again for a legacy owner, as before the
+  paged index. For a paged owner it is refused.
 - **Every catalog read** (`get_vault_record`, `get_vault_records` and therefore the Home's `content.getMany`,
   `get_entitled_record`, the native ingress) goes through `readVaultRecordData`. That is the legacy record expanded, or
   the pages assembled. An entitlement's field projection applies to the assembled array.
 
-**The trust boundary**, stated precisely: the commit door is the service MAC (the agent-runtime Worker) plus a tool name
-only the DO's catalog path calls. Any code in the agent-runtime Worker that holds an owner's grant could call it. That
-is the same trust domain as the DO itself. Narrowing it to the DO module alone would need a dedicated secret shared by
-the DO and the vault, which I did not add.
+**The trust boundary**, stated precisely: the commit door is the service MAC plus a tool name only the DO's catalog path
+calls. `get_catalog_records` and `catalog_commit` are callable by **any holder of the service MAC key** that also holds
+an owner's grant.
+
+- **Who holds the MAC key today.** In this repo, `A2A_MAC_SECRET` is held by `apps/vault` and `apps/agent-runtime`. It is
+  generated by `scripts/bootstrap-estate.mts` and `scripts/gen-dev-vars.ts`, and listed in `scripts/estate-shape.mts`.
+  Sibling checkouts of ap-home (`ap-home-personas`, `ap-home-old-extraction`) carry the same configuration for their own
+  deployments. Under `agentic-kms` the MAC key is derived inside AKCS (`ap-mac-v1`) for whoever holds the tenant's
+  AKCS credential.
+- **What a MAC holder can and cannot do.** The vault's own checks bound what such a caller can do, whatever it sends:
+  - a compare-and-set root;
+  - activation only onto an identical copy;
+  - deactivation only after a restore;
+  - a restore only over the stamped rev;
+  - generations written once.
+
+  None of these lets it overwrite the frozen legacy record or drop a paged owner's edits. It can still write a valid
+  paged state of its own making, exactly as it could write `content.catalog` before.
+- **Not done.** Narrowing the door to the DO module alone would need a dedicated secret shared by the DO and the vault.
 
 ## The seam in the interactions DO
 
@@ -119,6 +168,15 @@ Every reader and writer of `content.catalog` in the object passes through `vault
 - the runtime's `vaultRead` / `vaultWrite`;
 - the Home's `record.*` and `content.*` (including the scoped merge);
 - the org-package and skill reads.
+
+**Calls and the per-principal limit (120 verified calls / 60 s).** A transient 5xx on `get_catalog_records` is retried
+(bounded at 4 tries). Commits are not retried: a compare-and-set or a write-once page must not be repeated blind.
+
+- **Runtime save of a paged owner:** at most 4 vault calls (root read, page read, pages, root swap), plus a collect
+  when a page changes again. A held root and held page generations cut that further.
+- **Whole-list write:** decided on the held root, with no extra call. The vault guards it: a stale decision is
+  refused (`catalog_paged`, `catalog_switched` or `catalog_conflict`) and retried once on a fresh root.
+- **Switch actions** (40-entry test owner): prepare 9 calls, activate 28 (one per page compared), deactivate 10.
 
 **Read.** The DO reads the root as stored. Active means it reads the pages (held generations first; a generation never
 changes, so a held one is always current) and assembles them. Otherwise it reads the legacy record. A broken root is an
@@ -161,20 +219,28 @@ pages and compare pages to pages; that was the review's first finding.
    bucket and the count.
 4. **`activate`**: runs only if verify passes now **and** the legacy record's stored rev and digest equal
    `migratedFrom`. It swaps the root to active with `activation.legacyRev`, and the vault re-checks that rev atomically.
-5. **`deactivate`** (the rollback). **All checks come before any write:**
+5. **`deactivate`** (the rollback). It is **resumable**: run it again after any failure, and it continues from what
+   the vault says. All checks come before any write:
    - **Checks:**
-     - The legacy record's stored rev must equal `activation.legacyRev`. If not, it refuses with
-       `catalog_legacy_moved` and writes nothing; merge by hand.
+     - The legacy record must be at the rev the switch froze (`activation.legacyRev`), or at the `toRev` of this
+       rollback's own stamp, meaning its restore already landed. Anything else is `catalog_legacy_moved`: nothing is
+       written, merge by hand.
      - Every page is read fresh and must match its hash.
-     - The digest of the current paged catalog is computed from the pages.
+     - The digest of the current paged catalog is computed.
    - **Writes:**
-     1. Stamp a restore nonce into the root (compare-and-set).
-     2. Restore the legacy record. The vault checks the nonce, the frozen legacy rev, and that the root has not moved.
-     3. Read the restored record back **as stored** and compare digests.
-     4. Only then swap the root to inactive, naming the restored rev (atomic again). `migratedFrom` is reset to the
-        restored record, so `activate` can be run again straight away.
-   - **On failure:** a mismatch or an interruption at any step leaves the owner paged, with every save in the pages
-     (tested at every vault call).
+     1. If the stamp's restore already landed and the legacy record's digest equals the pages', go straight to the
+        swap.
+     2. Otherwise, stamp a restore over the legacy record's current rev (`fromRev`, landing as `toRev`), and restore.
+        The vault checks the nonce, the `fromRev`, and that the root has not moved.
+     3. Read the record back **as stored**: its rev and its digest.
+     4. Swap the root to inactive, naming the restored rev. The vault refuses this swap unless the restore happened and
+        matches.
+   - **On success:** `migratedFrom` is reset to the restored record, so `activate` can be run again straight away.
+   - **When the swap's answer is lost:** a deactivate whose swap already landed answers `ok, already`. `activate`
+     behaves the same way when its own swap's answer was lost.
+   - **Tested:** every vault call of prepare, activate and deactivate, interrupted both before the vault ran it and
+     after it ran with its answer lost. In every case the catalog reads the same, and running the action again
+     finishes it. The reviewer's probe cases (a lost read-back, a lost swap) are among these tests.
 
 Once an owner is active, the legacy record is the frozen pre-switch backup. Nothing writes it except the restore.
 
@@ -195,6 +261,26 @@ together. Garbage between collections comes on top of these figures.
 
 **Per-owner procedure** (for example Demo Admin): `status` → `prepare --execute` → `verify --execute` → read the
 report → `activate --execute` → watch a save or publish. To undo, run `deactivate --execute`.
+
+**Runbook: a deactivate that did not finish.**
+
+1. Run `status`. `paged: true` with `rollbackInProgress` shows the stamp's `fromRev`/`toRev` and whether its restore
+   has landed (`restoreLanded`).
+2. Run `deactivate --execute` again. That is all that is needed after a 5xx, a throttle, a lost answer or an eviction.
+3. If it answers `catalog_legacy_moved`, the legacy record was written by something other than this rollback while
+   the owner was paged. That needs a write that bypassed every vault guard. The owner stays paged and nothing is lost.
+   Compare the legacy record (`status` → `legacy`) with the pages by hand, then write the merge back as the paged
+   catalog (a whole-list `content.catalog` write through the DO). Then restore the legacy record's version to the
+   stamp's chain, which is an operator action on D1. Do not deactivate until it is merged.
+4. If it answers `catalog_restore_mismatch`, run `deactivate` again. A further restore over the rev the previous one
+   produced is allowed.
+
+**Runbook: a broken root.** The owner's Library fails closed until the root is repaired:
+
+- **A deleted root:** clear `deleted_at` on the `vault:content.catalog.root` row in D1. The row keeps its data.
+- **A root that does not parse:** restore it from the last good value (the root is small; check `seq`).
+
+The vault refuses to write over either state.
 
 ## What still touches the whole list
 
@@ -241,6 +327,18 @@ These apply to every owner from the moment the code is deployed:
   owners.
 
 ## Deploy order and rollback runbook
+
+**Deploy preflight.** `pnpm --filter @ap-home/agent-runtime run deploy -- --env <name>` now runs `scripts/deploy.mts`.
+It reads `MCP_URL` for that env from `wrangler.toml` (or `VAULT_URL`), asks the vault's `/health`, and refuses to
+deploy unless the answer names `catalogDoor: ap.catalog.paged.v2`. Only then does it run `wrangler deploy` with the
+same arguments.
+
+- **Skipping it** needs both `--skip-vault-preflight` and `VAULT_PREFLIGHT_ACK=deploy-without-catalog-door`.
+- **Any other deploy path must run the same check first.** That includes a bare `wrangler deploy`, CI, or the estate's
+  deploy scripts. If it is skipped, every Library read and save for every owner fails closed with "deploy apps/vault
+  first".
+- **There is no 404→legacy fallback, on purpose.** After a vault rollback, a fallback would serve frozen records and
+  accept writes into them.
 
 **Deploy in this order:**
 
