@@ -555,6 +555,8 @@ const LIBRARY_DOC = /^content\.(catalog(\.root|\.p\d{1,2})?|artifact\.[A-Za-z0-9
 const LIBRARY_DOC_MS = 60_000;
 /** The holder of the catalog lease while a switch action runs (`internal.library.paged`). */
 const PAGED_MIGRATION_HOLDER = 'paged-catalog-switch';
+/** The most rows one page edit may name (a page at the paged cap holds ~312). */
+const CATALOG_EDIT_MAX_ROWS = 4096;
 /** A document's record bigger than this is not remembered: it is read once per act, and a minute of 1–2 MB bodies is what
  *  filled the object (2026-10-28 — a publish saves three of them, a retry three more). The catalog is kept, compact. */
 const LIBRARY_DOC_KEEP_MAX = 256_000;
@@ -2872,7 +2874,9 @@ export class InteractionsDO {
         if (op === 'internal.library.catalogEdit') {
           if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
           const upserts = Array.isArray(body.upserts) ? body.upserts : [];
-          if (!upserts.length || upserts.length > 64) return json({ ok: false, error: 'upserts: 1..64 rows, each with its id' }, 400);
+          // Bounded by a page, not by one document: a save also re-files every older row of its page that still carried
+          // its bytes inline (a person's Home writes them that way), so one edit can name a whole page.
+          if (!upserts.length || upserts.length > CATALOG_EDIT_MAX_ROWS) return json({ ok: false, error: `upserts: 1..${CATALOG_EDIT_MAX_ROWS} rows, each with its id` }, 400);
           try {
             const out = await this.catalogExclusive(async () => {
               const raw = this.vaultRaw(g!);

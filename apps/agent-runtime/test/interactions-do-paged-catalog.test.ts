@@ -192,6 +192,17 @@ describe('a switched owner is written as pages', () => {
     expect(await readCatalog(w)).toEqual([...catalog(300), doc(5000)]);
   });
 
+  it('one edit may name a whole page of rows (a save re-files every inline-bytes row of its page)', async () => {
+    const w = await switched(catalog(400));
+    const k = pageOf('doc-1');
+    const pageRowsNow = catalog(400).filter((e) => !e.isFolder && pageOf(e.id) === k).map((e) => ({ ...e, version: 2 }));
+    expect(pageRowsNow.length).toBeGreaterThan(5);
+    const many = [...pageRowsNow, ...Array.from({ length: 150 }, (_, i) => doc(10_000 + i * 32))];
+    const out = await w.op('internal.library.catalogEdit', { upserts: many });
+    expect(out.ok).toBe(true);
+    expect((await readCatalog(w) as unknown[]).length).toBe(401 + 150);
+  });
+
   it('a page edit for an owner who is not switched is refused, not written', async () => {
     const w = world();
     w.records.set('content.catalog', catalog(3));
