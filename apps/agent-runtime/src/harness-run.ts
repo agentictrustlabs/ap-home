@@ -1128,6 +1128,8 @@ export interface HarnessDeps {
   announceShelf?: (owner: string, entryId: string) => Promise<void>;
   /** Hold an owner's Library index across one read→write (see `LibraryToolDeps.holdCatalog`). */
   holdCatalog?: (owner: string) => Promise<() => Promise<void>>;
+  /** The paged Library index (see `LibraryToolDeps.catalogStore`): an unmemoized root/page read and the DO's page edit. */
+  libraryCatalogStore?: import('./library-paged.js').CatalogStore;
   /** Append one entry to a subject's own record — how a request reaches the person who must decide it. */
   appendSubjectRecord?: (subject: string, recordType: string, entry: unknown) => Promise<{ ok: boolean; error?: string }>;
   /** Spec 410 §8 — one logical write into BOTH parties' vaults (a countersigned relationship credential or its revocation);
@@ -2517,7 +2519,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       const grantAct = LIBRARY_GRANT_ACTS.has(toolId) && presented ? presented : null;
       const ts = grantAct ? (grantAct.wire as Delegation).caveats.find((c) => c.enforcer.toLowerCase() === harnessEnforcers(env).timestamp.toLowerCase()) : undefined;
       return libraryInvoker({
-        readSubjectRecord: deps.readSubjectRecord, ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}), ...(deps.signAsAgent ? { signAsOwner: deps.signAsAgent } : {}), ...(deps.announceShelf ? { announce: deps.announceShelf } : {}), ...(deps.holdCatalog ? { holdCatalog: deps.holdCatalog } : {}), grantChecks: libraryGrantChecks(env, deps), stewardOf: (who, owner) => stewardshipOver({ readSubjectRecord: deps.readSubjectRecord!, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}) }, who, owner),
+        readSubjectRecord: deps.readSubjectRecord, ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}), ...(deps.signAsAgent ? { signAsOwner: deps.signAsAgent } : {}), ...(deps.announceShelf ? { announce: deps.announceShelf } : {}), ...(deps.holdCatalog ? { holdCatalog: deps.holdCatalog } : {}), ...(deps.libraryCatalogStore ? { catalogStore: deps.libraryCatalogStore } : {}), ...(deps.readSubjectRecordStatus ? { readSubjectRecordStatus: deps.readSubjectRecordStatus } : {}), grantChecks: libraryGrantChecks(env, deps), stewardOf: (who, owner) => stewardshipOver({ readSubjectRecord: deps.readSubjectRecord!, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}) }, who, owner),
         ...(grantAct && ts ? { mandate: { delegator: (grantAct.wire as Delegation).delegator, validAfter: Number(decodeTimestampTerms(ts.terms as Hex).validAfter) } } : {}),
         approvedHash: (owner, digest) => verifyAllowingSettle(async () => (await deps.readContract({ address: owner as Address, abi: ERC1271_IS_VALID_ABI, functionName: 'isValidSignature', args: [digest, '0x03'] }).catch(() => null)) === '0x1626ba7e', '0x03'),
         ...(grantAct ? { revokeOnChain: (grant: LibraryGrantWire, a: Record<string, unknown>, c: Parameters<ToolInvoker>[2]) => revokeByOwnerUnderMandate(deps, env, grantAct, grant, a, c) } : {}),

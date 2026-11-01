@@ -235,6 +235,7 @@ const RUN_ENDING_OF = (outcome: string): AgentRunFactsV1['ending'] =>
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
+import { CATALOG_ROOT_RECORD, CATALOG_MAX_PAGE_COUNT, catalogPageRecord } from './catalog-pages.js';
 import {
   storeFederatedToken, loadFederatedToken, setYouVersionGrant, getYouVersionGrant,
   YOUVERSION_DATA_SCOPES, type YouVersionDataScope,
@@ -1082,6 +1083,8 @@ app.use('*', async (c, next) => {
   if (c.req.path === '/custody/oidc/resolve' || c.req.path === '/custody/google/resolve') return next();
   if (c.req.path === '/custody/oidc/sign-site-delegation' || c.req.path === '/custody/google/sign-site-delegation') return next();
   if (c.req.path === '/custody/oidc/activate-vault' || c.req.path === '/custody/google/activate-vault') return next();
+  // The paged-Library switch's operator door: bridge-HMAC authenticated (its own audience), no browser cookie.
+  if (c.req.path === '/custody/library/paged') return next();
   // Spec 366 R1 — an ask ROUTED from another agent's harness in this Worker (`askSubjectAgent`). It
   // carries the in-Worker marker; its authorization is entirely body-carried (the asker's Home session,
   // re-verified by `verifyHomeSession`, and the standing the receiver derives against its own records) —
@@ -6887,8 +6890,31 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
         if ((out as { granted?: boolean }).granted !== false || Date.now() > deadline) break;
         await new Promise((r) => setTimeout(r, Number((out as { retryInMs?: number }).retryInMs) || 200));
       }
-      forgetMemo(owner, 'content.catalog');
+      // The read after the wait is fresh — the legacy record's memo, and the paged root's and pages' (catalog-pages.ts).
+      for (const rt of ['content.catalog', CATALOG_ROOT_RECORD, ...Array.from({ length: CATALOG_MAX_PAGE_COUNT }, (_, k) => catalogPageRecord(k))]) forgetMemo(owner, rt);
       return async () => { await lease({ release: true }).catch(() => undefined); };
+    },
+    // THE PAGED LIBRARY INDEX (library-paged.ts): the root and a page read straight from the owner's DO — NOT through the
+    // run's memo, which would keep every page a scan looked at for the rest of the run — and the DO's one-page edit.
+    libraryCatalogStore: {
+      read: async (owner: string, recordType: string) => {
+        try {
+          const out = await callInteractionsInternal(env, owner, 'internal.coordination.vaultRead', { recordType });
+          return { ok: true, data: (out as { data?: unknown }).data ?? null };
+        } catch (e) {
+          return { ok: false, data: null, error: e instanceof Error ? e.message : String(e) };
+        }
+      },
+      edit: async (owner: string, upserts: unknown[], operationId?: string) => {
+        forgetMemo(owner, 'content.catalog');
+        forgetMemo(owner, CATALOG_ROOT_RECORD);
+        try {
+          await callInteractionsInternal(env, owner, 'internal.library.catalogEdit', { upserts, ...(operationId ? { operationId } : {}) });
+          return { ok: true };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      },
     },
     writeSubjectRecord: async (subject: string, recordType: string, record: unknown, operationId?: string) => {
       forgetMemo(subject, recordType); // spec 396 W4 — the run's own write drops its read memo
@@ -8341,6 +8367,28 @@ async function assertSubjectSaStable(env: Env, iss: string, sub: string, agent: 
   if (!prior) await env.SUBJECT_SA_MAP.put(key, agent);
   return null;
 }
+
+/**
+ * POST /custody/library/paged  (operator → runtime, bridge-HMAC `custody.library.paged`)
+ * Body: { owner, action: 'status' | 'prepare' | 'verify' | 'activate' | 'deactivate' }
+ *
+ * THE OPERATOR'S DOOR TO THE PAGED LIBRARY SWITCH (docs/design/library-paged-catalog.md). Forwards to the owner's own
+ * InteractionsDO (`internal.library.paged`, in-Worker marker) and returns its report. Driven by
+ * `scripts/catalog-paged.mts`; every action is per owner and nothing changes for an owner until `activate`.
+ */
+app.post('/custody/library/paged', async (c) => {
+  const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
+  if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
+  const rawBody = await c.req.text();
+  const ev = await verifyBridgeCall({ request: c.req.raw, rawBody, secret, expectedAudience: 'custody.library.paged', nonces: bridgeNonceStore(c.env) });
+  if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
+  const body = (() => { try { return JSON.parse(rawBody) as { owner?: string; action?: string }; } catch { return null; } })();
+  const owner = String(body?.owner ?? '').toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(owner)) return c.json({ ok: false, error: 'owner (0x address) required' }, 400);
+  const stub = c.env.INTERACTIONS.get(c.env.INTERACTIONS.idFromName(owner));
+  const res = await stub.fetch(new Request(`https://do/interactions/${owner}/internal.library.paged`, { method: 'POST', headers: internalHeaders(c.env as never, { 'content-type': 'application/json' }), body: JSON.stringify({ owner, action: body?.action }) }));
+  return c.json(((await res.json().catch(() => ({ ok: false, error: `the owner's object answered ${res.status}` }))) as Record<string, unknown>), res.status as 200);
+});
 
 app.post('/custody/oidc/resolve', async (c) => {
   const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
