@@ -142,6 +142,10 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   'credential.request',
   'library.file.visibility',
   'library.file.publish',
+  // Slice S4 — a read grant from a Library (and its revoke) is the OWNER letting another agent read her words, under her own
+  // mandate and signature: consent, never work a plan allocates — a plan that could grant reads would hand out her Library.
+  'library.grant.issue',
+  'library.grant.revoke',
 ];
 
 /** A plan step as the work loop sees it. */
