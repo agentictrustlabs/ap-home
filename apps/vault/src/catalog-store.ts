@@ -122,15 +122,24 @@ export async function commitCatalog(v: Store, owner: string, args: Record<string
     if (op === 'sweep') {
       // Every page record the CURRENT root does not name (as a generation or as the kept previous one) is a leak — a
       // collection lost to an eviction, or a commit that died before its root swap. With no root, every page is one.
+      // NEVER one that may be IN FLIGHT: a generation from a sequence past the root's (a writer's pages, its root not
+      // yet swapped), or one written in the last SWEEP_MIN_AGE_MS. Those wait for a later sweep.
       const state = rootState(await stored(v, owner, CATALOG_ROOT_RECORD));
       const named = new Set<string>();
       if (state.kind !== 'legacy') for (const p of state.root.pages) for (const g of [p.gen, p.prevGen]) if (g) named.add(`content.catalog.p${p.k}.g${g}`);
+      const rootSeq = state.kind === 'legacy' ? -1 : state.root.seq;
       const swept: string[] = [];
-      for (const resource of await v.livePrefix(owner, R('content.catalog.p'))) {
-        const rt = resource.slice(VAULT_RECORD_PREFIX.length);
-        if (isVersionedPageRecord(rt) && !named.has(rt)) { await v.tombstone(owner, resource); swept.push(rt); }
+      const kept: string[] = [];
+      for (const row of await v.livePrefix(owner, R('content.catalog.p'))) {
+        const rt = row.resource.slice(VAULT_RECORD_PREFIX.length);
+        if (!isVersionedPageRecord(rt) || named.has(rt)) continue;
+        const seq = generationSeq(rt);
+        const age = now - Date.parse(`${row.updated_at.replace(' ', 'T')}${/Z|[+-]\d\d:?\d\d$/.test(row.updated_at) ? '' : 'Z'}`);
+        if ((seq !== null && seq > rootSeq) || !(age >= SWEEP_MIN_AGE_MS)) { kept.push(rt); continue; }
+        await v.tombstone(owner, row.resource);
+        swept.push(rt);
       }
-      return { ok: true, swept };
+      return { ok: true, swept, kept };
     }
     if (op === 'collect') {
       const rts = Array.isArray(args.recordTypes) ? (args.recordTypes as unknown[]).filter((r): r is string => typeof r === 'string') : [];
@@ -146,6 +155,16 @@ export async function commitCatalog(v: Store, owner: string, args: Record<string
     if (e instanceof CatalogIntegrityError) return refuse('catalog_integrity', e.message);
     throw e;
   }
+}
+
+/** A sweep leaves a page record younger than this alone: it may belong to a writer whose root swap has not landed yet. */
+export const SWEEP_MIN_AGE_MS = 5 * 60_000;
+/** The root sequence a generation was written for (`newGeneration`: base36 seq + 12 random characters). */
+export function generationSeq(recordType: string): number | null {
+  const gen = /\.g([0-9a-z]+)$/.exec(recordType)?.[1];
+  if (!gen || gen.length <= 12) return null;
+  const n = parseInt(gen.slice(0, -12), 36);
+  return Number.isFinite(n) ? n : null;
 }
 
 const sameStamp = (a: CatalogRoot['restore'], b: CatalogRoot['restore']): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -212,9 +231,10 @@ async function commitRoot(v: Store, owner: string, args: Record<string, unknown>
   const missing = named.filter((r) => !live.has(r));
   if (missing.length) return refuse('catalog_page_missing', `the root names ${missing.length} page record(s) that do not exist: ${missing.slice(0, 3).join(', ')}`);
   try {
-    await v.writeGuarded(owner, ROOT, root, { expectRev: expectRootRev, ...(guardRev !== undefined ? { guard: { resource: CATALOG, rev: guardRev } } : {}) });
+    // …and checked AGAIN in the write's own statement: a page tombstoned between the check above and the write fails it.
+    await v.writeGuarded(owner, ROOT, root, { expectRev: expectRootRev, requireLive: named, ...(guardRev !== undefined ? { guard: { resource: CATALOG, rev: guardRev } } : {}) });
   } catch (e) {
-    if (e instanceof VaultRevConflictError) return refuse('catalog_conflict', guardRev !== undefined ? 'the root or the legacy record moved since they were checked' : 'the root moved since it was read');
+    if (e instanceof VaultRevConflictError) return refuse('catalog_conflict', guardRev !== undefined ? 'the root or the legacy record moved, or a page it names went, since they were checked' : 'the root moved, or a page it names went, since it was read');
     throw e;
   }
   return { ok: true, rev: await v.revOf(owner, ROOT) };

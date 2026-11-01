@@ -27,3 +27,10 @@ describe('the vault preflight', () => {
   });
 });
 
+
+it('a bare `wrangler deploy --env` of either estate runs the preflight first (wrangler.toml build.command)', () => {
+  const toml = readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8');
+  for (const env of ['faithnet', 'impact-agent']) {
+    expect(toml).toContain(`[env.${env}.build]\ncommand = "npx tsx scripts/deploy.mts --preflight-only --env ${env}"`);
+  }
+});

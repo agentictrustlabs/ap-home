@@ -267,6 +267,11 @@ describe.skipIf(!sqliteAvailable)('the switch, enforced at the vault', () => {
   });
 });
 
+/** Make records look older than the sweep's in-flight window. */
+const age = (t: { exec: (sql: string, ...p: unknown[]) => unknown }, ...rts: string[]) => {
+  for (const rt of rts) t.exec(`UPDATE vault_objects SET updated_at = datetime('now', '-10 minutes') WHERE resource = ?`, `vault:${rt}`);
+};
+
 describe.skipIf(!sqliteAvailable)('collection and the sweep', () => {
   it('collect tombstones only generations no root names', async () => {
     const t = await setup(list(30));
@@ -284,10 +289,57 @@ describe.skipIf(!sqliteAvailable)('collection and the sweep', () => {
     const r1 = await t.edit(changed);
     const k = r1.pages.find((p) => p.prevGen)!;
     await commitCatalog(t.v, OWNER, { op: 'pages', writes: [{ recordType: 'content.catalog.p1.gleak1', data: [doc(1)] }, { recordType: 'content.catalog.p2.gleak2', data: [] }] });
+    age(t, 'content.catalog.p1.gleak1', 'content.catalog.p2.gleak2');
     const out = await commitCatalog(t.v, OWNER, { op: 'sweep' }) as { swept: string[] };
     expect(out.swept.sort()).toEqual(['content.catalog.p1.gleak1', 'content.catalog.p2.gleak2']);
     expect(await t.stored(`content.catalog.p${k.k}.g${k.prevGen}`)).toMatchObject({ deleted: false });
     expect(JSON.stringify(await readVaultRecordData(t.v, OWNER, CAT))).toBe(JSON.stringify(changed));
+  });
+});
+
+describe.skipIf(!sqliteAvailable)('the sweep never takes a page that may be in flight', () => {
+  it('a generation from a sequence past the root’s (a writer whose swap has not landed) is kept, however old', async () => {
+    const t = await setup(list(30));
+    const root = await t.page(true);
+    const plan = await planPagedWrite([...list(30), doc(777)], root, { gen: newGeneration(root.seq + 1), now: 3 });
+    await commitCatalog(t.v, OWNER, { op: 'pages', writes: plan.pages.map((p) => ({ recordType: p.recordType, data: p.data })) });
+    age(t, ...plan.pages.map((p) => p.recordType));
+    const out = await commitCatalog(t.v, OWNER, { op: 'sweep' }) as { swept: string[]; kept: string[] };
+    expect(out.swept).toEqual([]);
+    expect(out.kept).toEqual(plan.pages.map((p) => p.recordType));
+    expect(await t.commitRoot(plan.root)).toMatchObject({ ok: true });
+    expect(await readVaultRecordData(t.v, OWNER, CAT)).toEqual([...list(30), doc(777)]);
+  });
+
+  it('a generation written in the last five minutes is kept, whatever its sequence', async () => {
+    const t = await setup(list(10));
+    await t.page(true);
+    await commitCatalog(t.v, OWNER, { op: 'pages', writes: [{ recordType: 'content.catalog.p3.g0abcdefghijkl', data: [doc(3)] }] });
+    expect(await commitCatalog(t.v, OWNER, { op: 'sweep' })).toMatchObject({ swept: [], kept: ['content.catalog.p3.g0abcdefghijkl'] });
+    age(t, 'content.catalog.p3.g0abcdefghijkl');
+    expect(await commitCatalog(t.v, OWNER, { op: 'sweep' })).toMatchObject({ swept: ['content.catalog.p3.g0abcdefghijkl'] });
+  });
+
+  it('PROBE: a page tombstoned between the swap’s existence check and its write fails the swap — never a root naming a missing page', async () => {
+    const t = await setup(list(30));
+    const root = await t.page(true);
+    const plan = await planPagedWrite([...list(30), doc(888)], root, { gen: newGeneration(root.seq + 1), now: 3 });
+    await commitCatalog(t.v, OWNER, { op: 'pages', writes: plan.pages.map((p) => ({ recordType: p.recordType, data: p.data })) });
+    // A store whose existence check passes, then a tombstone lands before the guarded write (the race, made certain).
+    const racing = { ...t.v, live: async (o: string, rs: readonly string[]) => {
+      const got = await t.v.live(o, rs);
+      await t.v.tombstone(o, `vault:${plan.pages[0]!.recordType}`);
+      return got;
+    } };
+    expect(await commitCatalog(racing, OWNER, { op: 'root', data: plan.root, expectRootRev: await t.rootRev() })).toMatchObject({ ok: false, error: 'catalog_conflict' });
+    expect(JSON.stringify(await readVaultRecordData(t.v, OWNER, CAT))).toBe(JSON.stringify(list(30)));
+  });
+
+  it('generationSeq reads the sequence a generation was written for', async () => {
+    const { generationSeq } = await import('../src/catalog-store.js');
+    const g = newGeneration(1234);
+    expect(generationSeq(`content.catalog.p1.g${g}`)).toBe(1234);
+    expect(generationSeq('content.catalog.p1.gleak')).toBeNull();
   });
 });
 

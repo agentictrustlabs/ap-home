@@ -18,7 +18,7 @@
 // The VAULT enforces scopes only — never membership (stated so nobody optimizes this gate away).
 // Audit: D1 (spec 322 §7), before commit.
 import { CATALOG_RECORD, compactCatalog, expandCatalog } from './catalog-codec.js';
-import { CATALOG_ROOT_RECORD, applyCatalogEdit, assembleCatalog, buildPagedCatalog, catalogDigest, compareCatalog, isPageMissing, isPagedCatalogRecord, newGeneration, pageHash, pageRecordOf, pageRows, pagesDigest, planPagedWrite, readCatalogPages, rootState, PAGE_READ_BATCH, type CatalogRoot, type PagedWrite, type StoredRecord } from './catalog-pages.js';
+import { CATALOG_PAGE_COUNT, CATALOG_ROOT_RECORD, applyCatalogEdit, assembleCatalog, buildPagedCatalog, catalogDigest, compareCatalog, isPageMissing, isPagedCatalogRecord, newGeneration, pageHash, pageRecordOf, pageRows, pagesDigest, planPagedWrite, readCatalogPages, rootState, PAGE_READ_BATCH, type CatalogRoot, type PagedWrite, type StoredRecord } from './catalog-pages.js';
 import { CONTACT_FIELD_ARGS, contactField, precisionOf } from '@agenticprimitives/ontology';
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { chainFor, chainIdOf } from './chain';
@@ -1350,7 +1350,7 @@ export class InteractionsDO {
       const list = legacyList();
       return {
         ok: true, action, paged: st.kind === 'active', root: describe(root),
-        legacy: legacyRec ? { rev: legacyRev, deleted: legacyRec.deleted, total: list?.length ?? null, digest: list ? await catalogDigest(list) : null } : null,
+        legacy: legacyRec ? { rev: legacyRev, deleted: legacyRec.deleted, total: list?.length ?? null, digest: list ? await catalogDigest(list, root?.pageCount) : null } : null,
         ...(st.kind === 'inactive' ? { legacyUnchangedSincePrepare: root!.migratedFrom?.legacyRev === legacyRev } : {}),
         ...(st.kind === 'active' ? { legacyUnchangedSinceActivate: root!.activation?.legacyRev === legacyRev, ...(root!.restore ? { rollbackInProgress: { fromRev: root!.restore.fromRev, toRev: root!.restore.toRev, restoreLanded: legacyRev === root!.restore.toRev } } : {}) } : {}),
       };
@@ -1363,7 +1363,7 @@ export class InteractionsDO {
       if (st.kind === 'active') return { ok: false, action, error: 'this Library is already paged — deactivate first to prepare again' };
       const list = legacyList();
       if (!list) return { ok: false, action, error: 'there is no legacy Library index (a list) to copy' };
-      const built = await buildPagedCatalog(list, { gen: newGeneration((root?.seq ?? 0) + 1), active: false, now, migratedFrom: { hash: await catalogDigest(list), total: list.length, legacyRev, at: now }, previous: root });
+      const built = await buildPagedCatalog(list, { gen: newGeneration((root?.seq ?? 0) + 1), active: false, now, pageCount: CATALOG_PAGE_COUNT, migratedFrom: { hash: await catalogDigest(list, CATALOG_PAGE_COUNT), total: list.length, legacyRev, at: now }, previous: root });
       await this.commitPagedPlan(raw, built, rootRev);
       return { ok: true, action, root: describe(built.root), pageBytes: built.pages.map((w) => JSON.stringify(w.data).length), legacy: { rev: legacyRev, total: list.length } };
     }
@@ -1378,7 +1378,7 @@ export class InteractionsDO {
         const [rec] = await raw.stored([name]);
         return pageRows(root, k, rec && !rec.deleted ? rec.data : null);
       });
-      const legacyUnchanged = root.migratedFrom?.legacyRev === legacyRev && root.migratedFrom?.hash === await catalogDigest(list);
+      const legacyUnchanged = root.migratedFrom?.legacyRev === legacyRev && root.migratedFrom?.hash === await catalogDigest(list, root.pageCount);
       if (action === 'verify') return { ...cmp, action, active: root.active, legacyUnchangedSincePrepare: legacyUnchanged, legacyRev, ...(root.active ? { note: 'the owner is paged: saves since the switch are in the pages, not in the frozen legacy record, so differences are expected' } : {}) };
       // Already switched on — by this activate, if its swap landed and its answer was lost.
       if (root.active) return root.activation?.legacyRev === legacyRev ? { ok: true, action, already: true, root: describe(root) } : { ok: false, action, error: 'already active' };
@@ -1409,7 +1409,7 @@ export class InteractionsDO {
     const total = root.total;
     let restoredRev: number;
     const current = legacyList();
-    if (stamp && legacyRev === stamp.toRev && current && (await catalogDigest(current)) === digest) {
+    if (stamp && legacyRev === stamp.toRev && current && (await catalogDigest(current, root.pageCount)) === digest) {
       // This rollback's restore already landed and still matches the pages: straight to the swap.
       pages = null;
       restoredRev = legacyRev;
@@ -1426,7 +1426,7 @@ export class InteractionsDO {
     }
     const [back] = await raw.stored([CATALOG_RECORD]);
     const backList = back && !back.deleted ? expandCatalog(back.data) : null;
-    if (!back || back.rev !== restoredRev || !Array.isArray(backList) || backList.length !== total || (await catalogDigest(backList)) !== digest) {
+    if (!back || back.rev !== restoredRev || !Array.isArray(backList) || backList.length !== total || (await catalogDigest(backList, root.pageCount)) !== digest) {
       return { ok: false, action, code: 'catalog_restore_mismatch', error: 'the restored legacy record does not read back as the pages — the owner stays paged (nothing is lost: the pages still hold every save); run deactivate again', restoredRev };
     }
     const [rootNow] = await raw.stored([CATALOG_ROOT_RECORD]);

@@ -303,7 +303,7 @@ export const revToken = (row: Pick<VaultObjectRow, 'rev' | 'deleted_at'> | null)
 export async function putVaultObjectRowGuarded(
   db: D1Database,
   row: Pick<VaultObjectRow, 'owner_address' | 'resource' | 'classification' | 'ciphertext_b64' | 'wrapped_dek_b64' | 'crypto_meta'>,
-  cond: { expectRev?: number; guard?: { resource: string; rev: number } },
+  cond: { expectRev?: number; guard?: { resource: string; rev: number }; requireLive?: readonly string[] },
 ): Promise<void> {
   const owner = row.owner_address.toLowerCase();
   const TOKEN = (alias: string) => `COALESCE((SELECT CASE WHEN ${alias}.deleted_at IS NULL THEN ${alias}.rev ELSE -2 END FROM vault_objects ${alias} WHERE ${alias}.owner_address = ? AND ${alias}.resource = ?), -1)`;
@@ -311,6 +311,14 @@ export async function putVaultObjectRowGuarded(
   const params: unknown[] = [];
   if (cond.expectRev !== undefined) { conds.push(`${TOKEN('s')} = ?`); params.push(owner, row.resource, cond.expectRev); }
   if (cond.guard) { conds.push(`${TOKEN('g')} = ?`); params.push(owner, cond.guard.resource, cond.guard.rev); }
+  // Every named record live AT THE MOMENT of the write — the paged index's root never commits naming a page that a
+  // concurrent tombstone removed between a check and the write.
+  const live = [...new Set(cond.requireLive ?? [])];
+  if (live.length) {
+    if (live.length > 80) throw new Error('requireLive: at most 80 records per guarded write');
+    conds.push(`(SELECT COUNT(*) FROM vault_objects l WHERE l.owner_address = ? AND l.deleted_at IS NULL AND l.resource IN (${live.map(() => '?').join(',')})) = ?`);
+    params.push(owner, ...live, live.length);
+  }
   const where = conds.length ? conds.join(' AND ') : '1';
   const sql = `INSERT INTO vault_objects (owner_address, resource, classification, ciphertext_b64, wrapped_dek_b64, crypto_meta, rev)
        SELECT ?, ?, ?, ?, ?, ?, 0 WHERE ${where}
@@ -327,9 +335,9 @@ export async function putVaultObjectRowGuarded(
 }
 
 /** The live resources of an owner that start with `prefix` (no payloads). */
-export async function liveVaultResourcesWithPrefix(db: D1Database, owner: string, prefix: string): Promise<string[]> {
-  const res = await db.prepare('SELECT resource FROM vault_objects WHERE owner_address = ? AND deleted_at IS NULL AND substr(resource, 1, ?) = ?').bind(owner.toLowerCase(), prefix.length, prefix).all<{ resource: string }>();
-  return (res.results ?? []).map((r) => r.resource);
+export async function liveVaultResourcesWithPrefix(db: D1Database, owner: string, prefix: string): Promise<Array<{ resource: string; updated_at: string }>> {
+  const res = await db.prepare('SELECT resource, updated_at FROM vault_objects WHERE owner_address = ? AND deleted_at IS NULL AND substr(resource, 1, ?) = ?').bind(owner.toLowerCase(), prefix.length, prefix).all<{ resource: string; updated_at: string }>();
+  return res.results ?? [];
 }
 
 /** Which of these resources hold a live row. */

@@ -402,6 +402,34 @@ describe.skipIf(!sqliteAvailable)('every vault call of the switch, interrupted �
   }
 });
 
+describe.skipIf(!sqliteAvailable)('an owner split under a pageCount other than 32 (a later rebalance)', () => {
+  it('activates, edits, rolls back — and resumes a rollback — with every digest taken under ITS page count', async () => {
+    const { buildPagedCatalog, catalogDigest, newGeneration } = await import('../src/catalog-pages.js');
+    const { commitCatalog } = await import('../../vault/src/catalog-store.js');
+    for (const interruptReadback of [false, true]) {
+      const w = world();
+      await w.seedLegacy(catalog(70));
+      const legacyRev = (await w.stored('content.catalog'))!.rev;
+      const built = await buildPagedCatalog(catalog(70), { gen: newGeneration(1), active: false, now: 1, pageCount: 16, migratedFrom: { hash: await catalogDigest(catalog(70), 16), total: 71, legacyRev, at: 1 } });
+      expect(await commitCatalog(w.vault, PERSON, { op: 'pages', writes: built.pages.map((p) => ({ recordType: p.recordType, data: p.data })) })).toMatchObject({ ok: true });
+      expect(await commitCatalog(w.vault, PERSON, { op: 'root', data: built.root, expectRootRev: -1 })).toMatchObject({ ok: true });
+      expect(await paged(w, 'verify')).toMatchObject({ ok: true, legacyUnchangedSincePrepare: true });
+      expect(await paged(w, 'activate')).toMatchObject({ ok: true });
+      await w.op('internal.library.catalogEdit', { upserts: [doc(4321)] });
+      const truth = await readCatalog(w);
+      if (interruptReadback) {
+        let restored = false;
+        w.fail.when = (tool, a) => { if (tool === 'catalog_commit' && a.op === 'restore') { restored = true; return false; } return restored && tool === 'get_catalog_records'; };
+        expect((await paged(w, 'deactivate')).ok).toBe(false);
+        w.fail.when = null;
+      }
+      expect(await paged(w, 'deactivate')).toMatchObject({ ok: true });
+      expect((await w.root())!.pageCount).toBe(16);
+      expect(await w.legacy()).toEqual(truth);
+    }
+  });
+});
+
 describe.skipIf(!sqliteAvailable)('readers racing collection, and the sweep', () => {
   it('a whole-list write decided on a held (stale) root is refused by the vault, and lands as pages on the fresh one', async () => {
     const w = world();
@@ -433,9 +461,13 @@ describe.skipIf(!sqliteAvailable)('readers racing collection, and the sweep', ()
   it('the operator sweep and the periodic sweep tombstone page records no root names', async () => {
     const w = await switched(catalog(30));
     const { commitCatalog } = await import('../../vault/src/catalog-store.js');
+    const aged = (rt: string) => w.exec(`UPDATE vault_objects SET updated_at = datetime('now', '-10 minutes') WHERE resource = ?`, `vault:${rt}`);
     await commitCatalog(w.vault, PERSON, { op: 'pages', writes: [{ recordType: 'content.catalog.p4.gleak', data: [doc(1)] }] });
+    expect(await paged(w, 'sweep')).toMatchObject({ ok: true, swept: [] }); // too young: it may be in flight
+    aged('content.catalog.p4.gleak');
     expect(await paged(w, 'sweep')).toMatchObject({ ok: true, swept: ['content.catalog.p4.gleak'] });
     await commitCatalog(w.vault, PERSON, { op: 'pages', writes: [{ recordType: 'content.catalog.p5.gleak', data: [doc(1)] }] });
+    aged('content.catalog.p5.gleak');
     for (let i = 0; i < 16 && (await w.stored('content.catalog.p5.gleak'))?.deleted !== true; i++) await w.op('internal.library.catalogEdit', { upserts: [doc(900 + i)] });
     expect(await w.stored('content.catalog.p5.gleak')).toMatchObject({ deleted: true });
   });
