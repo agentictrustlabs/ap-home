@@ -65,6 +65,7 @@ export function makeEnv(): Env {
     // own portal can run ceremonies without a wallet. Demo keys only — never a real person's.
     DEMO_PERSONA_KEYS: t(process.env.DEMO_PERSONA_KEYS),
     DEMO_PERSONA_KEYS_EXTRA: t(process.env.DEMO_PERSONA_KEYS_EXTRA),
+    DEMO_PERSONA_KEYS_ADDITIONAL: t(process.env.DEMO_PERSONA_KEYS_ADDITIONAL),
     DEMO_SIGNER_SECRET: t(process.env.DEMO_SIGNER_SECRET),
     ALLOWED_ISSUER_HOSTS: t(process.env.ALLOWED_ISSUER_HOSTS),
   };

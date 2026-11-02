@@ -28,3 +28,20 @@ describe('DEMO_PERSONA_KEYS_EXTRA — additive only', () => {
     expect(listDemoPersonas(env).map((p) => p.handle).sort()).toEqual(['alice', 'demo-publisher', 'seedreader']);
   });
 });
+
+
+describe('independently managed additional demo roster', () => {
+  it('adds a persona without replacing either existing roster', () => {
+    const extra = JSON.stringify({ extra: { sa: B, eoaPrivateKey: K2 } });
+    const additional = JSON.stringify({ calvary: { sa: C, eoaPrivateKey: K3 }, replacePrimary: { sa: A, eoaPrivateKey: K3 }, replaceExtra: { sa: B, eoaPrivateKey: K3 } });
+    const merged = mergeRegistries(primary, extra, additional);
+    expect(merged.get(C)?.handle).toBe('calvary');
+    expect(merged.get(A)?.privateKey).toBe(K1);
+    expect(merged.get(B)?.privateKey).toBe(K2);
+  });
+  it('refreshes the cached registry when the additional roster changes', () => {
+    const env = { DEMO_PERSONA_KEYS: primary, DEMO_PERSONA_KEYS_ADDITIONAL: JSON.stringify({ calvary: { sa: C, eoaPrivateKey: K3 } }) } as never;
+    expect(demoPersonaFor(env, 'calvary')?.sa).toBe(C);
+    expect(demoPersonaFor({ ...env as object, DEMO_PERSONA_KEYS_ADDITIONAL: '{}' } as never, 'calvary')).toBeNull();
+  });
+});
