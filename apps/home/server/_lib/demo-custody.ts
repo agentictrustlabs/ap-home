@@ -68,16 +68,17 @@ function parseRegistry(raw: string | undefined): Map<string, DemoPersona> {
  *  the ones whose keys live elsewhere (seedreader's, for one). `DEMO_PERSONA_KEYS_EXTRA` takes new personas on their
  *  own, in either shape. It is ADDITIVE ONLY: an address already in `DEMO_PERSONA_KEYS` keeps that entry (the extra
  *  secret can never replace or re-key an existing persona), and a malformed extra secret adds nothing. */
-export function mergeRegistries(primary: string | undefined, extra: string | undefined): Map<string, DemoPersona> {
+// An independently managed additional roster preserves both unreadable existing Vercel secrets.
+export function mergeRegistries(primary: string | undefined, extra: string | undefined, additional?: string): Map<string, DemoPersona> {
   const out = parseRegistry(primary);
-  for (const [sa, p] of parseRegistry(extra)) if (!out.has(sa)) out.set(sa, p);
+  for (const raw of [extra, additional]) for (const [sa, p] of parseRegistry(raw)) if (!out.has(sa)) out.set(sa, p);
   return out;
 }
 
-let cached: { raw: string | undefined; extra: string | undefined; map: Map<string, DemoPersona> } | null = null;
+let cached: { raw: string | undefined; extra: string | undefined; additional: string | undefined; map: Map<string, DemoPersona> } | null = null;
 function registry(env: Env): Map<string, DemoPersona> {
-  if (!cached || cached.raw !== env.DEMO_PERSONA_KEYS || cached.extra !== env.DEMO_PERSONA_KEYS_EXTRA) {
-    cached = { raw: env.DEMO_PERSONA_KEYS, extra: env.DEMO_PERSONA_KEYS_EXTRA, map: mergeRegistries(env.DEMO_PERSONA_KEYS, env.DEMO_PERSONA_KEYS_EXTRA) };
+  if (!cached || cached.raw !== env.DEMO_PERSONA_KEYS || cached.extra !== env.DEMO_PERSONA_KEYS_EXTRA || cached.additional !== env.DEMO_PERSONA_KEYS_ADDITIONAL) {
+    cached = { raw: env.DEMO_PERSONA_KEYS, extra: env.DEMO_PERSONA_KEYS_EXTRA, additional: env.DEMO_PERSONA_KEYS_ADDITIONAL, map: mergeRegistries(env.DEMO_PERSONA_KEYS, env.DEMO_PERSONA_KEYS_EXTRA, env.DEMO_PERSONA_KEYS_ADDITIONAL) };
   }
   return cached.map;
 }
