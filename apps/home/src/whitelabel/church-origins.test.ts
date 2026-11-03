@@ -1,4 +1,5 @@
 import {describe,it,expect} from 'vitest';
+import {provisionsCommunityMessaging,reusesStandingGrantWithSelfVault,sharesEmailClaim} from './provisioning';
 import {whitelabel} from './config';
 import {getClient,clientAllowsRedirect,clientAllowsTemplate,isAllowedRelyingOrigin} from '../lib/oidc-clients';
 describe('church portal sign-in registration',()=>{
@@ -17,7 +18,8 @@ describe('church portal sign-in registration',()=>{
  it('grants sign-in only and leaves church authority separate',()=>{
   expect(church.allowed_delegation_templates).toEqual(['site-login']);
   expect(clientAllowsTemplate(church,'org-create')).toBe(false);
-  expect(church.operational_delegate).toBeUndefined();expect(church.org_read_grant).toBeUndefined();expect(church.self_vault_grant).toBeUndefined();
+  expect(church.operational_delegate).toBeUndefined();expect(church.org_read_grant).toBeUndefined();expect(church.self_vault_grant).toEqual({server:'demo-mcp',resources:['vault:church.*'],ops:['read','write']});
  });
+ it('keeps church connect focused on church records without unrelated messaging or email sharing',()=>{expect(provisionsCommunityMessaging('ap-church')).toBe(false);expect(reusesStandingGrantWithSelfVault('ap-church')).toBe(true);expect(sharesEmailClaim(church)).toBe(false);});
  it('keeps existing relying applications registered',()=>{for(const client of ['gather-app','skills-app','pokernight','town-app'])expect(whitelabel.relyingApps.some(a=>a.client_id===client)).toBe(true);});
 });
