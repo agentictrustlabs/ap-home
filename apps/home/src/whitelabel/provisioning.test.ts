@@ -1,5 +1,5 @@
 /**
- * The two sign-in opt-outs Gather 27 uses exist so that ONE client can skip legs it does not use.
+ * Registry sign-in options let clients skip ceremony legs they do not use.
  * This suite is the blast-radius proof: for every other client the answers are the defaults, which
  * is what the ceremony did before the fields existed. Remove either field from gather-app and the
  * matching test goes red; add either to any other client and the "every other client" tests do.
@@ -9,8 +9,8 @@ import { describe, expect, it } from 'vitest';
 import { whitelabel } from './config';
 import { provisionsCommunityMessaging, reusesStandingGrantWithSelfVault, sharesEmailClaim } from './provisioning';
 
-// gather-app and demo-terms are the two clients that skip the messaging leg; source-publishing shares the email claim.
-const others = whitelabel.relyingApps.filter((a) => a.client_id !== 'gather-app' && a.client_id !== 'demo-terms' && a.client_id !== 'source-publishing');
+// Church, Gather and demo-terms skip messaging; source-publishing shares the email claim.
+const others = whitelabel.relyingApps.filter((a) => a.client_id !== 'ap-church' && a.client_id !== 'gather-app' && a.client_id !== 'demo-terms' && a.client_id !== 'source-publishing');
 
 describe('community messaging on sign-in', () => {
   it('gather-app opts out — it registers no messaging capability and the leg cost 18 s', () => {
@@ -31,7 +31,7 @@ describe('community messaging on sign-in', () => {
   it('the field can only turn the leg OFF', () => {
     // The type says `false`; this pins that a truthy value is not a way to widen anything.
     const declared = whitelabel.relyingApps.filter((a) => a.provisioning !== undefined);
-    expect(declared.map((a) => a.client_id).sort()).toEqual(['demo-terms', 'gather-app']);
+    expect(declared.map((a) => a.client_id).sort()).toEqual(['ap-church', 'demo-terms', 'gather-app']);
     for (const a of declared) expect(a.provisioning?.communityMessaging).toBe(false);
   });
 });

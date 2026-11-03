@@ -132,6 +132,10 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'profile'],
       allowed_delegation_templates: ['site-login'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // Plain connect grants access to the member’s own church records, never an org vault.
+      self_vault_grant: { server: VAULT_SERVER_ID, resources: ['vault:church.*'], ops: ['read', 'write'] },
+      provisioning: { communityMessaging: false },
+      standingGrant: 'with-self-vault',
     },
     // skills-app — the SKILL.md management app (agentictrustlabs/skills). Login-grade connect via the
     // Personal Home; no PII held by the broker. aud = client_id; the allowed origin is derived from
