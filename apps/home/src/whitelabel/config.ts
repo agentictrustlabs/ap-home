@@ -117,6 +117,22 @@ const faithImpact: WhiteLabelConfig = {
     { id: 'data-source', label: 'Data sources', blurb: 'Records you help protect and share, with consent.', status: 'soon', verb: 'protect' },
   ],
   relyingApps: [
+    // Church member portal (ap-church). The canonical church origin is first so a sign-in
+    // or logout returns there. A site-login identifies the person; church record authority
+    // is still checked by the church agent and vault, never inferred from this registration.
+    {
+      client_id: 'ap-church',
+      name: 'My Church · Calvary',
+      redirect_uris: [
+        'https://church.faithnet.io/',
+        'https://ap-church-a2a-faithnet.richardpedersen3.workers.dev/',
+        'http://localhost:5178/',
+        'http://127.0.0.1:5178/',
+      ],
+      allowed_scopes: ['openid', 'profile'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
     // skills-app — the SKILL.md management app (agentictrustlabs/skills). Login-grade connect via the
     // Personal Home; no PII held by the broker. aud = client_id; the allowed origin is derived from
     // the exact-match redirect_uri (CN-1) by `src/lib/oidc-clients.ts`.
