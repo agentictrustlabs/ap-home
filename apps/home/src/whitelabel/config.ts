@@ -122,7 +122,7 @@ const faithImpact: WhiteLabelConfig = {
     // is still checked by the church agent and vault, never inferred from this registration.
     {
       client_id: 'ap-church',
-      name: 'My Church · Calvary',
+      name: 'Church',
       redirect_uris: [
         'https://church.faithnet.io/',
         'https://ap-church-a2a-faithnet.richardpedersen3.workers.dev/',
