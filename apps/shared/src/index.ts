@@ -58,7 +58,7 @@ export const APP_ASSESSMENT_SCOPES = ['vault:run.assessment:*'] as const;
  *  (the household precedent): a grant issued before this denies the write `record_scope_denied` until re-issued — found
  *  live, with the answer complete and every class reading absent. A domain whose skills produce records registers its
  *  family HERE and on the runtime's `EFFECT_WRITABLE_RECORDS` (interactions-do.ts); the two lists must agree. */
-export const APP_DOMAIN_RECORD_SCOPES = ['vault:cil-commons.*', 'vault:cil-commons:*'] as const; // both spellings of the rule: the dotted default and the data graph's mapsRecordType form
+export const APP_DOMAIN_RECORD_SCOPES = ['vault:cil-commons.*', 'vault:cil-commons:*', 'vault:faith.*'] as const; // both spellings of the rule: the dotted default and the data graph's mapsRecordType form
 
 /** Spec 444 W3 — an organization ISSUES its members' credentials: its issuer facet (which key-service key signs, for which
  *  credential type and claim layout) and what it keeps of each issuance (the digest, never the claims); and a member keeps

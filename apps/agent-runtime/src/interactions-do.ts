@@ -439,6 +439,9 @@ const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run
   // domain's own `skills:mapsRecordType` for a class the data graph already holds examples of (`cil-commons:deploymentinventory`,
   // the loader's form) — the first chain run wrote its scores and lost its inventory on the colon (2026-10-15).
   'cil-commons.', 'cil-commons:',
+  // The person's own faith records (faith.ttl §"The person's own faith records", record types by faith.data.ttl's
+  // skills:mapsRecordType): written by HER agent's person.faith.* acts into HER vault, never by an app.
+  'faith.',
   // Spec 444 W3 — what an organization keeps of a credential it issued (`appc:Issuance`): the digest and the facet, never
   // the claim values. Written by the organization's own grant when its `credential.issue` act completes.
   'credential.issued:',
