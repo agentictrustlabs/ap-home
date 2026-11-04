@@ -4806,6 +4806,7 @@ async function askReplyForInner(env: HarnessEnv, input: {
       // could be composed — but a floor reached in silence reads as the agent's answer. A provider that
       // refused (a free tier's rate limit, spec 377) is named here, so the person knows to wait or to pick
       // another model; nothing here retries on a different one (ADR-0013).
+      if(input.faithCollaborationRole==='synthesis')throw e; // A partial composition is not a fulfilled collective answer.
       const why = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, ' ').slice(0, 240);
       return withEvidence(`${raw}\n\n(The answer could not be put into words — ${why} — so the evidence is shown as it was found.)`);
     }

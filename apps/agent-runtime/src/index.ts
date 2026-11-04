@@ -5479,7 +5479,7 @@ app.post('/harness/ask', async (c) => {
     const reply = await marks.time('reply:compose', () => askReplyFor(c.env as unknown as HarnessEnv, {
       ...(memory ? { memory } : {}),
       ...(faithCollaboration ? {faithCollaborationRole: faithCollaboration.role} : {}),
-      intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(withGatewayVariant(c.env, variantReq?.gateway), { ...(provider ? { provider } : {}), ...(answerLine ? { systemPrompt: answerLine } : {}), need, onUsage: (u) => { trace.composeUsage = addUsage(trace.composeUsage, u); } }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
+      intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(withGatewayVariant(c.env, variantReq?.gateway), { ...(faithCollaboration?.role==='synthesis'?{profile:'composer-evidence',maxTokens:8192,requireComplete:true}:{}), ...(provider ? { provider } : {}), ...(answerLine ? { systemPrompt: answerLine } : {}), need, onUsage: (u) => { trace.composeUsage = addUsage(trace.composeUsage, u); } }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
       ...(runPlan ? { suppliedPlan: true } : {}),
       ...(runPlan && (body.rowsOnly || faithCollaboration && ['person', 'church'].includes(faithCollaboration.role)) ? { rowsOnly: true } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
