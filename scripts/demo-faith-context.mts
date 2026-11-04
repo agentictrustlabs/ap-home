@@ -31,8 +31,21 @@ for(const handle of ((process.argv.includes('--sources-only')||process.argv.incl
   const addition=role==='org'?definitions.church:definitions.person;
   // Use the shared compiler's composition identity. Keeping the default archetype ID lets Home's
   // default refresh erase the added capability during the next Connect session.
-  const composed=held.definition.archetypeId.includes('+'+addition.archetypeId)?{definition:held.definition,digest:held.definitionDigest}:composeDefinitions(
-   {ref:held.archetypeId,definition:held.definition,digest:held.definitionDigest},
+  let base=held.definition;
+  const installed=base.archetypeId.includes('+'+addition.archetypeId);
+  const current=installed&&Object.entries(addition.sourceCommitments).every(([k,v])=>base.sourceCommitments[k]===v);
+  if(installed&&!current){
+   // Upgrade only the pack this ceremony appended. Refuse unfamiliar compositions rather than
+   // replacing a person's other roles. Composition itself still belongs to the shared compiler.
+   const suffix='+'+addition.archetypeId,marker='\n\n## As '+addition.archetypeId+'\n\n';
+   const start=base.instructions.indexOf(marker);
+   if(!base.archetypeId.endsWith(suffix)||start<0||base.instructions.indexOf('\n\n## As ',start+marker.length)>=0)throw new Error('Faith pack is not the final composition; upgrade it through its original composition owner');
+   const baseId=base.archetypeId.slice(0,-suffix.length),commitments={...base.sourceCommitments};
+   for(const key of [...Object.keys(addition.sourceCommitments),'part:'+addition.archetypeId,'part:'+baseId])delete commitments[key];
+   base={...base,archetypeId:baseId,instructions:base.instructions.slice(0,start),tools:base.tools.filter((t:any)=>!addition.tools.some(a=>a.id===t.id)),sourceCommitments:commitments};
+  }
+  const composed=current?{definition:held.definition,digest:held.definitionDigest}:composeDefinitions(
+   {ref:base.archetypeId,definition:base,digest:definitionDigest(base)},
    [{ref:addition.archetypeId,definition:addition,digest:definitionDigest(addition as never)}]);
   const definition=composed.definition;
   if(!validateAgentHarnessDefinition(definition).ok)throw new Error('Invalid composed playbook');
@@ -42,7 +55,7 @@ for(const handle of ((process.argv.includes('--sources-only')||process.argv.incl
   const entries=new Map((previous?.entries??[]).map((e:any)=>[e.recordType,e]));
   if(role==='person'){
    // Existing answer settings only. No manufactured prayer, journey, age or maturity profile.
-   entries.set('person.preferences',{recordType:'person.preferences',class:'https://agenticprimitives.dev/ns/person#Preferences',category:'guidance',fields:['/answer/language','/answer/style'],release:{visibility:'recipients',recipients:[app,appDelegate,org,'0x3064d88922223881b206dcab68b992b9b2ba90b2'],purposes:['faith-ask']}});
+   entries.set('person.preferences',{recordType:'person.preferences',class:'https://agenticprimitives.dev/ns/context#PersonPreferences',category:'guidance',fields:['/answer/language','/answer/style'],release:{visibility:'recipients',recipients:[app,appDelegate,org,'0x3064d88922223881b206dcab68b992b9b2ba90b2'],purposes:['faith-ask']}});
   }else{
    for(const id of ['campus_messages_msg_2606','campus_messages_msg_2605','campus_messages_msg_2604']){
     const key='church.sermon:'+id;const r=unwrap(await vault('get',key));if(!r?.data)throw new Error('Missing sermon '+id);
@@ -71,6 +84,7 @@ for(const handle of ((process.argv.includes('--sources-only')||process.argv.incl
  const response=await json(await fetch(runtime+'/harness/ask',{method:'POST',headers:{'content-type':'application/json',origin:home,cookie:(cr.headers.get('set-cookie')??'').split(';')[0]??'','x-csrf-token':csrf.token??''},body:JSON.stringify({session:login.homeSession,addressee:owner,message:role==='org'?'Who spoke at Calvary this week?':'Prepare my permitted faith context',rowsOnly:true,plan:{steps:[{id:'faith',toolId,args:{question:process.argv.includes('--service-probe')?'What are Sunday service times at my campus? Name the campus.':'Who spoke at Calvary this week?',recipients:app,purpose:'faith-ask',...(process.argv.includes('--service-probe')?{campusId:'campus_erie'}:{})}}]}})}));
  if(process.argv.includes('--service-probe'))writeFileSync('/tmp/church-faith-org-probe.json',JSON.stringify(response,null,2));
  const contribution=response.reply?.results?.find((r:any)=>r.toolId===toolId)?.result;
+ if(contribution?.refused)console.log(JSON.stringify({playbook:response.reply?.plannerTrace?.playbook,unreadable:response.reply?.plannerTrace?.playbookUnreadable}));
  if(!response.runRef||contribution?.refused||contribution?.status!=='ready')throw new Error(`${handle}: no successful contribution: ${JSON.stringify(response.reply).slice(0,500)}`);
  report.push({handle,owner,runRef:response.runRef,durationMs:Date.now()-start,skill:toolId,sourceCount:contribution.sources.length,sourceKeys:contribution.sources.map((s:any)=>s.recordType),manifestRevision:contribution.manifestRevision});
  console.log(JSON.stringify(report.at(-1)));

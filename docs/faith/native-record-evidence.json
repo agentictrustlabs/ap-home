@@ -1,0 +1,43 @@
+{
+  "checkedAt": "2026-11-04T01:05:21.031Z",
+  "person": "0xb0d11ce19b756a682e78b4904cd8d832303b3d11",
+  "checks": [
+    "Open record contributed",
+    "Confidential change withheld it",
+    "Fixture removed"
+  ],
+  "runs": [
+    {
+      "toolId": "person.faith.journey.record",
+      "runRef": "run-3b7396e8-0445-4fb2-95aa-ae7a1ff06a29"
+    },
+    {
+      "toolId": "person.faith.journey.record",
+      "runRef": "run-a6dc3dd8-c945-4d97-a2de-10307ad1d341"
+    },
+    {
+      "toolId": "faith.context.prepare",
+      "runRef": "run-39097cb7-a9c9-47bd-8cda-64aef8633535"
+    },
+    {
+      "toolId": "person.faith.journey.record",
+      "runRef": "run-84e4920f-4bbe-430e-b941-d0aad2b43a68"
+    },
+    {
+      "toolId": "faith.context.prepare",
+      "runRef": "run-bf29a2aa-11f0-4244-9aee-e682c754206d"
+    },
+    {
+      "toolId": "person.faith.journey.record",
+      "runRef": "run-d625d750-81ae-40cb-8a13-20e020ba2bb7"
+    },
+    {
+      "toolId": "person.faith.journey.record",
+      "runRef": "run-01a49093-3409-4d90-8bfc-7083fbf415eb"
+    },
+    {
+      "toolId": "faith.context.prepare",
+      "runRef": "run-be6d039b-c162-4aa5-ae3b-d78408a9ee4e"
+    }
+  ]
+}

@@ -2,6 +2,7 @@
 import {z} from 'zod';
 import type {ToolInvoker,ToolSpec} from '@agenticprimitives/orchestration';
 import definitions from '../../shared/src/faith-skills.json';
+import {FAITH_CLASS,FAITH_RECORD} from './faith-records.js';
 
 export const FAITH_MANIFEST = 'faith.context:manifest';
 export const FAITH_NS = 'https://ontology.faithchain.org/faith-context#';
@@ -22,6 +23,7 @@ const requestSchema=z.object({question:z.string().min(1).max(8000),recipients:z.
 export const FAITH_TOOLS: ToolSpec[] = Object.values(definitions).flatMap(d=>d.tools).map(t=>({id:t.id,description:t.description,inputSchema:t.inputSchema,establishes:'lookup'}));
 export interface FaithDeps {
  readSubjectRecordStatus?:(owner:string,key:string)=>Promise<{ok:boolean;data:unknown;error?:string}>;
+ survey?:(owner:string)=>Promise<Array<{recordType:string;updatedAt?:string}>>;
  addresseeKind?:string|null;
  /** Set ONLY after signed admission. The recipient list cannot omit the app delegate or routed agent. */
  faithReceivers?:string[];
@@ -33,6 +35,27 @@ function field(record:unknown,path:string):unknown {
 function allowedKey(key:string,role:'person'|'org'){
  return role==='person'?/^(?:faith\.(?:journey|prayer|reading|preference):|church\.(?:journey|prayer|reading):|content\.artifact\.)/.test(key)||key==='person.preferences'
  :/^church\.(?:church|campus|service|event|sermon|sermon-insight|podcast|community|group|study|serve|strategy|resource):/.test(key);
+}
+// Seed writes through person.faith.*. Their inline visibility is authoritative; these records need no
+// second, app-maintained manifest. A collaboration has several receivers of different roles: only Open
+// permits that whole audience without inferring church membership, friendship or leadership.
+const nativeKinds=['stage','milestone','prayer'] as const;
+const nativeKind=(key:string)=>nativeKinds.find(k=>key.startsWith(`${FAITH_RECORD[k]}:`));
+const nativeFields={stage:['/stage','/assertedAt'],milestone:['/milestone','/occurredOn','/recordedAt'],prayer:['/label','/description','/kind','/status','/passage']} as const;
+async function nativeSources(deps:FaithDeps,owner:string,read:(key:string)=>Promise<unknown>){
+ if(!deps.survey)return [];
+ const catalog=(await deps.survey(owner)).filter(r=>nativeKind(r.recordType));
+ const keys=[...catalog].sort((a,b)=>(b.updatedAt??'').localeCompare(a.updatedAt??'')||a.recordType.localeCompare(b.recordType)).slice(0,32);
+ const rows=await Promise.all(keys.map(async r=>({key:r.recordType,kind:nativeKind(r.recordType)!,value:await read(r.recordType)})));
+ const valid=rows.filter(r=>object(r.value)&&r.value.aboutSubject===owner&&r.value['@type']===FAITH_CLASS[r.kind]&&!r.value.removedAt) as Array<{key:string;kind:typeof nativeKinds[number];value:Record<string,unknown>}>;
+ // Never disclose an older public assertion as the current stage if a newer assertion is confidential.
+ // If the bounded read missed any stage record, omit stage context rather than guessing which is current.
+ const stagesComplete=catalog.filter(r=>nativeKind(r.recordType)==='stage').every(r=>keys.some(k=>k.recordType===r.recordType));
+ const latest=stagesComplete?valid.filter(r=>r.kind==='stage').sort((a,b)=>String(b.value.assertedAt??'').localeCompare(String(a.value.assertedAt??'')))[0]?.key:undefined;
+ return valid.filter(r=>r.value.visibility==='Open'&&(r.kind!=='stage'||r.key===latest)).map(r=>({
+  entry:entry.parse({recordType:r.key,class:FAITH_CLASS[r.kind],category:r.kind==='stage'?'guidance':r.kind==='prayer'?'prayer':'journey',fields:[...nativeFields[r.kind]],release:{visibility:'public',purposes:['faith-ask']},topics:nativeFields[r.kind].map(p=>r.value[p.slice(1)]).filter((v):v is string=>typeof v==='string').map(v=>v.slice(0,400)),...(typeof r.value.passage==='string'?{passages:[r.value.passage.slice(0,100)]}:{}),...(/^\d{4}-\d{2}-\d{2}/.test(String(r.value.assertedAt??r.value.recordedAt??r.value.createdAt??''))?{date:String(r.value.assertedAt??r.value.recordedAt??r.value.createdAt).slice(0,10)}:{})}),
+  value:r.value,
+ }));
 }
 export function faithContextInvoker(deps:FaithDeps,asker:string|undefined,addressee:string|undefined):ToolInvoker {
  return async (toolId,args)=>{
@@ -52,19 +75,20 @@ export function faithContextInvoker(deps:FaithDeps,asker:string|undefined,addres
   const raw=await read(FAITH_MANIFEST);
   const skill=Object.values(definitions).find(d=>d.applicableAgentTypes.includes(role))!;
   const binding={owner,role,scope:{campusId:req.campusId??null,date:req.date??null,passage:req.passage??null},purpose:req.purpose,recipients:receivers,skill:{id:skill.archetypeId,version:skill.archetypeVersion,commitments:skill.sourceCommitments}};
-  if(raw===null)return {...binding,status:'not-configured',sources:[],gaps:['The owner has not configured faith context sources.']};
-  const parsedManifest=faithManifestSchema.safeParse(raw);
+  if(raw===null&&!(role==='person'&&deps.survey))return {...binding,status:'not-configured',sources:[],gaps:['The owner has not configured faith context sources.']};
+  const parsedManifest=faithManifestSchema.safeParse(raw??{'@type':`${FAITH_NS}ContextManifest`,owner,role,version:1,revision:'native-faith-records',updatedAt:new Date().toISOString(),entries:[]});
   if(!parsedManifest.success||parsedManifest.data.owner!==owner||parsedManifest.data.role!==role)return {refused:'the faith context manifest is invalid or belongs to another principal'};
   const manifest=parsedManifest.data,now=Date.now();
+  const native=role==='person'?await nativeSources(deps,owner,read):[];
   // Privacy is decided BEFORE plaintext reads and relevance ranking. Do not return withheld counts or metadata.
   const released=manifest.entries.filter(e=>allowedKey(e.recordType,role)&&!e.release.revoked&&e.release.purposes.includes(req.purpose)&&(!e.release.expiresAt||Date.parse(e.release.expiresAt)>now)&&
    (e.release.visibility==='public'&&role==='org'||e.release.visibility==='recipients'&&receivers.every(r=>r===owner||e.release.recipients.includes(r))));
-  const matching=released.filter(e=>(!req.campusId||!e.campusIds.length||e.campusIds.includes(req.campusId))&&(!req.date||e.date===req.date)&&(!req.passage||e.passages.some(p=>p.toLowerCase().includes(req.passage!.toLowerCase()))));
+  const matching=[...released,...native.map(r=>r.entry)].filter(e=>(!req.campusId||!e.campusIds.length||e.campusIds.includes(req.campusId))&&(!req.date||e.date===req.date)&&(!req.passage||e.passages.some(p=>p.toLowerCase().includes(req.passage!.toLowerCase()))));
   const words=[...new Set(req.question.toLowerCase().match(/[a-z]{4,}/g)??[])].filter(w=>!['what','this','that','with','from','have','about','church'].includes(w));
   const category=/compar|three.*(?:messages|sermons)|campus.*messages/i.test(req.question)?'comparison':/sermon|message|spoke|preach/i.test(req.question)?'sermon':/prayer|pray/i.test(req.question)?'prayer':/journey|faith life/i.test(req.question)?'journey':null;
   const score=(e:z.infer<typeof entry>)=>(e.category==='guidance'?30:0)+(e.category===category?20:0)+(/service|sunday|gathering|worship time/i.test(req.question)&&e.recordType.startsWith('church.service:')?30:0)+words.reduce((n,w)=>n+(e.topics.join(' ').toLowerCase().includes(w)?1:0),0);
   const selected=[...matching].sort((a,b)=>score(b)-score(a)||(b.date??'').localeCompare(a.date??'')||a.recordType.localeCompare(b.recordType)).slice(0,8);
-  const records=await Promise.all(selected.map(async e=>({entry:e,value:await read(e.recordType)})));
+  const records=await Promise.all(selected.map(async e=>({entry:e,value:native.find(r=>r.entry.recordType===e.recordType)?.value??await read(e.recordType)})));
   const gaps:string[]=[];const sources:Array<{recordType:string;class:string;category:string;fields:Array<{path:string;value:string|number|boolean;truncated:boolean;start?:number;end?:number}>;date?:string;campusIds:string[];passages:string[]}>=[];
   for(const {entry:e,value} of records){
    if(!object(value)){gaps.push('An authorized source is missing.');continue;}

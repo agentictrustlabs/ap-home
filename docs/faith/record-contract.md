@@ -1,7 +1,19 @@
 # Writer contract: faith context
 
-Home executes the faith skills. Seed owns personal editing; Church owns organization editing.
-Neither app needs to copy source text into the other app. The current implementation accepts a bounded manifest
+The A2A runtime in ap-home executes the faith skills; the Home website is not the agent runtime.
+Seed owns the personal editor and calls `person.faith.*` intent acts; the person's agent writes their vault.
+Church owns organization editing. Neither app needs to copy source text into the other app.
+
+Native personal records use the existing faith ontology and the actual Seed keys: `faith.journey-stage:*`,
+`faith.milestone:*`, and `faith.prayer-request:*`. The contribution adapter reads at most 32 candidate records
+inside the person's own agent and checks `@type`, `aboutSubject`, removal and inline `visibility` before
+releasing scalar evidence. Only `Open` authorizes the mixed audience of app, church and Scripture agents.
+`Confidential`, `Friends`, `BodyOnly` and `LeadersOnly` are not broadened by this collaborative Ask.
+Only the latest stage assertion may contribute; a private latest assertion does not expose an older public one.
+Care records and answered-prayer bodies are not included in general collaborative Ask. No extra manifest is needed
+for these native records. Seed remains responsible for the person's sharing controls.
+
+For organization data and additional personal sources, the implementation accepts a bounded manifest
 (maximum 100 references) at `faith.context:manifest` in the owner's own vault, plus its referenced source records.
 Use existing authenticated vault writes; this contract confers no write permission. Update sources before the manifest.
 Use compare-and-set/revision conflict handling in the owning application's existing write path.
@@ -45,6 +57,15 @@ records. Care cases, guide notes and credentials are outside this read adapter.
 Call the same signed `/harness/ask` endpoint with a supplied plan containing `faith.context.prepare` (person)
 or `church.context.prepare` (org). Arguments: question, purpose `faith-ask`, recipients as comma-separated addresses;
 optional campusId, ISO date and passage. Use rowsOnly for a contribution, or normal grounded composition for an answer.
-The capability must first be composed into the owner's archetype.assignment. A missing manifest returns not-configured;
+The capability must first be composed into the owner's archetype.assignment. A missing organization manifest returns not-configured;
 a denied vault read is an error, never an empty profile. Output supplies owner, recipients, current revision, bounded
 source excerpts and field locators; the harness provides runRef. No contribution starts another agent call.
+
+## Demo native-record acceptance
+
+From the skills repository, generate both contributions plus the existing native journey writer:
+`pnpm exec tsx scripts/compile-faith-context.mts /tmp/faith-definitions.json /tmp/faith-writer.json`.
+Then from ap-home run `FAITH_WRITER_DEFINITION=/tmp/faith-writer.json pnpm exec tsx scripts/check-native-faith-context.mts`.
+It validates and temporarily composes the writer into demo Alice's existing assignment, creates explicitly labelled
+acceptance fixtures through `person.faith.journey.record`, checks Open and Confidential contributions, removes its
+fixtures and restores the assignment. It refuses to overwrite a concurrent assignment change. It sends no messages.

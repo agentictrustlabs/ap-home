@@ -1,21 +1,26 @@
 # Faith intents in Home
 
-Status: implementation in progress. Extends Church specs 200/201. Uses the existing AP runIntent harness,
+Status: implemented; live acceptance evidence is recorded in docs/faith. Extends Church specs 200/201. Uses the existing AP runIntent harness,
 AgentHarnessDefinitionV1, signed ask admission and subject vault port; no second coordination engine.
 Smart-agent reference: canonical addressee binding in smart-agent/apps/a2a-agent/src/middleware/host-context.ts.
 
 Home executes `faith.context.prepare` for a person and `church.context.prepare` for an organization.
 The shared skills repository owns their SKILL.md contracts and ontology profile. Definitions compiled from those
 artifacts activate the tools in each owner's archetype.assignment. Neither installation nor an Ask grants vault access.
-Church maintains organization source records; Seed maintains personal source records. Apps write a bounded,
-owner-held `faith.context:manifest` of pointers and release rules through their existing authorized vault acts.
+Church maintains organization source records; Seed edits personal records through the person's `person.faith.*`
+intent acts. Their native ontology-shaped journey and prayer records are read directly by the person agent.
+Additional personal sources and organization sources use a bounded, owner-held `faith.context:manifest` of
+pointers and release rules written through existing authorized vault acts.
 No private source text is copied into the manifest. Sources are read afresh through the addressee's own grant.
 
 Requests name a question, intended recipients, purpose (`faith-ask`), and optional campus/date/passage scope.
-These are a request, never authority. EVERY contribution applies the manifest's release rules before fetching source
-plaintext. All named recipients AND the authenticated asker must be allowed. Personal self access is necessary but
+These are a request, never authority. Manifest references apply release rules before fetching source plaintext.
+Native faith records carry visibility inline: their own agent reads and validates that policy before any fields
+reach another agent or an answer model. Only native `Open` records authorize the mixed collaboration audience;
+restricted audiences and confidential records stay private. Care is excluded. Only the current stage is shared.
+All named recipients AND the authenticated asker and app delegate must be allowed. Personal self access is necessary but
 not sufficient for onward sharing. Private entries are never contributed. Public organization entries may be contributed;
-personal entries always require named recipients. Expired or revoked entries fail closed. Only approved scalar fields
+personal manifest entries always require named recipients. Expired or revoked entries fail closed. Only approved scalar fields
 are projected; arbitrary nested records, secrets and raw prayer bodies cannot escape through object serialization.
 The manifest owner and role must match the addressed principal and chain role. An organization cannot read a person's
 vault by supplying that person's address in tool arguments. Source records with owner metadata must agree with the vault.
