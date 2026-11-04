@@ -1,5 +1,5 @@
 import {describe,it,expect,vi} from 'vitest';
-import {faithContextInvoker,FAITH_MANIFEST,FAITH_NS,FAITH_TOOLS} from '../src/faith-context.js';
+import {faithContextInvoker,FAITH_MANIFEST,FAITH_NS,FAITH_TOOLS,offersFaithContext} from '../src/faith-context.js';
 import {harnessInvoker} from '../src/harness-run.js';
 import {validateAgentHarnessDefinition,definitionDigest} from '@agenticprimitives/capability-claims';
 import definitions from '../../shared/src/faith-skills.json';
@@ -29,7 +29,18 @@ describe('faith intent release before retrieval',()=>{
  it('fresh reads reflect revocation on next request',async()=>{let m=manifest();const read=vi.fn(async(_s:string,k:string)=>({ok:true,data:k===FAITH_MANIFEST?m:{'@type':cls,owner:me,text:'released'}}));const call=faithContextInvoker({readSubjectRecordStatus:read,addresseeKind:'person',faithReceivers:[app]},me,me);expect((await call('faith.context.prepare',args,{} as never) as any).sources).toHaveLength(1);m=manifest([{...source,release:{...source.release,revoked:true}}]);expect((await call('faith.context.prepare',args,{} as never) as any).sources).toHaveLength(0);expect(read).toHaveBeenCalledTimes(3);});
  it('organization reads own public sources and honors campus and date',async()=>{const sermon={...source,recordType:'church.sermon:one',class:'https://churchcore.ai/ontology/church#Sermon',category:'sermon',campusIds:['erie'],date:'2026-11-01',release:{visibility:'public',purposes:['faith-ask']}};const x=setup(manifest([sermon],'org',org),'org',org,{'church.sermon:one':{'@type':sermon.class,owner:org,text:'Church teaching'}});expect((await x.call({...args,campusId:'boulder'}) as any).sources).toHaveLength(0);const result=await x.call({...args,campusId:'erie',date:'2026-11-01'}) as any;expect(result.sources).toHaveLength(1);expect(result.scope).toMatchObject({campusId:'erie',date:'2026-11-01'});expect(x.read.mock.calls.every(c=>c[0]===org)).toBe(true);});
  it('missing manifest is explicitly not configured',async()=>{expect(await setup(null).call()).toHaveProperty('status','not-configured');});
- it('only an assigned skill can be invoked inside the harness',async()=>{const invoke=harnessInvoker({addresseeKind:'person'} as never,{} as never,null,vi.fn(),me as never,undefined,undefined,me as never,null);expect(await invoke('faith.context.prepare',args,{step:{id:'faith',toolId:'faith.context.prepare',args},index:0,intent:{goal:'faith context'},operationId:'test'} as never)).toHaveProperty('refused');});
+ it('new people can contribute through the harness without a manually installed role',async()=>{
+  const invoke=harnessInvoker({addresseeKind:'person',survey:async()=>[],readSubjectRecordStatus:async()=>({ok:true,data:null})} as never,{} as never,null,vi.fn(),me as never,undefined,undefined,me as never,null);
+  const result=await invoke('faith.context.prepare',args,{step:{id:'faith',toolId:'faith.context.prepare',args},index:0,intent:{goal:'faith context'},operationId:'test'} as never) as any;
+  expect(result.status).toBe('ready');expect(result.sources).toEqual([]);expect(result.skill.commitments).toBeTruthy();
+ });
+ it('native self-read is person-only and church reads require an assigned organization role',()=>{
+  expect(offersFaithContext('faith.context.prepare','person',undefined)).toBe(true);
+  expect(offersFaithContext('faith.context.prepare','org',new Set(['faith.context.prepare']))).toBe(false);
+  expect(offersFaithContext('church.context.prepare','org',undefined)).toBe(false);
+  expect(offersFaithContext('church.context.prepare','person',new Set(['church.context.prepare']))).toBe(false);
+  expect(offersFaithContext('church.context.prepare','org',new Set(['church.context.prepare']))).toBe(true);
+ });
  it('compiled artifacts are valid and contain the executable capabilities',()=>{for(const d of Object.values(definitions)){expect(validateAgentHarnessDefinition(d).ok).toBe(true);expect(definitionDigest(d as never)).toMatch(/^0x/);expect(d.tools[0]?.source?.contractDigest).not.toMatch(/^id:/);}expect(FAITH_TOOLS.map(t=>t.id)).toEqual(['faith.context.prepare','church.context.prepare']);});
 });
 describe('Seed faith records in collaborative context',()=>{
@@ -62,6 +73,10 @@ describe('Seed faith records in collaborative context',()=>{
  it('fresh inline visibility changes revoke disclosure on the next request',async()=>{
   const record={'@type':FAITH_CLASS.prayer,aboutSubject:me,label:'Patience',visibility:'Open'};
   const {call}=native({[prayerKey]:record});expect((await call() as any).sources).toHaveLength(1);record.visibility='Confidential';expect((await call() as any).sources).toHaveLength(0);
+ });
+ it('does not send unrelated Open prayers with a campus service-time question',async()=>{
+  const invoke=faithContextInvoker({addresseeKind:'person',survey:async()=>[{recordType:prayerKey}],readSubjectRecordStatus:async(_owner,key)=>({ok:true,data:key===prayerKey?{'@type':FAITH_CLASS.prayer,aboutSubject:me,label:'Patience',visibility:'Open'}:null})},me,me);
+  expect((await invoke('faith.context.prepare',{...args,question:'What are Sunday service times at my campus?'},{} as never) as any).sources).toEqual([]);
  });
  it('bounds reads and never reads care requests for general collaborative Ask',async()=>{
   const records=Object.fromEntries(Array.from({length:40},(_,i)=>[`${FAITH_RECORD.prayer}:${i}`,{'@type':FAITH_CLASS.prayer,aboutSubject:me,label:'Patience',visibility:'Open'}]));

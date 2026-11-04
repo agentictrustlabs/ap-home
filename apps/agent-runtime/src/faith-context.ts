@@ -21,6 +21,10 @@ export const faithManifestSchema=z.object({
 export type FaithManifest=z.infer<typeof faithManifestSchema>;
 const requestSchema=z.object({question:z.string().min(1).max(8000),recipients:z.string().min(1).max(900),purpose:z.literal('faith-ask'),campusId:z.string().max(120).optional(),date:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),passage:z.string().max(100).optional()}).strict();
 export const FAITH_TOOLS: ToolSpec[] = Object.values(definitions).flatMap(d=>d.tools).map(t=>({id:t.id,description:t.description,inputSchema:t.inputSchema,establishes:'lookup'}));
+/** Native self-read, like person.faith.* reads. Organizations still require their church role. */
+export function offersFaithContext(toolId:string,kind:string|null|undefined,assigned:ReadonlySet<string>|undefined){
+ return toolId==='faith.context.prepare'?kind==='person':toolId==='church.context.prepare'&&['org','church'].includes(kind??'')&&assigned?.has(toolId)===true;
+}
 export interface FaithDeps {
  readSubjectRecordStatus?:(owner:string,key:string)=>Promise<{ok:boolean;data:unknown;error?:string}>;
  survey?:(owner:string)=>Promise<Array<{recordType:string;updatedAt?:string}>>;
@@ -83,10 +87,11 @@ export function faithContextInvoker(deps:FaithDeps,asker:string|undefined,addres
   // Privacy is decided BEFORE plaintext reads and relevance ranking. Do not return withheld counts or metadata.
   const released=manifest.entries.filter(e=>allowedKey(e.recordType,role)&&!e.release.revoked&&e.release.purposes.includes(req.purpose)&&(!e.release.expiresAt||Date.parse(e.release.expiresAt)>now)&&
    (e.release.visibility==='public'&&role==='org'||e.release.visibility==='recipients'&&receivers.every(r=>r===owner||e.release.recipients.includes(r))));
-  const matching=[...released,...native.map(r=>r.entry)].filter(e=>(!req.campusId||!e.campusIds.length||e.campusIds.includes(req.campusId))&&(!req.date||e.date===req.date)&&(!req.passage||e.passages.some(p=>p.toLowerCase().includes(req.passage!.toLowerCase()))));
+  const candidates=[...released,...native.map(r=>r.entry)].filter(e=>(!req.campusId||!e.campusIds.length||e.campusIds.includes(req.campusId))&&(!req.date||e.date===req.date)&&(!req.passage||e.passages.some(p=>p.toLowerCase().includes(req.passage!.toLowerCase()))));
   const words=[...new Set(req.question.toLowerCase().match(/[a-z]{4,}/g)??[])].filter(w=>!['what','this','that','with','from','have','about','church'].includes(w));
   const category=/compar|three.*(?:messages|sermons)|campus.*messages/i.test(req.question)?'comparison':/sermon|message|spoke|preach/i.test(req.question)?'sermon':/prayer|pray/i.test(req.question)?'prayer':/journey|faith life/i.test(req.question)?'journey':null;
   const score=(e:z.infer<typeof entry>)=>(e.category==='guidance'?30:0)+(e.category===category?20:0)+(/service|sunday|gathering|worship time/i.test(req.question)&&e.recordType.startsWith('church.service:')?30:0)+words.reduce((n,w)=>n+(e.topics.join(' ').toLowerCase().includes(w)?1:0),0);
+  const matching=candidates.filter(e=>!native.some(r=>r.entry.recordType===e.recordType)||score(e)>0);
   const selected=[...matching].sort((a,b)=>score(b)-score(a)||(b.date??'').localeCompare(a.date??'')||a.recordType.localeCompare(b.recordType)).slice(0,8);
   const records=await Promise.all(selected.map(async e=>({entry:e,value:native.find(r=>r.entry.recordType===e.recordType)?.value??await read(e.recordType)})));
   const gaps:string[]=[];const sources:Array<{recordType:string;class:string;category:string;fields:Array<{path:string;value:string|number|boolean;truncated:boolean;start?:number;end?:number}>;date?:string;campusIds:string[];passages:string[]}>=[];

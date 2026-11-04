@@ -15,8 +15,8 @@ describe('church portal sign-in registration',()=>{
   expect(clientAllowsRedirect(church,'https://church.faithnet.io/other')).toBe(false);
   expect(isAllowedRelyingOrigin('https://evilchurch.faithnet.io')).toBe(false);
  });
- it('grants sign-in only and leaves church authority separate',()=>{
-  expect(church.allowed_delegation_templates).toEqual(['site-login']);
+ it('grants sign-in and personal Ask while leaving church authority separate',()=>{
+  expect(church.allowed_delegation_templates).toEqual(['site-login', 'ask-as-me']);
   expect(clientAllowsTemplate(church,'org-create')).toBe(false);
   expect(church.operational_delegate).toBeUndefined();expect(church.org_read_grant).toBeUndefined();expect(church.self_vault_grant).toEqual({server:'demo-mcp',resources:['vault:church.*'],ops:['read','write']});
  });

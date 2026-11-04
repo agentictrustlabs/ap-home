@@ -1,4 +1,4 @@
-import {FAITH_TOOLS as FAITH_CONTEXT_TOOLS,faithContextInvoker} from './faith-context.js';
+import {FAITH_TOOLS as FAITH_CONTEXT_TOOLS,faithContextInvoker,offersFaithContext} from './faith-context.js';
 // THE HARNESS ON THIS AGENT — spec 350 W2: a treasury payment (scenario 3) and a team's creation
 // (scenario 2) under a mandate.
 //
@@ -2512,7 +2512,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (WEB_TOOLS.some((t) => t.id === toolId)) return webReadInvoker()(toolId, args, ctx);
     if (WEB_SEARCH_TOOLS.some((t) => t.id === toolId)) return webSearchInvoker(env as never)(toolId, args, ctx);
     if (FAITH_CONTEXT_TOOLS.some(t => t.id === toolId)) {
-      if (!playbook?.capabilityIds.has(toolId)) return {refused: 'this agent has no assigned faith skill'};
+      if (!offersFaithContext(toolId,deps.addresseeKind,playbook?.capabilityIds)) return {refused: 'this agent does not offer this faith skill for its role'};
       return faithContextInvoker(deps,person,addressee)(toolId,args,ctx);
     }
     if (FAITH_TOOLS.some((t) => t.id === toolId)) return faithInvoker({ ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}), ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee)(toolId, args, ctx);
@@ -5984,7 +5984,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   const tools = [
     ...playbookAnswer,
     ...instructionTools,
-    ...(deps.readSubjectRecordStatus ? FAITH_CONTEXT_TOOLS.flatMap(t=>playbook?.tools?.[t.id] ? [mergeContractTool(t,playbook.tools[t.id]!)] : []) : []),
+    ...(deps.readSubjectRecordStatus ? FAITH_CONTEXT_TOOLS.filter(t=>offersFaithContext(t.id,deps.addresseeKind,playbook?.capabilityIds)).map(t=>mergeContractTool(t,playbook?.tools?.[t.id])) : []),
     ...scopedActionTools(input.surface, playbook), ...catalogTools, ...peopleGroupTools, ...mcpTools, ...ASK_DISCOVERY_TOOLS,
     ...(kbQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }) ? [KB_QUESTION_TOOL] : []),
     // Spec 413 — passages from the public tier (released shelf works + agent descriptions), where the estate binds an index.

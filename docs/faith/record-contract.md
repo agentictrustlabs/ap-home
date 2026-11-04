@@ -57,7 +57,7 @@ records. Care cases, guide notes and credentials are outside this read adapter.
 Call the same signed `/harness/ask` endpoint with a supplied plan containing `faith.context.prepare` (person)
 or `church.context.prepare` (org). Arguments: question, purpose `faith-ask`, recipients as comma-separated addresses;
 optional campusId, ISO date and passage. Use rowsOnly for a contribution, or normal grounded composition for an answer.
-The capability must first be composed into the owner's archetype.assignment. A missing organization manifest returns not-configured;
+The person contribution is a native read-only capability backed by the compiled faith artifact, so newly connected people need no manual playbook installation. The organization capability must be composed into the organization's archetype.assignment. A missing organization manifest returns not-configured;
 a denied vault read is an error, never an empty profile. Output supplies owner, recipients, current revision, bounded
 source excerpts and field locators; the harness provides runRef. No contribution starts another agent call.
 

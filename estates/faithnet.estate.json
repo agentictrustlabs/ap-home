@@ -29,7 +29,11 @@
     "https://poker.faithnet.io",
     "https://explorer.faithnet.io",
     "https://demo-bible-ontology-faithnet.richardpedersen3.workers.dev",
-    "https://faithnet.estate"
+    "https://faithnet.estate",
+    "https://skills.faithnet.io",
+    "https://skills.faithnet.town",
+    "https://skills-web-7ar.pages.dev",
+    "http://localhost:5190"
   ],
   "_agents": "OUTPUTS of the build, not inputs: this estate chartered its own. An estate that reuses another estate's interactions SA is not a second estate (439 \u00a77.13).",
   "agents": {
@@ -49,8 +53,13 @@
     "ORCHESTRATION_GEMINI_BILLING_URL": "https://ai.studio/spend",
     "ORCHESTRATION_GEMINI_STRONG_MODEL": "gemini-3.1-pro-preview",
     "ORCHESTRATION_GROQ_TPM": "8000",
-    "ORCHESTRATION_MODEL": "claude-haiku-4-5-20251001",
+    "ORCHESTRATION_MODEL": "claude-haiku-5-5",
     "WARM_AGENTS": "0x1dba4a27c53d7babda99513080223fb3bfc4bad1,0x8e32c713f44c7747d97a589522806a8e1dd810fb",
-    "ORCHESTRATION_LLM": "gemini,anthropic"
+    "ORCHESTRATION_LLM": "gemini,anthropic",
+    "ISSUANCE_EVIDENCE_ISSUER": "https://presentation-release.faithnet.internal",
+    "ISSUANCE_EVIDENCE_AUDIENCE": "akcs-pilot-evidence",
+    "READER_PASS": "{\"issuer\":\"0x00ff8ccc7c7145289c8a42fe8870ec5d8cd68774\",\"treasury\":\"0xdc3ef3d91ceb006099646e7cbb25cf74d747dcc6\",\"priceUnits\":\"1000000\",\"days\":30,\"demoFund\":true,\"audience\":\"https://scripture.faithnet.io\"}",
+    "ORCHESTRATION_ANTHROPIC_STRONG_MODEL": "claude-sonnet-5-5",
+    "READER_HUDDLE_PRINCIPAL": "0x5dd5f3db5085604b0f6a907bbb35ae645afd307f"
   }
 }

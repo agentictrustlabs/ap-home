@@ -33,15 +33,18 @@ The companion journey-writer artifact's metadata now uses the current AP `submis
 
 ## Checks
 
-Runtime typecheck and deployment dry run passed. The complete runtime suite passed: 1,628 tests in 171 files.
-The first full run had one unrelated import timeout; the rerun with four workers passed without changing the test.
+Runtime typecheck and deployment dry run passed. The complete runtime suite passed: 1,630 tests in 171 files.
+The Home suite passed 961 tests. Import-heavy runtime suites now use a bounded worker pool alongside other packages.
 Church typecheck, build and 109 tests passed. Shared skill definitions regenerate byte-for-byte and validate against AP;
 its Turtle source parses (140 triples).
 
-`ap doctor` retains one pre-existing failure in `credential-issue.ts` (`no-cross-subject-vault-reads`), reproduced on the
-baseline before this work. All other enabled rules pass; custodian coverage is skipped by repository configuration.
+All enabled `ap doctor` rules pass. Credential issuance retains its exact mandate check and now also uses the standard
+`subjectOfRead` gate. Rules projection, Home census, fixture coverage and estate shape pass. Custodian coverage remains
+skipped by the existing repository configuration.
 
 The skills are installed as compiled playbook definitions for Calvary and the demo people. Their source artifacts are
 in [skills PR 41](https://github.com/agentictrustlabs/skills/pull/41). Signed corpus publication and graph loading are separate.
-Native writers remain under Seed's role assignment and sharing UX. Additional people/organizations need the corresponding
-skill composed into their existing assignment and an adequate own-vault grant; this code does not silently grant access.
+Native writers remain under Seed's role assignment and sharing UX. Person context preparation is a native read-only capability backed by the compiled skill; new people do not need a
+manual playbook edit. Organizations still need the church role assigned. Both require adequate vault authority; this
+code does not grant access. Open native prayers must also be relevant to the question; private and confidential records
+are withheld before contribution or model composition.

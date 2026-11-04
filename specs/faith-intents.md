@@ -6,7 +6,7 @@ Smart-agent reference: canonical addressee binding in smart-agent/apps/a2a-agent
 
 Home executes `faith.context.prepare` for a person and `church.context.prepare` for an organization.
 The shared skills repository owns their SKILL.md contracts and ontology profile. Definitions compiled from those
-artifacts activate the tools in each owner's archetype.assignment. Neither installation nor an Ask grants vault access.
+artifacts supply the native person self-read and the organization's explicitly assigned church role. Neither installation nor an Ask grants vault access.
 Church maintains organization source records; Seed edits personal records through the person's `person.faith.*`
 intent acts. Their native ontology-shaped journey and prayer records are read directly by the person agent.
 Additional personal sources and organization sources use a bounded, owner-held `faith.context:manifest` of
