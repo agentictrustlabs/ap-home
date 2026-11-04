@@ -1,4 +1,4 @@
-import {FAITH_CONTRIBUTIONS_TOOL,faithCollaborationGuidance,faithCollaborationTools, type FaithCollaborationRole} from './faith-collaboration.js';
+import {FAITH_CONTRIBUTIONS_TOOL,faithContributionEvidence,faithCollaborationGuidance,faithCollaborationTools, type FaithCollaborationRole} from './faith-collaboration.js';
 import {FAITH_TOOLS as FAITH_CONTEXT_TOOLS,faithContextInvoker,offersFaithContext} from './faith-context.js';
 // THE HARNESS ON THIS AGENT — spec 350 W2: a treasury payment (scenario 3) and a team's creation
 // (scenario 2) under a mandate.
@@ -5912,7 +5912,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     : offerBound;
   const boundPlanner: Planner = { plan: async (pin) => {
     const proposed = await boundPlanner0.plan(pin);
-    const p = input.faithCollaborationRole === 'synthesis' && !proposed.steps.some(st => st.toolId === FAITH_CONTRIBUTIONS_TOOL.id) ? {...proposed,steps:[{id:'faith-peers',toolId:FAITH_CONTRIBUTIONS_TOOL.id,args:{}},...proposed.steps]} : proposed;
+    const p = input.faithCollaborationRole === 'synthesis' ? {...proposed,steps:[...(['church','scripture'] as const).map(section=>({id:'faith-'+section,toolId:FAITH_CONTRIBUTIONS_TOOL.id,args:{section}})),...proposed.steps.filter(st=>st.toolId!==FAITH_CONTRIBUTIONS_TOOL.id)]} : proposed;
     if (pin.continuation) trace.continuations = [...(trace.continuations ?? []), { steps: p.steps.map((st) => ({ toolId: st.toolId })) }];
     return p;
   } };
@@ -6163,7 +6163,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   const instructionIds = new Set(instructionTools.map((t) => t.id));
   const localInvoke: ToolInvoker = async (toolId, args, ctx) => {
     if (input.faithCollaborationRole && !faithCollaborationTools(input.faithCollaborationRole).has(toolId)) throw new Error('This read collaboration does not offer ' + toolId);
-    if (toolId === FAITH_CONTRIBUTIONS_TOOL.id && input.faithCollaborationRole === 'synthesis') return {attribution:'Participant contributions supplied by the coordinating workspace; source qualifications remain applicable.',...(input.intent.context as {faithContributions:Record<string,unknown>}).faithContributions};
+    if (toolId === FAITH_CONTRIBUTIONS_TOOL.id && input.faithCollaborationRole === 'synthesis') return faithContributionEvidence((input.intent.context as {faithContributions:Record<string,unknown>}).faithContributions,args.section);
     mark(`invoke:${toolId}:start`);
     try { return await (answerInvoke && toolId === PLAYBOOK_ANSWER_TOOL.id ? answerInvoke(toolId, args, ctx) : skillInvoke && instructionIds.has(toolId) ? skillInvoke(toolId, args, ctx) : harnessLocal(toolId, args, ctx)); }
     finally { mark(`invoke:${toolId}:end`); }
