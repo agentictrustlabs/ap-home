@@ -83,8 +83,16 @@ export const APP_AGREEMENT_SCOPES = ['vault:agreement-acceptance:*'] as const;
  *  distinct op at the record-scope gate). The product grants this, never the substrate; drop it when no vault holds one. */
 export const APP_LEGACY_CONTACT_MIGRATION_SCOPES = ['vault:contact:*'] as const;
 
+/** Faith apps maintain these records; Home's agents read them under their OWN storage grant.
+ * Release to an Ask is separately enforced by the faith skill. Additive; no existing grant is invalidated. */
+export const APP_FAITH_READ_SCOPES = [
+  'vault:faith.context:manifest', 'vault:faith.journey:*', 'vault:faith.prayer:*',
+  'vault:faith.reading:*', 'vault:faith.preference:*',
+  ...['church','campus','service','event','sermon','sermon-insight','podcast','community','group','study','serve','strategy','resource','journey','prayer','reading'].map(name => `vault:church.${name}:*`),
+] as const;
+
 export const INTERACTIONS_APP_SCOPES: ReadonlyArray<RecordScopeSpec> = [
-  { resources: [...APP_COORDINATION_READ_SCOPES, ...APP_OWN_NAMESPACE_READ_SCOPES], ops: ['read'] },
+  { resources: [...APP_COORDINATION_READ_SCOPES, ...APP_OWN_NAMESPACE_READ_SCOPES, ...APP_FAITH_READ_SCOPES], ops: ['read'] },
   { resources: [...APP_OWN_NAMESPACE_SEED_SCOPES, ...APP_ASSESSMENT_SCOPES, ...APP_DOMAIN_RECORD_SCOPES, ...APP_CREDENTIAL_SCOPES, ...APP_IDENTITY_SCOPES, ...APP_FRIENDSHIP_SCOPES, ...APP_AGREEMENT_SCOPES], ops: ['read', 'write'] },
   { resources: [...APP_LEGACY_CONTACT_MIGRATION_SCOPES], ops: ['read', 'write', 'delete'] },
 ];

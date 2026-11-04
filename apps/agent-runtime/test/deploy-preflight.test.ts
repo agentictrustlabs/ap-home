@@ -2,7 +2,7 @@
 // catalog door, so it refuses to deploy against a vault whose /health does not name it.
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { CATALOG_DOOR, envOf, mcpUrlOf, vaultPreflight } from '../scripts/deploy.mjs';
+import { CATALOG_DOOR, deploymentArgs, envOf, mcpUrlOf, vaultPreflight } from '../scripts/deploy.mjs';
 import { CATALOG_PAGED_FORMAT } from '../src/catalog-pages.js';
 
 const health = (body: unknown, status = 200) => (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
@@ -34,3 +34,5 @@ it('a bare `wrangler deploy --env` of either estate runs the preflight first (wr
     expect(toml).toContain(`[env.${env}.build]\ncommand = "npx tsx scripts/deploy.mts --preflight-only --env ${env}"`);
   }
 });
+
+it('does not forward pnpm’s separator to wrangler and drop the requested estate',()=>{expect(deploymentArgs(['--','--env','faithnet'])).toEqual(['--env','faithnet']);});

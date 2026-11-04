@@ -1,0 +1,24 @@
+{
+  "checkedAt": "2026-11-04T00:39:58.669Z",
+  "runs": [
+    {
+      "handle": "calvary",
+      "owner": "0x863bd39e938ac593c8d67a11f2f6c12d824b2526",
+      "runRef": "run-25799412-dca2-4421-80b0-48995b4d951b",
+      "durationMs": 7669,
+      "skill": "church.context.prepare",
+      "sourceCount": 8,
+      "sourceKeys": [
+        "church.sermon-insight:comparison_2026-11-01_074592b5554bed3e1163d812924b5894",
+        "church.sermon-insight:comparison_2026-10-25_bcc9b7f56a497169b36ea5b4c52456f3",
+        "church.campus:campuses_campus_boulder",
+        "church.campus:campuses_campus_erie",
+        "church.campus:campuses_campus_thornton",
+        "church.service:services_svc_erie_0800",
+        "church.service:services_svc_erie_0930",
+        "church.service:services_svc_erie_1100"
+      ],
+      "manifestRevision": "f41e3316-6636-4070-89fb-796ec52597d1"
+    }
+  ]
+}
