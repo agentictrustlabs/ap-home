@@ -15,6 +15,7 @@ import { MOUNTED_PEER_SKILLS, withMountedSkills, buildA2aAgentCard, type A2aSkil
 import { makeMessagingSkills, makeOrgApplySkill } from '../src/messaging-skills.js';
 import { PUBLIC_LANE_SKILLS, publicLaneSkillOf } from '../src/standard-a2a.js';
 import { makeLibraryGrantedReadSkill } from '../src/library-tools.js';
+import { CHURCH_DESCRIBE, CHURCH_DESCRIBE_SKILL } from '../src/church-describe.js';
 
 const RECIPIENT = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 // EVERY factory the runtime mounts peer-callable skills from, not just one. The first version listed
@@ -28,7 +29,9 @@ const mountedIds = [
   makeOrgApplySkill(RECIPIENT, async () => undefined).skill,
   // Slice S2 — the granted Library read, mounted on every agent's task runtime beside the messaging skills.
   makeLibraryGrantedReadSkill(RECIPIENT, () => ({ readSubjectRecord: async () => null })).skill,
-  ...PUBLIC_LANE_SKILLS,
+  // Spec 203 §2 — `church.describe` rides the public lane for every agent but is ANSWERED only by a church, so it is
+  // advertised on a church's card alone (liveCardFor), never among the unconditional ones.
+  ...[...PUBLIC_LANE_SKILLS].filter((id) => id !== CHURCH_DESCRIBE),
 ].sort();
 
 describe('the Card and the runtime cannot drift', () => {
@@ -37,6 +40,12 @@ describe('the Card and the runtime cannot drift', () => {
     // one that is not mounted is worse: a peer builds against it, sends, and gets a rejection that
     // reads like an authorization problem and is not one.
     expect(MOUNTED_PEER_SKILLS.map((s) => s.id).sort()).toEqual(mountedIds);
+  });
+
+  it('church.describe is on the lane but not on every card', () => {
+    expect(PUBLIC_LANE_SKILLS.has(CHURCH_DESCRIBE)).toBe(true);
+    expect(MOUNTED_PEER_SKILLS.some((s) => s.id === CHURCH_DESCRIBE)).toBe(false);
+    expect(CHURCH_DESCRIBE_SKILL).toMatchObject({ id: CHURCH_DESCRIBE, name: expect.any(String), description: expect.stringMatching(/church\.describe\/1/) });
   });
 
   it('gives every advertised skill a name and a description', () => {

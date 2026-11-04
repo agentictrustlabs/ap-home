@@ -46,6 +46,8 @@ export const CARRIES = {
   faithJourney: { note: [T.FreeText], place: [T.FreeText] },
   prayer: { label: [T.FreeText], description: [T.FreeText], prayingFor: [T.FreeText], answered: [T.FreeText] },
   care: { label: [T.FreeText], description: [T.FreeText] },
+  /** Her choice of church: which churches and sites she calls home — a preference about herself. */
+  churchHome: { churches: [T.PersonalPreference] },
   /** Answer preferences. */
   preferences: { style: [T.PersonalPreference], language: [T.PersonalPreference], callMe: [T.PersonalPreference], emailNudges: [T.PersonalPreference], routineEmails: [T.PersonalPreference] },
   /** A calendar entry: when, where, what. */

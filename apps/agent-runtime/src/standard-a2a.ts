@@ -57,6 +57,7 @@ import { subjectAskOf, subjectAnswerOf, handoffOf, routedRunRefFor, subjectAnswe
 import { a2aDoor } from './run-trace.js';
 import { PULSE_PUBLIC_ASK } from './pulse-public';
 import { PUBLISHER_READ_SKILLS } from './publisher-contract.js';
+import { CHURCH_DESCRIBE } from './church-describe.js';
 
 /** Spec 439 F3 — what a verified door receipt says, as recorded on a task. Evidence a reader weighs; never a grant. */
 export interface ForeignStandingEvidenceV1 {
@@ -139,7 +140,8 @@ export interface StandardMountDeps {
 export const RECORD_PUBLIC_ASK = 'record.public.ask';
 // The publisher contract's reads (publisher-contract.ts) — what the owner marked public, in the envelope every publisher
 // answers with, so a reader merges a person's public shelf with the scripture publisher and the content publishers.
-export const PUBLIC_LANE_SKILLS: ReadonlySet<string> = new Set(['library.public.list', 'library.public.read', PULSE_PUBLIC_ASK, RECORD_PUBLIC_ASK, ...PUBLISHER_READ_SKILLS]);
+// Spec 203 §2 — `church.describe`: a church's own public description (answered only by an agent that is a church).
+export const PUBLIC_LANE_SKILLS: ReadonlySet<string> = new Set(['library.public.list', 'library.public.read', PULSE_PUBLIC_ASK, RECORD_PUBLIC_ASK, CHURCH_DESCRIBE, ...PUBLISHER_READ_SKILLS]);
 export function publicLaneSkillOf(message: { parts: MessageV1['parts'] }): { skill: string; args: Record<string, unknown> } | null {
   const data = partsData(message.parts);
   const skill = data && typeof data.skill === 'string' ? data.skill : null;
@@ -192,7 +194,10 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           const q = publicLaneSkillOf(m)!;
           const result = await deps.publicRead!({ agent, skill: q.skill, args: q.args });
           const said = typeof result.answer === 'string' ? result.answer : '';
-          return { messageId: crypto.randomUUID(), role: 'ROLE_AGENT' as const, parts: [...(said ? [{ text: said }] : []), { data: { skill: q.skill, ...result } }] } as never;
+          // church.describe/1's data part is exactly the description (spec 203 §2): its sentence rides the text part only.
+          const { answer: _said, ...described } = result;
+          const data = q.skill === CHURCH_DESCRIBE ? described : result;
+          return { messageId: crypto.randomUUID(), role: 'ROLE_AGENT' as const, parts: [...(said ? [{ text: said }] : []), { data: { skill: q.skill, ...data } }] } as never;
         },
       },
     } : {}),

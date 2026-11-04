@@ -160,6 +160,7 @@ import { internalHeaders, markInWorker, isInWorkerRequest } from './internal-mar
 import { parseExperimentRequest, type ExperimentJobV1 } from './experiment-job.js';
 import { validateCaptureWindow } from '@agenticprimitives/evaluation';
 import { RECORD_PUBLIC_ASK, standardServerFor } from './standard-a2a.js';
+import { CHURCH_DESCRIBE, CHURCH_DESCRIBE_SKILL, churchDescription } from './church-describe.js';
 import { withStandardCardFields } from '@agenticprimitives/a2a/standard';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
 import { chainStewardshipCheck, deriveStanding, governingSubjectOf, governorOf, WORKSPACE_GOVERNOR_RECORD } from '@agenticprimitives/context';
@@ -1382,6 +1383,12 @@ async function liveCardFor(env: Env, ctx: AgentHostContext): Promise<Record<stri
   // task runtime mounts them. Merged AFTER the label read, so a best-effort chain failure loses the
   // self-asserted labels and never the mounted ones.
   if (ctx.agent) skills = withMountedSkills(skills);
+  // Spec 203 §2 — `church.describe` is answered only by a church, so only a church's card names it. Best-effort, like
+  // the label read: a type that cannot be read leaves it off (a silent card, never an over-claiming one).
+  if (ctx.agent && !skills.some((s) => s.id === CHURCH_DESCRIBE)) {
+    const type = await harnessDeps(env, buildAuditSink(env)).agentTypeOf?.(ctx.agent).catch(() => null);
+    if (type?.toLowerCase() === 'church') skills = [...skills, CHURCH_DESCRIBE_SKILL];
+  }
   // …AND THE ONES MOUNTED FROM THE AGENT'S OWN RECORDS. A catalog profile is mounted only when the
   // agent's `atl:mcpEndpoint` names an endpoint that serves it, so those tools do not exist until a
   // `tools/list` at plan time — and this builder resolves no binding and does no such read. The result
@@ -1635,6 +1642,8 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
       publicRead: async ({ agent: who, skill, args }) => {
         // Spec 438 §13 — its record, as it reports it. Counts and signed judgments; nothing of any run.
         if (skill === RECORD_PUBLIC_ASK) return publicRecordAsk(c.env, who);
+        // Spec 203 §2 — a church's own description: its name records and the public profile in its own vault.
+        if (skill === CHURCH_DESCRIBE) return publicChurchDescribe(c.env, who, deps.readSubjectRecord!);
         // The publisher contract over the public shelf: only what the owner marked public leaves (publisher-contract.ts).
         if (isPublisherSkill(skill)) return publisherRead({ readSubjectRecord: deps.readSubjectRecord! }, who.toLowerCase(), 'public', skill, args);
         if (skill !== PULSE_PUBLIC_ASK) return publicLibraryRead({ readSubjectRecord: deps.readSubjectRecord! }, who.toLowerCase(), skill, args);
@@ -3466,6 +3475,24 @@ async function agentRecordInputs(env: Env, addressee: Address, mine: (r: { inten
  * "Could not look" is said as itself. A stranger told "nobody has judged these" when the vault was simply
  * unreachable would be told a falsehood with a true-sounding shape.
  */
+/**
+ * `church.describe/1` AS `agent` (spec 203 §2) — see church-describe.ts for the source rule: the name's own records
+ * (on chain), then the church's public profile `faith.church-profile:current` in its own vault, else `sites: []`.
+ * The type is the on-chain `atl:agentType`: an agent that does not declare itself a church is answered that it is not.
+ */
+async function publicChurchDescribe(env: Env, agent: string, readSubjectRecord: (subject: string, key: string) => Promise<unknown>): Promise<Record<string, unknown>> {
+  const naming = env.AGENT_NAME_REGISTRY && env.AGENT_NAME_UNIVERSAL_RESOLVER
+    ? new AgentNamingClient({ rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID), registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address, ...(env.PROFILE_RESOLVER ? { profileResolver: env.PROFILE_RESOLVER as Address } : {}) })
+    : null;
+  const d = harnessDeps(env, buildAuditSink(env));
+  return churchDescription({
+    agentTypeOf: (a) => d.agentTypeOf?.(a) ?? Promise.resolve(null),
+    nameOf: async (a) => (naming ? naming.reverseResolve(a as Address) : null),
+    nameRecords: async (n) => (naming ? naming.getRecords(n) : null),
+    readSubjectRecord,
+  }, agent);
+}
+
 async function publicRecordAsk(env: Env, agent: string): Promise<Record<string, unknown>> {
   const addressee = agent.toLowerCase() as Address;
   const { facts, unreadable, assessments, assessmentsRead } = await agentRecordInputs(env, addressee, () => true);
@@ -5321,21 +5348,7 @@ app.post('/harness/ask', async (c) => {
         // Spec 379 — an outside agent's answer: fetched by its card over the network, graded as an observation.
         // A card on a host THIS Worker serves is read in-process: a Worker cannot fetch its own hostname (CF 522/530), and
         // the per-agent hosts of this deployment are its own. Anything else goes over the network as it should.
-        const zones = a2aBaseDomains(c.env);
-        const reachFetch: typeof fetch = async (u, init) => {
-          const host = (() => { try { return new URL(String(u instanceof Request ? u.url : u)).hostname.toLowerCase(); } catch { return ''; } })();
-          const lane = laneFor(c.env, host);
-          if (lane) return lane(u, init);
-          if (host && zones.some((z) => host === z || host.endsWith(`.${z}`))) {
-            // In-process first. A zone host this Worker does NOT serve (a service on its own custom domain in the
-            // same zone — scripture.faithnet.io, bsb.faithnet.io) answers 404 here; THAT card lives on the network,
-            // and a Worker may fetch another Worker's custom domain (only its own hostname is unreachable).
-            const here = await app.fetch(new Request(u instanceof Request ? u.url : String(u), init), c.env, executionContextFor(c.executionCtx));
-            if (here.status !== 404) return here;
-            return fetch(u, init);
-          }
-          return fetch(u, init);
-        };
+        const reachFetch = reachFetchFor(c.env, c.executionCtx);
         // Spec 397 — the card through the name's records, at her agent (387's inspect): public facts, pinned when pinned.
         if (toolId === DISCOVERY_INSPECT_CAPABILITY) return discoveryInspectInvoker({ nameRecords: nameRecordsReader(c.env) ?? (async () => null), fetch: reachFetch })(toolId, args, ctx);
         // Spec 397 — the invitations that reached the person, from their own inbox record.
@@ -6584,6 +6597,32 @@ function executionContextFor(ctx?: ExecutionContext): ExecutionContext {
   } as unknown as ExecutionContext;
 }
 
+/**
+ * A FETCH THAT REACHES THIS DEPLOYMENT. A Worker cannot fetch its own hostname (CF 522/530), and the per-agent hosts
+ * of this deployment are its own, so a host in its A2A zones is tried in-process first; a zone host this Worker does
+ * NOT serve (a service on its own custom domain in the same zone) answers 404 here and is then fetched over the
+ * network, as is everything else. A reach lane (service binding) wins when one names the host.
+ *
+ * `inWorker` marks the in-process request as this Worker's own hop (spec 341 §7), which is what an edge-required
+ * deployment admits in place of the edge's assertion — so `https://edge.<zone>/api/a2a/<name>` answers here instead
+ * of 401. It names no agent (no `x-ap-internal-agent`), so it carries no principal: only public reads answer it.
+ * Set it only for a caller that sends public reads (the church-home check's `church.describe`).
+ */
+function reachFetchFor(env: Env, executionCtx?: ExecutionContext, opts: { inWorker?: boolean } = {}): typeof fetch {
+  const zones = a2aBaseDomains(env);
+  return (async (u: RequestInfo | URL, init?: RequestInit) => {
+    const host = (() => { try { return new URL(String(u instanceof Request ? u.url : u)).hostname.toLowerCase(); } catch { return ''; } })();
+    const lane = laneFor(env, host);
+    if (lane) return lane(u, init);
+    if (host && zones.some((z) => host === z || host.endsWith(`.${z}`))) {
+      const req = new Request(u instanceof Request ? u.url : String(u), init);
+      const here = await app.fetch(opts.inWorker ? markInWorker(req) : req, env, executionContextFor(executionCtx));
+      if (here.status !== 404) return here;
+    }
+    return fetch(u, init);
+  }) as typeof fetch;
+}
+
 /** Spec 384 W2/W3 — SEND ONE PROBE to a candidate served here, in-process as the requester (a Worker cannot fetch
  *  its own hostnames); the reply is the candidate's message. A candidate served elsewhere is refused by name. */
 export function probeSenderFor(env: Env, requester: Address, executionCtx?: ExecutionContext): ProbeDeps['sendProbe'] {
@@ -6638,6 +6677,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       return { ok: r.ok !== false, ...(r.needsEnable ? { needsEnable: true } : {}), data: r.data ?? null, ...(r.error ? { error: r.error } : {}) };
     });
   const deps: HarnessDeps = {
+    publicReadFetch: reachFetchFor(env, opts.executionCtx, { inWorker: true }),
     readContract: (a) => pub.readContract(a as never) as Promise<unknown>,
     audit,
     teamGenesis: teamGenesisDeps(env, audit),
