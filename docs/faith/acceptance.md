@@ -10,7 +10,7 @@ Calvary domain agent version: `01ef88db-8706-4a17-b995-95dced7b2d07`.
 
 ## Final release browser evidence
 
-[Church release evidence](https://github.com/agentictrustlabs/ap-church/blob/master/docs/collective-ask-flow.md#release-acceptance--2026-11-03-americadenver) records the post-merge acceptance:
+[Church release evidence](https://github.com/agentictrustlabs/ap-church/blob/main/docs/collective-ask-flow.md#release-acceptance--2026-11-03-americadenver) records the post-merge acceptance:
 
 - Fresh demo Carol connected, saved Calvary/Erie, reloaded and recovered her preference. Services took 19.3 seconds; her Philippians 3 ask took 35.9 seconds and returned 20 evidence items through distinct person, church and Scripture runs.
 - A read-only assignment audit confirmed Carol had no manually installed faith-context tool; the native runtime offer worked without modifying her assignment.
