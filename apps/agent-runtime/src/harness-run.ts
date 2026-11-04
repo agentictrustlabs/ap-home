@@ -1,3 +1,4 @@
+import {FAITH_CONTRIBUTIONS_TOOL,faithCollaborationGuidance,faithCollaborationTools, type FaithCollaborationRole} from './faith-collaboration.js';
 import {FAITH_TOOLS as FAITH_CONTEXT_TOOLS,faithContextInvoker,offersFaithContext} from './faith-context.js';
 // THE HARNESS ON THIS AGENT — spec 350 W2: a treasury payment (scenario 3) and a team's creation
 // (scenario 2) under a mandate.
@@ -2848,6 +2849,8 @@ export interface HarnessRunInput {
    * protect it).
    */
   surface?: AskScopeV1;
+  /** Server-validated read collaboration; narrow the offer and every invocation. */
+  faithCollaborationRole?: FaithCollaborationRole;
   /** Spec 369 — the words arrived by voice (the transcript the agent itself produced). Trace only. */
   channel?: 'text' | 'voice';
   /** Spec 377 — the provider this turn plans, composes and looks things up with. Absent ⇒ the deployment
@@ -4369,6 +4372,7 @@ function whoseWordsWarning(d: Record<string, ArgDerivationV1>, args: Record<stri
 const withoutRelayedWarning = (note: string): string => note.replace(/Check before you sign:.*?— not from what you said\.\s*/g, '').trim();
 
 async function askReplyForInner(env: HarnessEnv, input: {
+  faithCollaborationRole?: FaithCollaborationRole;
   /** Spec 371 — the tools the run was offered, for rendering a read's `answer` template. */
   tools?: ToolSpec[];
   /** Spec 402 W1 — what the asker's agent remembers about the asker: one more observation the composer is grounded in. */
@@ -4711,7 +4715,7 @@ async function askReplyForInner(env: HarnessEnv, input: {
     // Spec 402 W4 — a read whose contract names a RESULT APP is the deliverable too: its rows ride back for any caller, so
     // the app can render over them beside the sentence (the same reason a catalog read's do).
     const results = r.steps
-      .filter((o) => o.ok && o.result && typeof o.result === 'object' && (input.suppliedPlan || isCatalogTool(o.step.toolId) || isPeopleGroupTool(o.step.toolId) || !!input.interactionFor?.[o.step.toolId]?.result))
+      .filter((o) => o.ok && o.result && typeof o.result === 'object' && (input.suppliedPlan || input.faithCollaborationRole && ['person', 'church'].includes(input.faithCollaborationRole) || isCatalogTool(o.step.toolId) || isPeopleGroupTool(o.step.toolId) || !!input.interactionFor?.[o.step.toolId]?.result))
       .map((o) => ({ toolId: o.step.toolId, result: o.result }));
     const routed = routedStepsOf(r.steps);
     // Spec 402 W4 — the first answered read whose contract names a RESULT app: its binding rides on the reply, with the
@@ -4741,7 +4745,7 @@ async function askReplyForInner(env: HarnessEnv, input: {
     // rendered and the passages are not re-composed over it — measured 2026-09-27: the composer re-rendered a skill's
     // answer over five passages (15.6 s of an 18.6 s run) and once contradicted it.
     const readSteps = r.steps.filter((o) => o.ok && !o.skipped && o.step.toolId !== KB_RETRIEVE_TOOL.id);
-    if (readSteps.length && readSteps.every((o) => offered.find((t) => t.id === o.step.toolId)?.answer)) {
+    if (!input.faithCollaborationRole && readSteps.length && readSteps.every((o) => offered.find((t) => t.id === o.step.toolId)?.answer)) {
       const rendered = readSteps.map((o) => renderAnswer(offered.find((t) => t.id === o.step.toolId)!.answer!, o.result));
       if (rendered.every((x): x is string => typeof x === 'string' && x.length > 0)) return withEvidence(rendered.join(' '));
     }
@@ -5572,7 +5576,8 @@ step is then handed to that agent under authority the person grants; leave it ou
   const examplesFor = (positivesPerTool?: number) => playbook ? utteranceExamples(Object.values(playbook.tools ?? {}), positivesPerTool) : '';
   const examples = examplesFor();
   const doctrine = playbook ? plannerDoctrineOf(playbook.instructions) : null;
-  const withPlaybook = doctrine ? `${doctrine.text}\n\n---\n\n${fanOutPrompt}${examples}` : fanOutPrompt;
+  const withPlaybook0 = doctrine ? `${doctrine.text}\n\n---\n\n${fanOutPrompt}${examples}` : fanOutPrompt;
+  const withPlaybook = input.faithCollaborationRole ? faithCollaborationGuidance(input.faithCollaborationRole) + '\n' + withPlaybook0 : withPlaybook0;
   // A provider with a prompt budget (Groq's free plan) is served the same prompt made to FIT — whole parts
   // dropped in a fixed order and each drop recorded — decided at plan time, when the tools it rides with are
   // known. The digest on the trace is of what was actually sent.
@@ -5627,7 +5632,7 @@ step is then handed to that agent under authority the person grants; leave it ou
           };
           // Spec 402 W3 — a sentence with a clock, said at the person's own agent, is a routine to keep (read back first).
           // Spec 421 W1 — a CONTINUATION is always the model's: it plans from what was read, which no compiled shape knows.
-          const compiled = pin.continuation ? null : compiledSkillAnswer() ?? compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest) ?? (input.person && input.addressee && input.person.toLowerCase() === input.addressee.toLowerCase() ? compiledRoutine(rest) : null);
+          const compiled = pin.continuation || input.faithCollaborationRole ? null : compiledSkillAnswer() ?? compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest) ?? (input.person && input.addressee && input.person.toLowerCase() === input.addressee.toLowerCase() ? compiledRoutine(rest) : null);
           if (compiled) {
             plannerUsed = 'compiled';
             // Spec 421 W1 — A COMPILED READ THAT THE SENTENCE WANTS ACTED ON continues: "save the details from my latest
@@ -5906,7 +5911,8 @@ step is then handed to that agent under authority the person grants; leave it ou
       } }
     : offerBound;
   const boundPlanner: Planner = { plan: async (pin) => {
-    const p = await boundPlanner0.plan(pin);
+    const proposed = await boundPlanner0.plan(pin);
+    const p = input.faithCollaborationRole === 'synthesis' && !proposed.steps.some(st => st.toolId === FAITH_CONTRIBUTIONS_TOOL.id) ? {...proposed,steps:[{id:'faith-peers',toolId:FAITH_CONTRIBUTIONS_TOOL.id,args:{}},...proposed.steps]} : proposed;
     if (pin.continuation) trace.continuations = [...(trace.continuations ?? []), { steps: p.steps.map((st) => ({ toolId: st.toolId })) }];
     return p;
   } };
@@ -5984,6 +5990,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   const tools = [
     ...playbookAnswer,
     ...instructionTools,
+    ...(input.faithCollaborationRole === 'synthesis' ? [FAITH_CONTRIBUTIONS_TOOL] : []),
     ...(deps.readSubjectRecordStatus ? FAITH_CONTEXT_TOOLS.filter(t=>offersFaithContext(t.id,deps.addresseeKind,playbook?.capabilityIds)).map(t=>mergeContractTool(t,playbook?.tools?.[t.id])) : []),
     ...scopedActionTools(input.surface, playbook), ...catalogTools, ...peopleGroupTools, ...mcpTools, ...ASK_DISCOVERY_TOOLS,
     ...(kbQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }) ? [KB_QUESTION_TOOL] : []),
@@ -6066,7 +6073,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     UNSUPPORTED_TOOL,
     // Spec 418 — planned only by the skill stage (see ASK_CLARIFY_TOOL); filtered from the planner's view below.
     ...(Object.keys(instructionSourcesOf(playbook)).length ? [ASK_CLARIFY_TOOL] : []),
-  ];
+  ].filter(t => !input.faithCollaborationRole || faithCollaborationTools(input.faithCollaborationRole).has(t.id));
   // ONE TOOL, ONE ENTRY. A family listed as both an act and a read reaches the planner twice, and a provider refuses the
   // whole offer for it (Gemini: "Duplicate function declaration"), so every ask on the agent fails — said here, once,
   // with the ids, instead of surfacing as a planner error on an unrelated question.
@@ -6155,6 +6162,8 @@ step is then handed to that agent under authority the person grants; leave it ou
   };
   const instructionIds = new Set(instructionTools.map((t) => t.id));
   const localInvoke: ToolInvoker = async (toolId, args, ctx) => {
+    if (input.faithCollaborationRole && !faithCollaborationTools(input.faithCollaborationRole).has(toolId)) throw new Error('This read collaboration does not offer ' + toolId);
+    if (toolId === FAITH_CONTRIBUTIONS_TOOL.id && input.faithCollaborationRole === 'synthesis') return {attribution:'Participant contributions supplied by the coordinating workspace; source qualifications remain applicable.',...(input.intent.context as {faithContributions:Record<string,unknown>}).faithContributions};
     mark(`invoke:${toolId}:start`);
     try { return await (answerInvoke && toolId === PLAYBOOK_ANSWER_TOOL.id ? answerInvoke(toolId, args, ctx) : skillInvoke && instructionIds.has(toolId) ? skillInvoke(toolId, args, ctx) : harnessLocal(toolId, args, ctx)); }
     finally { mark(`invoke:${toolId}:end`); }
@@ -6248,6 +6257,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     // Spec 374 §1 — a step routed to another agent is JUDGED there: no mandate is asked of the asker here.
     authorityJudgedElsewhere: (rs) => routedSubjectFor(rs.tool, rs.args, input.addressee),
     invoke: async (toolId, args, ctx) => {
+      if (input.faithCollaborationRole && (!faithCollaborationTools(input.faithCollaborationRole).has(toolId) || ctx.step.executor && String(ctx.step.executor).toLowerCase() !== input.addressee?.toLowerCase())) throw new Error('This read collaboration does not authorize this invocation or handoff.');
       // Spec 370 P6 — on a replay nothing runs: the record answers, or refuses a step it never held.
       if (input.replayOf) return replayingInvoker(input.replayOf)(toolId, args, ctx);
       const tool = tools.find((t) => t.id === toolId);

@@ -1,3 +1,5 @@
+import {parseFaithCollaboration, faithQuestion, faithPreparationPlan, faithCommitmentDigest, faithCollaborationGuidance, type FaithCollaborationBinding} from './faith-collaboration.js';
+import {verifySessionLeafSignatureAt, sessionBodyHash} from '@agenticprimitives/a2a';
 import {parseSessionWrappedSignature} from '@agenticprimitives/a2a';
 import { forwardToSelfHost , type SelfHostForwardAuth } from './self-hosted-read.js';
 import { wireCredentialFor, pairwiseSubjectPort } from './subject-hop-credential.js';
@@ -4956,6 +4958,7 @@ app.post('/harness/ask', async (c) => {
     session?: string; addressee?: Address; message?: string; presented?: DelegationWireV1 | DelegationWireV1[] | null;
     supplied?: HarnessRunInput['supplied']; approvals?: HarnessRunInput['approvals']; runRef?: string;
     surface?: HarnessRunInput['surface'];
+    faithCollaboration?: unknown;
     /** Spec 402 W3 — the asker's IANA zone, so a routine's clock is read in their day. */
     tz?: string;
     /** Spec 361 I4 — a SCREEN's deterministic entry through the SAME conversational boundary: the form
@@ -5022,6 +5025,32 @@ app.post('/harness/ask', async (c) => {
   // the admission was an app delegation (a session names no client). Ids for the door and the receipt — never a wire.
   const viaHost = viaApp?.ok && body?.via && typeof body.via.client === 'string' && typeof body.via.template === 'string' && /^[a-z0-9._-]{1,64}$/i.test(body.via.client) && /^[a-z-]{1,32}$/.test(body.via.template)
     ? { client: body.via.client, template: body.via.template } : undefined;
+  let faithCollaboration: FaithCollaborationBinding | undefined;
+  if (body.faithCollaboration !== undefined) {
+    try {
+      if (body.plan || body.presented || body.approvals || body.subjectAsk || body.variant) throw new Error('A read collaboration participant plans its own work; supplied execution plans and effect authority are not accepted.');
+      faithCollaboration = parseFaithCollaboration(body.faithCollaboration, {asker: who.sa, addressee: body.addressee, message: body.message ?? ''});
+      const fd = harnessDeps(c.env, buildAuditSink(c.env));
+      const kind = await fd.agentTypeOf?.(body.addressee);
+      if (faithCollaboration.role === 'church') {
+        const storedRole = await fd.readSubjectRecordStatus!(body.addressee,'archetype.assignment');
+        if (!storedRole.ok) return c.json({ok:false,error:'church_storage_unavailable',detail:'The church agent cannot read its own role. Its steward needs to renew the organization’s Home storage connection.'},503);
+        const pb = await loadPlaybook(async () => storedRole.data, body.addressee, console.log);
+        if (!['org', 'church'].includes(kind ?? '') || !pb?.capabilityIds.has('church.context.prepare')) throw new Error('This agent has not accepted the church faith role.');
+      } else if (kind !== 'person') throw new Error('This faith contribution requires the connected person’s own agent.');
+      const digest = faithCommitmentDigest(faithCollaboration);
+      if (faithCollaboration.phase === 'commit') {
+        const signature = await signAsAgent(c.env, body.addressee, digest);
+        if (!signature) return c.json({ok: false, error: 'participant_signing_required', detail: 'Open this agent’s Home to refresh its own signing leaf before collaborating.'}, 409);
+        return c.json({ok: true, participant: body.addressee, commitment: {payloadHash: digest, signer: body.addressee.toLowerCase(), scheme: 'ecdsa', signature}, accepted: {role: faithCollaboration.role, planHash: faithCollaboration.plan.contentHash, readOnly: true, deadline: faithCollaboration.deadline}});
+      }
+      const refusal = await verifySessionLeafSignatureAt({signer: body.addressee, digest, signature: faithCollaboration.commitment!.signature,
+        timestampEnforcer: c.env.TIMESTAMP_ENFORCER!, at: Date.now(),
+        verifyDelegationSig: async d => (await fd.readContract({address: c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [d.delegator, hashDelegation(d, Number(c.env.CHAIN_ID), c.env.DELEGATION_MANAGER as Address), d.signature]})) === true,
+        isRevoked: async d => (await fd.readContract({address: c.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI_FOR_STANDING, functionName: 'isRevoked', args: [hashDelegation(d, Number(c.env.CHAIN_ID), c.env.DELEGATION_MANAGER as Address)]})) === true});
+      if (refusal) throw new Error('The participant commitment no longer verifies: ' + refusal);
+    } catch (e) { return c.json({ok: false, error: 'faith_collaboration_refused', detail: e instanceof Error ? e.message : String(e)}, 403); }
+  }
   if (!c.env.HARNESS_AGENT_SA) return c.json({ ok: false, error: 'HARNESS_AGENT_SA not configured' }, 503);
   // P1.4 — THE AGENT'S BUDGET, at the door: a FRESH ask (not a resume) against the steward's declared limits and the
   // day's counters, before a model is called or a step runs. Over ⇒ said, 429; never a silent degrade.
@@ -5142,6 +5171,7 @@ app.post('/harness/ask', async (c) => {
     if (stored && !claimableBy(stored, String(who.sa).toLowerCase() as Address)) {
       return c.json({ ok: false, error: 'this run belongs to someone else' }, 403);
     }
+    if (faithCollaboration && body.runRef && (!stored || (stored.intent?.context as {faithBinding?:string}|undefined)?.faithBinding !== faithCommitmentDigest(faithCollaboration))) return c.json({ok:false,error:'The continuation belongs to a different faith contribution.'},403);
     // ONE EXECUTOR PER RUN (spec 362 §2). A workflow-owned run is advanced by its engine; re-driving it
     // from the conversation would be two executors on one operation — approve it instead.
     if (stored?.executor === 'workflow') {
@@ -5190,7 +5220,7 @@ app.post('/harness/ask', async (c) => {
   if (body.plan && !stored?.plan && turn.presented.length > 0) {
     return c.json({ ok: false, error: 'a plan may be supplied only before authority is presented — the mandate binds the plan the run parked with' }, 409);
   }
-  const runPlan = (stored?.plan ?? body.plan) as Plan | undefined;
+  const runPlan = (stored?.plan ?? (faithCollaboration ? faithPreparationPlan(faithCollaboration, body.message ?? '') : body.plan)) as Plan | undefined;
   // The intent IS the ask: the sentence plus the realm it was asked in. The mandate binds to its digest,
   // so authority granted for this ask covers this ask — retyping the same words in another realm is
   // another intent, and the mandate does not travel.
@@ -5199,10 +5229,10 @@ app.post('/harness/ask', async (c) => {
   // that clock, not UTC's, whatever surface the yes came from (caught by verify-portable-home, 2026-09-15).
   const storedTz = (stored?.intent?.context as { tz?: unknown } | undefined)?.tz;
   const tz = typeof body.tz === 'string' && /^[A-Za-z_]+\/[A-Za-z_+-]+$|^UTC$/.test(body.tz) ? body.tz : typeof storedTz === 'string' && storedTz ? storedTz : undefined;
-  const intent = { goal: turn.message, context: { addressee, asker: who.sa, ...(tz ? { tz } : {}) } };
+  const intent = { goal: faithCollaboration ? faithQuestion(body.message ?? '') : turn.message, context: { addressee, asker: who.sa, ...(tz ? { tz } : {}), ...(faithCollaboration ? {faithCollaborationRole: faithCollaboration.role, faithBinding: faithCommitmentDigest(faithCollaboration), ...(faithCollaboration.role === 'synthesis' ? {faithContributions: JSON.parse(body.message!)} : {}), sharedPlan: {planId: faithCollaboration.plan.planId, revision: faithCollaboration.plan.revision, hash: faithCollaboration.plan.contentHash}, guidance: faithCollaborationGuidance(faithCollaboration.role)} : {}) } };
   const audit = buildAuditSink(c.env);
   const askDeps = harnessDeps(c.env, audit, { executionCtx: c.executionCtx });
-  askDeps.faithReceivers = [...(viaApp?.ok ? [viaApp.delegate] : []), ...(inResponseTo?.agent ? [inResponseTo.agent] : [])];
+  askDeps.faithReceivers = [...(viaApp?.ok ? [viaApp.delegate] : []), ...(inResponseTo?.agent ? [inResponseTo.agent] : []), ...(faithCollaboration?.recipients ?? [])];
   // Spec 415 A4 — a PLAYBOOK PIN: the comparison names the definition digest it means to run under; an agent whose
   // playbook has moved is refused with both digests named, never run under the wrong one and reported as the right one.
   if (variantReq?.playbook) {
@@ -5260,9 +5290,9 @@ app.post('/harness/ask', async (c) => {
   // filled the person's conversation with lines like "merge my highlights for PSA.79" for the next "him" to resolve in.
   const screenTurn = !!body.plan && body.rowsOnly === true;
   const isolatedTurn = !!variantReq || screenTurn;
-  const conversationRaw = isolatedTurn ? null : askerRecords[CONVERSATION_RECORD] ?? null;
-  const memoryRaw = ownAgent ? askerRecords[FACTS_RECORD] ?? null : null;
-  const prefsRaw = ownAgent ? askerRecords[PREFERENCES_RECORD] ?? null : null;
+  const conversationRaw = isolatedTurn || faithCollaboration ? null : askerRecords[CONVERSATION_RECORD] ?? null;
+  const memoryRaw = ownAgent && (!faithCollaboration || ['synthesis', 'validation'].includes(faithCollaboration.role)) ? askerRecords[FACTS_RECORD] ?? null : null;
+  const prefsRaw = ownAgent && (!faithCollaboration || ['synthesis', 'validation'].includes(faithCollaboration.role)) ? askerRecords[PREFERENCES_RECORD] ?? null : null;
   askDeps.addresseeKind = addresseeKind ?? null;
   try {
     // Spec 370 P2 — the run narrates itself; each sentence lands on the task DO as it happens, and the
@@ -5275,7 +5305,7 @@ app.post('/harness/ask', async (c) => {
     const memory: RememberedFactsV1 | null = ownAgent ? factsOf(memoryRaw) : null;
     // Spec 403 W4 — how she wants answers (brief, a language, what to call her): one line on the composer's prompt,
     // at her own agent only. Behaviour, never authority.
-    const answerLine = ownAgent ? answerPreferencesForPrompt(preferencesOf(prefsRaw)) : '';
+    const answerLine = (ownAgent ? answerPreferencesForPrompt(preferencesOf(prefsRaw)) : '') + (faithCollaboration ? '\n' + faithCollaborationGuidance(faithCollaboration.role) : '');
     let progressSeq = 0;
     let progressChain: Promise<void> = Promise.resolve();
     const askerSa = String(who.sa).toLowerCase() as Address;
@@ -5289,6 +5319,7 @@ app.post('/harness/ask', async (c) => {
     const runStartMs = Date.now();
     const { result, resolved, interactionFor, trace, tools: offeredTools, events: runEvents, presentedRefs, playbook: askedPlaybook, bill } = await runUnderMandateBilled(c.env as unknown as HarnessEnv, askDeps, {
       traceContext: traceContextOf(c.req.raw.headers), marks,
+      ...(faithCollaboration ? {faithCollaborationRole: faithCollaboration.role} : {}),
       intent, presented: turn.presented, person: who.sa as Address, session: body.session, ...(appCredential ? { appCredential } : {}), ...(viaHost ? { via: viaHost } : {}), runRef, addressee, onProgress: progress,
       conversation: conversation && conversation.type === 'ap.context.conversation-memory.v1' ? conversation : null,
       ...(memory && memory.entries.length ? { memory } : {}),
@@ -5302,7 +5333,7 @@ app.post('/harness/ask', async (c) => {
       // — which refused the incident-playbook cases ("answered in prose instead of calling skill_answer") and cut the rest.
       ...(variantReq && (variantReq.plannerKind || variantReq.selection || variantReq.toggles || variantReq.acceptance || variantReq.judgeProfile || variantReq.askerContext || variantReq.gateway) ? { variant: { ...(variantReq.plannerKind ? { plannerKind: variantReq.plannerKind } : {}), ...(variantReq.gateway ? { gateway: variantReq.gateway } : {}), ...(variantReq.selection ? { selection: variantReq.selection } : {}), ...(variantReq.toggles ? { toggles: variantReq.toggles } : {}), ...(variantReq.acceptance ? { acceptance: variantReq.acceptance } : {}), ...(variantReq.judgeProfile ? { judgeProfile: variantReq.judgeProfile } : {}), ...(variantReq.askerContext ? { askerContext: variantReq.askerContext } : {}) } } : {}),
       ...(runPlan ? { plan: runPlan } : {}),
-      ...(runPlan && body.rowsOnly ? { rowsOnly: true } : {}),
+      ...(runPlan && (body.rowsOnly || faithCollaboration && ['person', 'church'].includes(faithCollaboration.role)) ? { rowsOnly: true } : {}),
       // Spec 384 W3 — a campaign selected a provider for this step: the plan is bound to it and to its offer.
       ...(stored?.origin?.engagement ? { engagement: stored.origin.engagement } : {}),
       // Spec 370 P1 — what already ran, replayed; what has not, attempted. The planner is not asked again.
@@ -5447,9 +5478,10 @@ app.post('/harness/ask', async (c) => {
     if (structuredCalls.length) trace.structuredCalls = [...(trace.structuredCalls ?? []), ...structuredCalls.map((x) => ({ role: 'structured' as const, ...x }))].sort((a, b) => a.startMs - b.startMs);
     const reply = await marks.time('reply:compose', () => askReplyFor(c.env as unknown as HarnessEnv, {
       ...(memory ? { memory } : {}),
+      ...(faithCollaboration ? {faithCollaborationRole: faithCollaboration.role} : {}),
       intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(withGatewayVariant(c.env, variantReq?.gateway), { ...(provider ? { provider } : {}), ...(answerLine ? { systemPrompt: answerLine } : {}), need, onUsage: (u) => { trace.composeUsage = addUsage(trace.composeUsage, u); } }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
       ...(runPlan ? { suppliedPlan: true } : {}),
-      ...(runPlan && body.rowsOnly ? { rowsOnly: true } : {}),
+      ...(runPlan && (body.rowsOnly || faithCollaboration && ['person', 'church'].includes(faithCollaboration.role)) ? { rowsOnly: true } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
       resolveName: (name) => askDeps.resolveName?.(name) ?? Promise.resolve(null),
       // WHAT THE ASKER IS to whoever must authorize the plan (spec 353 S5). Derived here from evidence they
@@ -5886,7 +5918,15 @@ app.post('/harness/ask', async (c) => {
         if (typeof fw.answerFirstWordsMs === 'number') stages['answer:first-words-in-step'] = fw.answerFirstWordsMs; }
       (reply as { plannerTrace: { stages?: Record<string, number> } }).plannerTrace.stages = stages;
     }
-    return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, hasProvenance: hasProvenanceRef(addressee, runRef), resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(routedDelivery ? { routedDelivery } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });
+    let faithReceipt: Record<string, unknown> | undefined;
+    if (faithCollaboration) {
+      const digest = sessionBodyHash({...reply, ...(spoken ? {spoken} : {})});
+      const payload = {profile: faithCollaboration.profile, commitment: faithCommitmentDigest(faithCollaboration), runRef, resultDigest: digest};
+      const signature = await signAsAgent(c.env, addressee, sessionBodyHash(payload));
+      if (!signature) throw new Error('The participant could not sign its completed contribution.');
+      faithReceipt = {...payload, signer: addressee, scheme: 'ecdsa', signature};
+    }
+    return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, ...(faithReceipt ? {faithReceipt} : {}), hasProvenance: hasProvenanceRef(addressee, runRef), resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(routedDelivery ? { routedDelivery } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
