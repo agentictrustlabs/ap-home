@@ -1,3 +1,4 @@
+import {parseSessionWrappedSignature} from '@agenticprimitives/a2a';
 import { forwardToSelfHost , type SelfHostForwardAuth } from './self-hosted-read.js';
 import { wireCredentialFor, pairwiseSubjectPort } from './subject-hop-credential.js';
 import { credentialIssuerDeps } from './credential-issuer-deps.js';
@@ -1414,7 +1415,7 @@ function standardCardFor(live: Record<string, unknown>): Record<string, unknown>
  * parking for the mandate only they can sign. Never a fallback for a missing session (ADR-0013): the scheme
  * token selects it, and it fails closed on its own terms.
  */
-async function principalFromAppDelegation(c: Context<{ Bindings: Env }>, raw: string): Promise<{ ok: true; sa: Address; caip: string; app: true } | { ok: false; status: number; error: string } | null> {
+async function principalFromAppDelegation(c: Context<{ Bindings: Env }>, raw: string): Promise<{ ok: true; sa: Address; caip: string; app: true; delegate: string } | { ok: false; status: number; error: string } | null> {
   const auth = c.req.header('authorization') ?? '';
   if (!/^A2A-Session\s/i.test(auth)) return null;
   return verifyAppDelegation(c.env, c.req.url, auth, raw);
@@ -1423,7 +1424,7 @@ async function principalFromAppDelegation(c: Context<{ Bindings: Env }>, raw: st
 /** Spec 397 — the verification itself, so a ROUTED hop (spec 366) can present the same evidence to the subject's
  *  agent: `claimOn` names whose object spends the assertion — the asserting person's own by default, the RECEIVER's
  *  for a forwarded credential (one hop per receiver, never a replay to the same one). */
-async function verifyAppDelegation(env: Env, url: string, auth: string, raw: string, claimOn?: Address): Promise<{ ok: true; sa: Address; caip: string; app: true } | { ok: false; status: number; error: string }> {
+async function verifyAppDelegation(env: Env, url: string, auth: string, raw: string, claimOn?: Address): Promise<{ ok: true; sa: Address; caip: string; app: true; delegate: string } | { ok: false; status: number; error: string }> {
   const validator = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
   if (!validator || !env.TIMESTAMP_ENFORCER || !env.ALLOWED_METHODS_ENFORCER || !env.DELEGATION_MANAGER) return { ok: false, status: 503, error: 'the wire gate is not configured' };
   const deps = harnessDeps(env, buildAuditSink(env));
@@ -1447,7 +1448,10 @@ async function verifyAppDelegation(env: Env, url: string, auth: string, raw: str
   const p = await principal(new Request(url, { method: 'POST', headers: { authorization: auth, 'content-type': 'application/json' }, body: raw }));
   if (!p) return { ok: false, status: 401, error: 'the app delegation did not verify' };
   const sa = p.agent.toLowerCase() as Address;
-  return { ok: true, sa, caip: `eip155:${chainId}:${sa}`, app: true };
+  const assertion = parseSessionAuthorization(auth);
+  const wrapped = assertion && parseSessionWrappedSignature(assertion.signature);
+  if (!wrapped) return {ok:false,status:401,error:'an app ask requires a session delegate'};
+  return { ok: true, sa, caip: `eip155:${chainId}:${sa}`, app: true, delegate: wrapped.wire.delegate.toLowerCase() };
 }
 
 /** Spec 397 W3 — WHO IS ASKING on the ask surface's READ routes (records, runs, progress): the person's Home session
@@ -1463,7 +1467,7 @@ async function askSurfacePrincipal(c: Context<{ Bindings: Env }>, raw: string, b
 /** Spec 397 + 366 — a ROUTED hop whose asker came through a client: the forwarded admission evidence, verified here
  *  as the receiver (wire, assertion, freshness, audience; spent once on THIS agent's object), and checked to be the
  *  asker's own ask — the body it binds was addressed to the asker's agent by the asker. */
-async function principalFromForwardedAppDelegation(c: Context<{ Bindings: Env }>, cred: { authorization: string; body: string }, asker: string, receiver: Address, routeAgent?: string): Promise<{ ok: true; sa: Address; caip: string; app: true } | { ok: false; status: number; error: string }> {
+async function principalFromForwardedAppDelegation(c: Context<{ Bindings: Env }>, cred: { authorization: string; body: string }, asker: string, receiver: Address, routeAgent?: string): Promise<{ ok: true; sa: Address; caip: string; app: true; delegate: string } | { ok: false; status: number; error: string }> {
   let original: { addressee?: unknown } | null = null;
   try { original = JSON.parse(cred.body) as { addressee?: unknown }; } catch { return { ok: false, status: 400, error: 'the forwarded app delegation binds no readable body' }; }
   // The bound body was the asker's ask at their OWN agent, or at the ROOM whose agent routed this step (the profile
@@ -5198,6 +5202,7 @@ app.post('/harness/ask', async (c) => {
   const intent = { goal: turn.message, context: { addressee, asker: who.sa, ...(tz ? { tz } : {}) } };
   const audit = buildAuditSink(c.env);
   const askDeps = harnessDeps(c.env, audit, { executionCtx: c.executionCtx });
+  askDeps.faithReceivers = [...(viaApp?.ok ? [viaApp.delegate] : []), ...(inResponseTo?.agent ? [inResponseTo.agent] : [])];
   // Spec 415 A4 — a PLAYBOOK PIN: the comparison names the definition digest it means to run under; an agent whose
   // playbook has moved is refused with both digests named, never run under the wrong one and reported as the right one.
   if (variantReq?.playbook) {

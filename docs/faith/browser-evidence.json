@@ -1,0 +1,109 @@
+{
+  "checkedAt": "2026-11-04T00:55:03.083Z",
+  "runtimeVersion": "ba077be8-718e-46be-af79-eb8ce9b5c632",
+  "site": "https://church.faithnet.io",
+  "checks": [
+    {
+      "person": "Alice Okoro",
+      "principal": "0xb0d11ce19b756a682e78b4904cd8d832303b3d11",
+      "campus": "campus_erie",
+      "personAskReady": true,
+      "runs": {
+        "person": "run-1c34c463-7d49-4138-800b-725803ca1e1e",
+        "church": "run-8e28b7f2-0e82-42cb-9a6a-026d06f972a5",
+        "answer": "run-8e28b7f2-0e82-42cb-9a6a-026d06f972a5"
+      },
+      "answer": "The Sunday service times at the Erie Campus are:\n\n\u2022 8:00 AM\n\n\u2022 9:30 AM\n\n\u2022 11:00 AM\n\nSources and ask details",
+      "errors": [],
+      "durationMs": 28185,
+      "writing": {
+        "runs": {
+          "person": "run-0d07fa19-3989-4a19-9067-e29ee7de391f",
+          "church": "run-b073f725-486f-4635-ae89-0834fdbf49a4",
+          "answer": "run-8037ab1b-422c-4a6b-acfa-284bf190ba46",
+          "scripture": "run-8037ab1b-422c-4a6b-acfa-284bf190ba46"
+        },
+        "providerMode": "writings",
+        "evidenceCount": 20,
+        "contextUse": {
+          "topicIncluded": true,
+          "historyTurns": 0
+        },
+        "durationMs": 35621,
+        "churchSources": [
+          {
+            "id": "campus_messages_msg_2605",
+            "title": "To Live is Christ: Philippians 3:12-16",
+            "campusId": "campus_erie",
+            "speaker": "Thomas Milburn",
+            "date": "2026-11-01",
+            "passage": "Philippians 3:12-16",
+            "series": "To Live is Christ",
+            "url": "https://publishing.faithnet.io/@calvary-bible-publishing/to-live-is-christ-philippians-3-12-16-thomas-milburn-erie-novemb/1",
+            "freshness": "recent",
+            "excerptIncluded": true
+          },
+          {
+            "id": "campus_messages_msg_2602",
+            "title": "To Live is Christ: Philippians 3:7-11",
+            "campusId": "campus_erie",
+            "speaker": "Thomas Milburn",
+            "date": "2026-10-25",
+            "passage": "Philippians 3:7-11",
+            "series": "To Live is Christ",
+            "url": "https://publishing.faithnet.io/@calvary-bible-publishing/to-live-is-christ-philippians-3-7-11-thomas-milburn-erie-october/1",
+            "freshness": "older",
+            "excerptIncluded": true
+          }
+        ],
+        "submittedContext": {
+          "personPreferences": true,
+          "churchContributionIncluded": true,
+          "churchRunRef": "run-b073f725-486f-4635-ae89-0834fdbf49a4",
+          "topicKind": "church-agent-contribution",
+          "contextSha256": "19e7084954ac3afe51c6ebb9e84d2b508b2a1087649d449b7297dc31903186f4",
+          "characters": 5733,
+          "sourceIds": [
+            "campus_messages_msg_2605",
+            "campus_messages_msg_2602"
+          ],
+          "omittedSourceIds": [],
+          "truncatedSourceIds": [
+            "campus_messages_msg_2605",
+            "campus_messages_msg_2602"
+          ]
+        }
+      }
+    },
+    {
+      "person": "Bob Tanaka",
+      "principal": "0x8c5cddca27c088a65e58e94403acdc9bc3eb7fe3",
+      "campus": "campus_boulder",
+      "personAskReady": true,
+      "runs": {
+        "person": "run-7fda9618-f78a-4efc-a77b-268f69aa6e31",
+        "church": "run-483e90ca-eb16-4eef-b434-536f6556e418",
+        "answer": "run-483e90ca-eb16-4eef-b434-536f6556e418"
+      },
+      "answer": "The Sunday service times at the Boulder Campus are 9:00 AM and 10:30 AM (09:00 and 10:30).\n\nSources and ask details",
+      "errors": [],
+      "durationMs": 21739
+    }
+  ],
+  "comparison": {
+    "person": "Bob Tanaka",
+    "runs": {
+      "person": "run-3ec24bc7-4d33-4636-968c-649320dcfec8",
+      "church": "run-f677b61d-a0a3-47f3-aa1b-001efe5c15bb",
+      "answer": "run-f720e8f6-3fa2-4a56-8e9a-a4a9eb5c073c"
+    },
+    "durationMs": 32476,
+    "sourceCampuses": [
+      "campus_thornton",
+      "campus_erie",
+      "campus_boulder"
+    ],
+    "answer": "Stored automated analysis \u00b7 2026-11-01\n\nModel-proposed, unreviewed.\n\n\u2022 boulder: Perry Marshall \u00b7 2026-11-01 \u00b7 Read sermon\n\n\u2022 erie: Thomas Milburn \u00b7 2026-11-01 \u00b7 Read sermon\n\n\u2022 thornton: Zack Thompson \u00b7 2026-11-01 \u00b7 Read sermon\n\nCampus Comparison: Philippians 3:12-16 (\"To Live is Christ\")\n\nAcross all three Calvary Bible Church campuses on November 1, 2026, the pastors preached on Philippians 3:12\u201316, addressing Paul\u2019s call to press on toward maturity in Christ. While each speaker tailored the message to their unique congregation, the sermons share a unified central message: spiritual effort is a grateful response to Christ's prior pursuit, not an attempt to earn salvation.\n\n---\n\nShared Themes & Core Message\n1. Grace-Driven Effort vs. Earning\n\nAll three pastors emphasized the phrase *\"because Christ Jesus has made me his own\"* (Phil 3:12) to establish that divine grace precedes human exertion. Growth in the Christian life is not about moralistic self-improvement, but responding to a relationship initiated by God.\n\n2. The \"Already / Not Yet\" Tension of Maturity\n\nEach message highlighted Paul\u2019s admission that despite his spiritual background, he had not yet achieved perfection or final completion. True spiritual maturity is defined not by flawless performance, but by recognizing one's ongoing need for growth while pursuing Christ.\n\n3. Communion Integration\n\nEvery campus connected Paul's teaching to the sacrament of Communion. The elements were presented as a visible reminder of Christ\u2019s initial work on the cross and the promise that He will bring His work in believers to completion.\n\n---\n\nCampus-Specific Focus & Application\nBoulder Campus (Perry Marshall)\n\n\u2022 Theme & Focus: Perry Marshall framed the passage around the \"mindset of maturity,\" defining it through two main qualities: humility (acknowledging room for growth) and confidence (trusting God's initiating and completing work).\n\n\u2022 Illustrations & Community Context: Marshall celebrated the Boulder congregation's seasoned believers, highlighting the \"Nudge Brothers\"\u2014a weekly gathering of men in their 70s and 80s in Niwot who encourage one another in faith. He illustrated relational growth through marriage (comparing a 5-year marriage to 50 years) and academic humility through PhD studies, where deeper learning reveals how much remains unknown.\n\n\u2022 Application: Believers are urged to stay consistently committed to life groups, prayer, and community, learning alongside veteran Christians.\n\nErie Campus (Thomas Milburn)\n\n\u2022 Theme & Focus: Thomas Milburn framed the text as a contrast between relational pursuit of Jesus and moralistic religion (\"trying to be a good person\"). He expanded on Paul's conversion story in Acts 9 to show how God redeems human zeal.\n\n\u2022 Theological & Historical References: Preaching on the day after Reformation Day (October 31), Milburn discussed Martin Luther, contrasting infused righteousness with imputed (alien) righteousness. He noted that the Greek word translated \"press on\" in verse 12 is the same root (*di\u014dk\u014d*) Paul used in verse 6 for \"persecute,\" illustrating how Christ redirected Paul's zeal.\n\n\u2022 Illustrations & Application: Quoting Dallas Willard (*\"grace is not opposed to effort, but it is opposed to earning\"*), Milburn used a sailboat analogy: human effort is raising the sails so the Holy Spirit's wind can push the vessel forward. He challenged listeners to examine their spiritual \"diet\" (God's Word), prayer, community running partners, and spiritual coaches.\n\nThornton Campus (Zack Thompson)\n\n\u2022 Theme & Focus: Zack Thompson centered his sermon on the theme of living out a newly declared identity. He emphasized that because Christ has declared believers His own, failing to pursue Him is as illogical as accepting a dream job or getting married and remaining on the couch.\n\n\u2022 Illustrations & Practical Examination: Thompson opened with three scenarios: getting hired but staying in bed, getting accepted to college but staying home, and getting married but living apart. He defined the \"prize\" of the upward call as the conclusive experience of knowing Christ fully at the resurrection. To evaluate personal pursuit, he challenged the church to audit their calendars, noting that schedule allocation reveals what prize one is chasing.\n\n\u2022 Personal Context & Tone: Thompson shared a conversation with a non-churchgoing friend who assumed \"doing my best to be good\" was enough, explaining why self-reliance fails before a holy God.\n\n---\n\nTheology / Interpretation Differences\n\nNo contradictory theological differences were detected across the three messages. All three pastors presented an identical Reformed understanding of grace, justification by faith alone, and sanctification. \n\nMinor interpretive variations were strictly homiletical emphasis:\n\n\u2022 Erie (Thomas Milburn) explicitly drew upon Reformation terminology (imputed vs. infused righteousness) and highlighted the linguistic link between *di\u014dk\u014d* (\"press on\" / \"persecute\") in Philippians 3:6 and 3:12.\n\n\u2022 Boulder (Perry Marshall) framed the passage around the subjective \"mindset of maturity\" (humility paired with confidence in God's Phil 1:6 promise).\n\n\u2022 Thornton (Zack Thompson) framed the text around identity and practical alignment, examining how a believer's calendar reflects their pursuit of the prize.\n\n---\n\nMaterial Differences in What Was Said\n\nMaterial differences consisted of campus-specific illustrations, personal anecdotes, and local community references:\n\n\u2022 Boulder: Cited the \"Nudge Brothers\" (a Niwot men's group) and \"Nudge Sisters,\" referencing elderly veterans of the faith present at the Boulder campus.\n\n\u2022 Erie: Referenced a conversation on an Erie golf course regarding moralism, cited Martin Luther and Reformation Day, quoted Dallas Willard, and referenced Paul Peterson's boat illustration from a prior Boulder message.\n\n\u2022 Thornton: Included scripture reading by team member Cheryl Stoddard, utilized the hired/admitted/married introductory illustrations, detailed a personal dialogue with a friend about moral effort, and gave specific operational instructions for four communion stations (front and lobby).\n\nSources and ask details",
+    "errors": []
+  }
+}

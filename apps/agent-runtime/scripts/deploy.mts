@@ -15,6 +15,8 @@
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
+export const deploymentArgs = (args: string[]) => args.filter(arg => arg !== '--');
+
 export const CATALOG_DOOR = 'ap.catalog.paged.v2';
 
 /** The `--env` named in wrangler's arguments, if any. */
@@ -52,7 +54,8 @@ export async function vaultPreflight(vaultUrl: string, fetchImpl: typeof fetch =
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const args = process.argv.slice(2);
+  // pnpm run deploy -- --env faithnet can retain the separator. Never forward it: wrangler then ignores --env.
+  const args = deploymentArgs(process.argv.slice(2));
   // `--preflight-only`: the check alone — what wrangler.toml's per-environment `build.command` runs, so even a bare
   // `wrangler deploy --env <name>` stops here against a vault without the door.
   const only = args.includes('--preflight-only');

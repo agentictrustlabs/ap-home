@@ -1,0 +1,25 @@
+{
+  "checkedAt": "2026-11-04T00:58:14.338Z",
+  "runs": [
+    {
+      "handle": "alice",
+      "owner": "0xb0d11ce19b756a682e78b4904cd8d832303b3d11",
+      "runRef": "run-9a96d2f4-2d13-4ec6-9895-63abf6a54753",
+      "durationMs": 10121,
+      "skill": "faith.context.prepare",
+      "sourceCount": 0,
+      "sourceKeys": [],
+      "manifestRevision": "0c9c084d-0b0d-439e-b4f9-27d922299f83"
+    },
+    {
+      "handle": "bob",
+      "owner": "0x8c5cddca27c088a65e58e94403acdc9bc3eb7fe3",
+      "runRef": "run-1e338dd8-8d8d-4586-bfc8-07340e2bf743",
+      "durationMs": 10505,
+      "skill": "faith.context.prepare",
+      "sourceCount": 0,
+      "sourceKeys": [],
+      "manifestRevision": "05bccd2a-7a5d-40c3-8ca7-02191f883eec"
+    }
+  ]
+}

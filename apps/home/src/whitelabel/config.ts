@@ -132,7 +132,7 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'profile'],
       allowed_delegation_templates: ['site-login', 'ask-as-me'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
-      ask_delegate: '0xAF1cd4c4C7FddB58e1CC31f905c46Cc0F3CE71E7',
+      ask_delegate: '0x1118623077cca9a36591e7c2fa3ac6cd8ed3aa91',
       ask_with_login: true,
       // Plain connect grants access to the member’s own church records, never an org vault.
       self_vault_grant: { server: VAULT_SERVER_ID, resources: ['vault:church.*'], ops: ['read', 'write'] },

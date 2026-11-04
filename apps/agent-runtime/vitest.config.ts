@@ -11,6 +11,8 @@ export default defineConfig({
     },
   },
   test: {
+    // Bound import-heavy Worker suites while pnpm also tests other packages.
+    maxWorkers: process.env.CI ? 2 : 4,
     // One suite reaches the Home's `lib/chain.ts`, which REQUIRES a declared chain and throws without one:
     // there is no default, because a chain id is part of what a signature means (2026-10-14). The suite runs
     // against the committed faithchain table, so it says so rather than letting a default say it silently.

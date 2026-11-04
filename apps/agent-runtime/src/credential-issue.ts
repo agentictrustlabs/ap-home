@@ -17,6 +17,7 @@ import { InputRequired, type ToolSpec, type ToolInvoker } from '@agenticprimitiv
 import { issueOpenAcCredential, OpenAcIssueRefusal } from '@agenticprimitives/privacy-credentials-openac/issuer';
 import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import { REQUEST_PREFIX, type CredentialRequestV1 } from './credential-request.js';
+import { subjectOfRead } from '@agenticprimitives/context';
 
 export const CREDENTIAL_ISSUE_CAPABILITY = 'credential.issue' as const;
 /** The organization's issuer facet record (spec 444 W3), keyed by the facet's key id. */
@@ -101,6 +102,10 @@ export function credentialIssueInvoker(deps: CredentialIssueDeps, mandateDelegat
     const member = String(args.member ?? '').toLowerCase();
     if (org !== mandateDelegator.toLowerCase()) throw new Error(`a credential is issued by the mandate's delegator (${mandateDelegator}); the plan named ${org || 'no organization'}`);
     if (!steward) return { refused: 'issuing a credential is a steward\'s act, and there is no signed-in person on this run' };
+    // Issuance reads only the mandate's own organization. Apply the standard subject gate as well
+    // as the authority binding above, so malformed subjects cannot reach the vault port.
+    const subject = subjectOfRead(args, mandateDelegator as `0x${string}`, steward as `0x${string}`, { arg: 'org', noun: 'organization', toolId, stepRef, selfKind: 'org' });
+    if ('refused' in subject) return subject;
     if (!ADDR.test(member)) throw new InputRequired({ kind: 'data', stepRef, toolId, prompt: 'Issue to whom? Give the member\'s agent address.', fields: [{ name: 'member', label: 'Member', type: 'address', required: true }] } as never);
     // HER REQUEST, when she made one (`credential.request`): the device key she asked for it to be bound to. A key in the
     // args wins — the steward may be issuing from a request made some other way — and one of the two is required.
