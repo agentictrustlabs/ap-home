@@ -72,6 +72,7 @@ import { PUBLISHER_TOOLS, publisherRead } from './publisher-contract.js';
 import { MCP_CONNECTOR_PREFIX, MCP_CONNECTORS_LIST, MCP_CONNECTORS_LIST_TOOL, isMcpTool, isMcpConnectorRecord, mcpConnectorTools, mcpConnectorInvoker, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
 import { PREFERENCES_TOOLS, PREFERENCES_ACTS, PREFERENCES_GET, preferencesInvoker } from './preferences-tools.js';
 import { FAITH_TOOLS, FAITH_ACTS, faithInvoker } from './faith-records.js';
+import { CHURCH_HOME_TOOLS, CHURCH_HOME_ACTS, churchHomeInvoker } from './church-home.js';
 import type { TriggerScheduleV1 } from './triggers.js';
 import { factsForPrompt, factsOf, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { FRIEND_ADD_TOOL, FRIEND_REMOVE_TOOL, friendArg, friendGrantFor, friendAddInvoker, friendRemoveInvoker, type FriendDeps } from './friend-offers.js';
@@ -518,6 +519,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   ...PREFERENCES_TOOLS.filter((t) => PREFERENCES_ACTS.has(t.id)),
   // Her faith records (journey, prayers, care requests), self-acting: her own vault, her own words.
   ...FAITH_TOOLS.filter((t) => FAITH_ACTS.has(t.id)),
+  // Spec 203 §3 — her choice of church, checked against the church's own description, self-acting: her own vault.
+  ...CHURCH_HOME_TOOLS.filter((t) => CHURCH_HOME_ACTS.has(t.id)),
   {
     id: 'treasury.payment.execute',
 
@@ -1222,6 +1225,10 @@ export interface HarnessDeps {
    *  claim; this record is the authority (ADR-0061), genesis writes it, and an unnamed treasury still has
    *  it. Absent or unreadable ⇒ a value move is REFUSED, because a rail that fails open is not a rail. */
   agentTypeOf?: (agent: string) => Promise<string | null>;
+  /** A fetch for PUBLIC READS that reaches this Worker's own hosts in-process (a Worker cannot fetch its own hostname)
+   *  and anything else over the network — for a person's agent asking a church its `church.describe` before keeping
+   *  her choice. Its in-process hops are marked as this Worker's own and carry no principal. */
+  publicReadFetch?: typeof fetch;
   /** What an agent holds of the deployment's value asset — annotates a choice between accounts. */
   valueHeld?: (agent: string) => Promise<{ amount: bigint; display: string } | null>;
   /** The apps a person has authorized to read their records, and whether each grant is still live. */
@@ -2516,6 +2523,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       return faithContextInvoker(deps,person,addressee)(toolId,args,ctx);
     }
     if (FAITH_TOOLS.some((t) => t.id === toolId)) return faithInvoker({ ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}), ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee)(toolId, args, ctx);
+    if (CHURCH_HOME_TOOLS.some((t) => t.id === toolId)) return churchHomeInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}), ...(deps.publicReadFetch ? { fetch: deps.publicReadFetch } : {}) }, person, addressee)(toolId, args, ctx);
     if (PREFERENCES_TOOLS.some((t) => t.id === toolId)) return preferencesInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee)(toolId, args, ctx);
     if (MAIL_DRIVE_TOOLS.some((t) => t.id === toolId)) return mailDriveInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (CALENDAR_TOOLS.some((t) => t.id === toolId)) return calendarInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
@@ -6063,6 +6071,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(deps.listTriggers ? ROUTINE_TOOLS.filter((t) => t.id === ROUTINE_LIST).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     ...(deps.readSubjectRecord ? PREFERENCES_TOOLS.filter((t) => t.id === PREFERENCES_GET).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     ...(deps.survey && deps.readRecords ? FAITH_TOOLS.filter((t) => !FAITH_ACTS.has(t.id)).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
+    ...(deps.readSubjectRecord ? CHURCH_HOME_TOOLS.filter((t) => !CHURCH_HOME_ACTS.has(t.id)).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     UNSUPPORTED_TOOL,
     // Spec 418 — planned only by the skill stage (see ASK_CLARIFY_TOOL); filtered from the planner's view below.
     ...(Object.keys(instructionSourcesOf(playbook)).length ? [ASK_CLARIFY_TOOL] : []),

@@ -139,6 +139,8 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   'person.faith.journey.record',
   'person.faith.prayer.save',
   'person.faith.care.request',
+  // Spec 203 §3 — her choice of church is a preference about herself: self-acting, never work.
+  'person.church.home.save',
   // Spec 412 W5 — her own Library, written by her own agent: self-acting, no mandate, never work anyone is
   // allocated (a release is signed AS her under her agent's session leaf, not authorized by a plan).
   'library.file.save',
