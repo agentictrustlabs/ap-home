@@ -760,7 +760,12 @@ const faithImpact: WhiteLabelConfig = {
     {
       client_id: 'seed-bible-reader',
       name: 'Seed Bible Reader',
-      redirect_uris: ['https://seed-reader.faithnet.io/', 'http://localhost:5185/'],
+      redirect_uris: [
+        'https://seed-reader.faithnet.io/',
+        // Global.Church's "familiar first" fork of the reader (global-church/seed-bible-global-church), same client.
+        'https://seed-bible.global-church.workers.dev/',
+        'http://localhost:5185/',
+      ],
       allowed_scopes: ['openid', 'profile', 'agent'],
       // Spec 412 W5 — `ask-as-me`: a reader's highlights, notes and bookmarks are written into THEIR OWN Library
       // (`seed-bible/…`) by THEIR agent, asked as them under this wire by the reader workspace (reader-a2a). The app
