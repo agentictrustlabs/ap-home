@@ -42,6 +42,10 @@ export const CARRIES = {
   routine: { sentence: [T.Instruction] },
   /** A remembered fact about the person, in their words. */
   memory: { fact: [T.PersonalPreference] },
+  /** The person's own faith records: her words about her journey, her prayers, the care she asks for. */
+  faithJourney: { note: [T.FreeText], place: [T.FreeText] },
+  prayer: { label: [T.FreeText], description: [T.FreeText], prayingFor: [T.FreeText], answered: [T.FreeText] },
+  care: { label: [T.FreeText], description: [T.FreeText] },
   /** Answer preferences. */
   preferences: { style: [T.PersonalPreference], language: [T.PersonalPreference], callMe: [T.PersonalPreference], emailNudges: [T.PersonalPreference], routineEmails: [T.PersonalPreference] },
   /** A calendar entry: when, where, what. */

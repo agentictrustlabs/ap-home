@@ -70,6 +70,7 @@ import { LIBRARY_TOOLS, LIBRARY_ACTS, LIBRARY_GRANT_ACTS, LIBRARY_GRANT_ISSUE, L
 import { PUBLISHER_TOOLS, publisherRead } from './publisher-contract.js';
 import { MCP_CONNECTOR_PREFIX, MCP_CONNECTORS_LIST, MCP_CONNECTORS_LIST_TOOL, isMcpTool, isMcpConnectorRecord, mcpConnectorTools, mcpConnectorInvoker, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
 import { PREFERENCES_TOOLS, PREFERENCES_ACTS, PREFERENCES_GET, preferencesInvoker } from './preferences-tools.js';
+import { FAITH_TOOLS, FAITH_ACTS, faithInvoker } from './faith-records.js';
 import type { TriggerScheduleV1 } from './triggers.js';
 import { factsForPrompt, factsOf, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { FRIEND_ADD_TOOL, FRIEND_REMOVE_TOOL, friendArg, friendGrantFor, friendAddInvoker, friendRemoveInvoker, type FriendDeps } from './friend-offers.js';
@@ -514,6 +515,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   ...ROUTINE_TOOLS.filter((t) => ROUTINE_ACTS.has(t.id)),
   // Spec 403 W2/W4 — her preferences (how her agent answers and reaches her), self-acting.
   ...PREFERENCES_TOOLS.filter((t) => PREFERENCES_ACTS.has(t.id)),
+  // Her faith records (journey, prayers, care requests), self-acting: her own vault, her own words.
+  ...FAITH_TOOLS.filter((t) => FAITH_ACTS.has(t.id)),
   {
     id: 'treasury.payment.execute',
 
@@ -2505,6 +2508,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // Spec 400 W3/W4 — GitHub as a connector: reads under the holder's connector, acts under the holder's mandate.
     if (WEB_TOOLS.some((t) => t.id === toolId)) return webReadInvoker()(toolId, args, ctx);
     if (WEB_SEARCH_TOOLS.some((t) => t.id === toolId)) return webSearchInvoker(env as never)(toolId, args, ctx);
+    if (FAITH_TOOLS.some((t) => t.id === toolId)) return faithInvoker({ ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}), ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee)(toolId, args, ctx);
     if (PREFERENCES_TOOLS.some((t) => t.id === toolId)) return preferencesInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee)(toolId, args, ctx);
     if (MAIL_DRIVE_TOOLS.some((t) => t.id === toolId)) return mailDriveInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (CALENDAR_TOOLS.some((t) => t.id === toolId)) return calendarInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
@@ -6050,6 +6054,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL, MEMORY_LIST_TOOL].map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     ...(deps.listTriggers ? ROUTINE_TOOLS.filter((t) => t.id === ROUTINE_LIST).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     ...(deps.readSubjectRecord ? PREFERENCES_TOOLS.filter((t) => t.id === PREFERENCES_GET).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
+    ...(deps.survey && deps.readRecords ? FAITH_TOOLS.filter((t) => !FAITH_ACTS.has(t.id)).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     UNSUPPORTED_TOOL,
     // Spec 418 — planned only by the skill stage (see ASK_CLARIFY_TOOL); filtered from the planner's view below.
     ...(Object.keys(instructionSourcesOf(playbook)).length ? [ASK_CLARIFY_TOOL] : []),
