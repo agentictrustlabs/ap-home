@@ -113,14 +113,15 @@ export function faithContextInvoker(deps:FaithDeps,asker:string|undefined,addres
    const types=Array.isArray(value['@type'])?value['@type']:[value['@type']];
    // Legacy preference records predate JSON-LD. Their only releasable values are answer style/language.
    if(e.recordType!=='person.preferences'&&!types.includes(e.class)){gaps.push('An authorized source has an unexpected class.');continue;}
-   let budget=1500;const fields=[];
+   const comparison=role==='org'&&e.category==='comparison';
+   let budget=comparison?6500:1500;const fields=[];
    const body=(p:string)=>/\/(?:description|transcript|text|body|summary)$/i.test(p)?1:0;
    // Retain citation identity, dates, speakers and URLs before assigning the remaining excerpt budget.
    const paths=role==='org'?[...e.fields].sort((a,b)=>body(a)-body(b)):e.fields;
    for(const path of paths){
     if(e.recordType==='person.preferences'&&!['/answer/language','/answer/style'].includes(path))continue;
     const v=field(value,path);if(!['string','number','boolean'].includes(typeof v)||budget<=0)continue;
-    const n=Math.min(budget,1200);let start=0,best=0;
+    const n=Math.min(budget,comparison?6000:1200);let start=0,best=0;
     if(typeof v==='string'&&v.length>n)for(let i=0;i<v.length;i+=600){const window=v.slice(i,i+n).toLowerCase();const score=words.reduce((sum,w)=>sum+(window.includes(w)?1:0),0);if(score>best){best=score;start=i;}}
     const out=typeof v==='string'?v.slice(start,start+n):v as number|boolean;
     fields.push({path,value:out,truncated:typeof v==='string'&&(start>0||v.length>n),...(typeof v==='string'?{start,end:start+out.toString().length}:{})});budget-=String(out).length;

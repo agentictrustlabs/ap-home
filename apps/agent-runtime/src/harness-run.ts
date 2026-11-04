@@ -5913,7 +5913,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     : offerBound;
   const boundPlanner: Planner = { plan: async (pin) => {
     const proposed = await boundPlanner0.plan(pin);
-    const p = input.faithCollaborationRole === 'synthesis' ? {...proposed,steps:[...(['church','scripture'] as const).map(section=>({id:'faith-'+section,toolId:FAITH_CONTRIBUTIONS_TOOL.id,args:{section}})),...proposed.steps.filter(st=>st.toolId!==FAITH_CONTRIBUTIONS_TOOL.id)]} : proposed;
+    const p = input.faithCollaborationRole === 'synthesis' ? {...proposed,steps:[...(['church','church-comparison','scripture'] as const).map(section=>({id:'faith-'+section,toolId:FAITH_CONTRIBUTIONS_TOOL.id,args:{section}})),...proposed.steps.filter(st=>st.toolId!==FAITH_CONTRIBUTIONS_TOOL.id)]} : proposed;
     if (pin.continuation) trace.continuations = [...(trace.continuations ?? []), { steps: p.steps.map((st) => ({ toolId: st.toolId })) }];
     return p;
   } };
