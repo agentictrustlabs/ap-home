@@ -134,6 +134,11 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   'person.routine.remove',
   // Spec 403 — her preferences are her own settings: self-acting, no mandate, never work.
   'person.preferences.set',
+  // Her faith records (her journey, her prayers, the care she asks for) are her own words about herself: self-acting,
+  // no mandate, and never work — a plan that could record someone's baptism or prayer would be speaking for them.
+  'person.faith.journey.record',
+  'person.faith.prayer.save',
+  'person.faith.care.request',
   // Spec 412 W5 — her own Library, written by her own agent: self-acting, no mandate, never work anyone is
   // allocated (a release is signed AS her under her agent's session leaf, not authorized by a plan).
   'library.file.save',
