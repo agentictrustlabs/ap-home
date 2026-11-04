@@ -273,7 +273,25 @@ export async function recomposePlaybook(input: RecomposeInput): Promise<Recompos
       equippedAt: now, equippedBy: lower(input.actor), equippedAs,
     })),
   ];
-  const composed = await composePlaybook(baseRes.base, next.map((p) => ({ context: p.context, archetype: p.archetype, as: packHeading(p) })));
+  // A PACK THE REGISTRY NO LONGER LETS IN (it was re-scoped to another kind of agent since it was equipped) refuses
+  // the whole composition, so the person stayed on an old snapshot forever: the self-heal failed on every load and
+  // so did Update, and a capability added to the base since (faith records, 2026-11-04) never reached them. Such a
+  // pack cannot be kept on the new version whatever we do — it is left out, by name, and the rest is composed.
+  const dropped: string[] = [];
+  let composed: Composition;
+  for (;;) {
+    try {
+      composed = await composePlaybook(baseRes.base, next.map((p) => ({ context: p.context, archetype: p.archetype, as: packHeading(p) })));
+      break;
+    } catch (e) {
+      const ref = disallowedPack(e instanceof Error ? e.message : String(e));
+      // Only a pack already held: one being equipped now is refused out loud, as before.
+      const at = ref && kept.some((p) => packKey(p) === ref) && !adding.some((a) => packKey(a.pack) === ref) ? next.findIndex((p) => packKey(p) === ref) : -1;
+      if (at < 0) throw e;
+      dropped.push(ref!);
+      next.splice(at, 1);
+    }
+  }
   if (!composed.definition.applicableAgentTypes.includes(input.typeSlug)) throw new Error(`the composed playbook does not apply to a ${input.typeSlug} agent`);
   const part = (ref: PackRef) => composed.parts.find((x) => x.ref === packKey(ref));
   const basePart = part(baseRes.base);
@@ -295,12 +313,17 @@ export async function recomposePlaybook(input: RecomposeInput): Promise<Recompos
   return {
     record,
     added: adding.map((a) => packKey(a.pack)),
-    removed: (current?.composedFrom?.packs ?? []).filter((p) => removing.has(`${lower(p.organization)}|${packKey(p)}`)).map(packKey),
+    removed: [...(current?.composedFrom?.packs ?? []).filter((p) => removing.has(`${lower(p.organization)}|${packKey(p)}`)).map(packKey), ...dropped],
     toolsAdded: [...after].filter((t) => !before.has(t)),
     toolsRemoved: [...before].filter((t) => !after.has(t)),
     baseMoved: !!current?.composedFrom && current.composedFrom.base.digest !== basePart.digest,
-    warnings: composed.warnings,
+    warnings: [...composed.warnings, ...dropped.map((ref) => `${ref} is no longer offered for this kind of agent, so it was left out`)],
   };
+}
+
+/** The pack a registry composition refused because it is for another kind of agent (archetype-compiler's wording). */
+export function disallowedPack(error: string): string | null {
+  return /^(\S+\/\S+) is for .+ agents and cannot be added to an? .+ playbook/.exec(error)?.[1] ?? null;
 }
 
 /**

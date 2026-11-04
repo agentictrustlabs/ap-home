@@ -1,7 +1,8 @@
 // Spec 427 §5 — which role packs a playbook should hold. The organization offers; the person equips; a pack whose
 // membership ended is dropped; and an organization that could not be asked decides nothing.
-import { describe, it, expect } from 'vitest';
-import { planRolePacks, mergeRolesReads, packHeading, type ComposedFrom, type ComposedPack, type HeldRole } from './role-playbook';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { definitionDigest, type AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-claims';
+import { planRolePacks, mergeRolesReads, packHeading, recomposePlaybook, type ComposedFrom, type ComposedPack, type HeldRole } from './role-playbook';
 
 const WELD = '0x1111111111111111111111111111111111111111';
 const ORG = '0x5555555555555555555555555555555555555555';
@@ -99,5 +100,54 @@ describe('a pack the person added for themselves (spec 427 §5.5)', () => {
   });
   it('heads its instructions by its own label', () => {
     expect(packHeading(self)).toBe('Gap Steward (added by you)');
+  });
+});
+
+// A pack re-scoped to another kind of agent after it was equipped refused the whole composition, so the person's
+// playbook could never move forward (a person who had equipped people-group-catalog, 2026-11-04).
+describe('recomposing with a pack the registry no longer lets in', () => {
+  const AGENT = '0x3333333333333333333333333333333333333333';
+  const PGC = { context: 'agentic-trust', archetype: 'people-group-catalog' };
+  const def = (tools: string[]): AgentHarnessDefinitionV1 => ({
+    type: 'ap.agent-harness-definition.v1', archetypeId: 'skill:archetypes/person-steward', archetypeVersion: '1.0.0',
+    applicableAgentTypes: ['person'], instructions: 'You are a Person Steward.',
+    tools: tools.map((id) => ({ id, description: id, capability: { id, action: 'read' }, risk: 'low' })),
+    requiredMandateTypes: [], approvalPolicyRefs: [], retrievalQueries: ['Person'], evidenceRequirements: [], sourceCommitments: { x: 'id:x' },
+  });
+  const held = (): Record<string, unknown> => {
+    const old = def(['person.profile.get']);
+    return { type: 'ap.archetype-assignment.v1', archetypeId: old.archetypeId, archetypeVersion: '1.0.0', definitionDigest: definitionDigest(old), definition: old,
+      composedFrom: { base: { context: 'agentic-trust', archetype: 'person-steward', version: '1.0.0', digest: '0xold' }, packs: [pack(ME, PGC, 'People-Group Catalog')] } };
+  };
+  const registry = (written: unknown[]) => vi.fn(async (url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    if (url.endsWith('/connect/channels') && body.action === 'archetypeAssignmentGet') return Response.json({ ok: true, record: held() });
+    if (url.endsWith('/connect/channels') && body.action === 'archetypeAssignmentPut') { written.push(body.record); return Response.json({ ok: true }); }
+    if (url.endsWith('/context/compose')) {
+      if (body.packs.length) return Response.json({ error: 'agentic-trust/people-group-catalog is for service agents and cannot be added to a person playbook' }, { status: 400 });
+      const d = def(['person.profile.get', 'person.faith.journey.record']);
+      return Response.json({ definition: d, digest: definitionDigest(d), parts: [{ ref: 'agentic-trust/person-steward', digest: '0xnew', archetypeId: d.archetypeId, version: '1.0.0' }], warnings: [] });
+    }
+    return Response.json({}, { status: 404 });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('leaves that pack out, says so, and writes the current base with its new tools', async () => {
+    const written: unknown[] = [];
+    vi.stubGlobal('fetch', registry(written));
+    const out = await recomposePlaybook({ agent: AGENT, token: 't', typeSlug: 'person', actor: AGENT });
+    expect(out.removed).toEqual(['agentic-trust/people-group-catalog']);
+    expect(out.warnings.join(' ')).toMatch(/people-group-catalog is no longer offered/);
+    expect(out.toolsAdded).toContain('person.faith.journey.record');
+    expect(written).toHaveLength(1);
+    expect((written[0] as { composedFrom: { packs: unknown[] } }).composedFrom.packs).toEqual([]);
+  });
+
+  it('still refuses, out loud, a pack the person is equipping now', async () => {
+    const written: unknown[] = [];
+    vi.stubGlobal('fetch', registry(written));
+    await expect(recomposePlaybook({ agent: AGENT, token: 't', typeSlug: 'person', actor: AGENT, remove: [{ organization: ME, ...PGC }], add: [{ role: role(ORG, [PGC]), pack: PGC }] }))
+      .rejects.toThrow(/service agents/);
+    expect(written).toHaveLength(0);
   });
 });
