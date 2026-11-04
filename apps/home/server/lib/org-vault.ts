@@ -41,7 +41,9 @@ export async function orgVault(
     // ONE dispatch, so there is exactly one place that decides which authority a record type takes.
     const route = (recordType: string, data?: unknown): { op: string; payload: Record<string, unknown> } => {
       const tok = /^org\.invite:(?!agent:)(.+)$/.exec(recordType);
-      if (tok) return { op: 'invite.token', payload: { token: tok[1], ...(data !== undefined ? { data } : {}) } };
+      // A WRITE carries the steward's session + stewardship when the caller has them (creating an invite);
+      // the runtime refuses a token-only write except to mark an existing invite redeemed (audit H-02).
+      if (tok) return { op: 'invite.token', payload: { token: tok[1], ...(data !== undefined ? { data, ...(session ? { session } : {}), ...(stewardship ? { stewardship } : {}) } : {}) } };
       const mine = /^org\.invite:agent:(.+)$/.exec(recordType);
       // The key is IGNORED on a self-claim: the agent derives it. Passing it would re-open exactly the
       // hole `invite.claim` closes.

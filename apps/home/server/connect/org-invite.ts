@@ -224,7 +224,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // by reading the org vault at (org, token) directly (portability; no demo-sso-next KV dependency).
   // The vault write is REQUIRED now (not best-effort): without it the invite has no record at all.
   const expiresAt = Date.now() + 60 * 60 * 24 * 7 * 1000;
-  const vault = await orgVault(env, org);
+  // Creating the invitation is the org acting: the runtime requires the steward's session and stewardship
+  // delegation for the token record (security audit H-02, 2026-11-04).
+  const stewardBearer = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+  const stewardLinkRaw = await env.AUTH_CODES.get(`related:${caller.person}:${org}`);
+  const stewardWire = stewardLinkRaw ? (JSON.parse(stewardLinkRaw) as { stewardshipDelegation?: unknown }).stewardshipDelegation : undefined;
+  const vault = await orgVault(env, org, stewardBearer || undefined, stewardWire);
   if (!vault) return json({ error: 'org vault storage not enabled — a steward must enable it before inviting' }, 409);
   // `ServerVaultTransport.set` THROWS on refusal, and this call was not guarded — so any vault
   // denial became a bare 500 with no body from the endpoint that creates invitations. A caller
@@ -282,5 +287,5 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const declineUrl = env.A2A_CUSTODY_URL?.trim() ? `${env.A2A_CUSTODY_URL.trim().replace(/\/$/, '')}/invite/decline?org=${org}&token=${token}` : null;
   const sent = await sendEmail(env, inviteEmail(email, joinUrl, orgName ?? 'the organization', whitelabel.brand.name, appName, declineUrl), session ? { session, as: org } : undefined);
   if (!sent.ok) return json({ error: `could not send invite: ${sent.error}` }, 502);
-  return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', joinUrl, ...(appName ? { appName } : {}), ...(roleOnInvite !== undefined ? { roleOnInvite } : {}) });
+  return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', ...(appName ? { appName } : {}), ...(roleOnInvite !== undefined ? { roleOnInvite } : {}) });
 };
