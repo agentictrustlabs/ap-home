@@ -11,6 +11,8 @@ import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { getClient } from '../../src/lib/oidc-clients';
 import { CONTRACTS } from '../../src/lib/chain';
+import { wireValidUntil } from '../../src/lib/consent-terms';
+import { wireRef, type AppGrantRow } from '../oidc/app-grant-row';
 
 const json = (b: unknown, s = 200): Response => new Response(JSON.stringify(b), { status: s, headers: { 'content-type': 'application/json' } });
 
@@ -24,32 +26,56 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
 }
 
-interface ActWire { v: 1; template: string; capability: string; wire: { delegator?: string; delegate?: string; caveats?: Array<{ enforcer: string; terms: string }> }; ref: string; requirement: Record<string, unknown> }
-interface Row { clientId: string; template: string; delegate: string; delegation: { caveats?: Array<{ enforcer: string; terms: string }> }; issuedAt: number; /** Spec 397 §11 — the act set, one wire per capability. */ wires?: ActWire[] }
+const validUntilOf = (wire: Parameters<typeof wireValidUntil>[0]): number | null => wireValidUntil(wire, CONTRACTS.timestampEnforcer);
+/** A wire's ref for the page, or null for one that cannot be hashed. */
+const refOf = (wire: Parameters<typeof wireRef>[0] | undefined): string | null => { try { return wire ? wireRef(wire) : null; } catch { return null; } };
 
-/** The timestamp caveat's validUntil, read from the wire's own terms (uint128 validAfter ‖ uint128 validUntil). */
-function validUntilOf(row: Row, timestampEnforcer: string | undefined): number | null {
-  const c = (row.delegation.caveats ?? []).find((x) => timestampEnforcer && x.enforcer.toLowerCase() === timestampEnforcer.toLowerCase());
-  if (!c || typeof c.terms !== 'string' || c.terms.length < 66) return null;
-  const hex = c.terms.slice(2);
-  const until = Number(BigInt('0x' + hex.slice(32, 64)));
-  return Number.isFinite(until) && until > 0 ? until * 1000 : null;
-}
+interface ActWire { v: 1; template: string; capability: string; wire: { delegator?: string; delegate?: string; caveats?: Array<{ enforcer: string; terms: string }> }; ref: string; requirement: Record<string, unknown> }
+type Row = Omit<AppGrantRow, 'wires'> & { /** Spec 397 §11 — the act set, one wire per capability. */ wires?: ActWire[] };
 
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   const person = await personFrom(request, env);
   if (!person) return json({ error: 'session required' }, 401);
   const rows = JSON.parse((await env.AUTH_CODES.get(`app-grants:${person}`)) ?? '[]') as Row[];
-  return json({ ok: true, grants: rows.map((r) => ({ ...r, appName: getClient(r.clientId)?.name ?? r.clientId, validUntil: validUntilOf(r, CONTRACTS.timestampEnforcer), ...(r.wires ? { wires: r.wires.map((w) => ({ ...w, validUntil: validUntilOf({ ...r, delegation: w.wire }, CONTRACTS.timestampEnforcer) })) } : {}) })) });
+  return json({
+    ok: true,
+    grants: rows.map((r) => ({
+      ...r,
+      appName: getClient(r.clientId)?.name ?? r.clientId,
+      validUntil: validUntilOf(r.delegation),
+      ref: refOf(r.delegation),
+      ...(r.wires ? { wires: r.wires.map((w) => ({ ...w, validUntil: validUntilOf(w.wire) })) } : {}),
+      ...(r.askDelegation ? { ask: { ref: refOf(r.askDelegation), validUntil: validUntilOf(r.askDelegation) } } : {}),
+      ...(r.selfVaultGrant ? { vault: { ref: refOf(r.selfVaultGrant), validUntil: validUntilOf(r.selfVaultGrant) } } : {}),
+    })),
+    // Spec 445 §7 — each sign-in that passed with no sheet: Activity lists them beside the control plane.
+    rememberedSignIns: JSON.parse((await env.AUTH_CODES.get(`remembered-log:${person}`)) ?? '[]') as unknown[],
+  });
 };
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
   const person = await personFrom(request, env);
   if (!person) return json({ error: 'session required' }, 401);
-  const body = (await request.json().catch(() => null)) as { clientId?: string; revoked?: boolean; ref?: string; delegation?: Row['delegation'] & { delegator?: string; delegate?: string; signature?: string } } | null;
+  const body = (await request.json().catch(() => null)) as { clientId?: string; revoked?: boolean; ref?: string; delegation?: Row['delegation']; forget?: boolean; askEveryTime?: boolean; part?: 'ask' | 'vault'; supersededRef?: string } | null;
   if (!body?.clientId) return json({ error: 'clientId is required' }, 400);
   const key = `app-grants:${person}`;
   const rows = JSON.parse((await env.AUTH_CODES.get(key)) ?? '[]') as Row[];
+  const save = async (change: (r: Row) => Row): Promise<Response> => {
+    if (!rows.some((r) => r.clientId === body.clientId)) return json({ error: 'no grant row for that client' }, 404);
+    await env.AUTH_CODES.put(key, JSON.stringify(rows.map((r) => (r.clientId === body.clientId ? change(r) : r))));
+    return json({ ok: true });
+  };
+  // Spec 445 §7 — the person's own controls over remembered consent.
+  // FORGET drops what the Allow agreed to, so the next sign-in shows the sheet. The row stays: its wires are still live on
+  // chain, and a forgotten row that vanished would take the only place to revoke them with it.
+  if (body.forget === true) return save(({ terms: _t, termsDigest: _d, origins: _o, ...r }) => r);
+  if (typeof body.askEveryTime === 'boolean') return save(({ askEveryTime: _a, ...r }) => (body.askEveryTime ? { ...r, askEveryTime: true as const } : r));
+  // A wire she revoked on chain, forgotten here. The chain already refuses it; this keeps the list honest.
+  if (body.revoked === true && (body.part === 'ask' || body.part === 'vault')) return save(({ askDelegation, selfVaultGrant, ...r }) => ({ ...r, ...(body.part === 'ask' ? {} : { askDelegation }), ...(body.part === 'vault' ? {} : { selfVaultGrant }) }) as Row);
+  if (body.revoked === true && typeof body.supersededRef === 'string') {
+    const gone = body.supersededRef.toLowerCase();
+    return save((r) => ({ ...r, superseded: (r.superseded ?? []).filter((x) => x.ref.toLowerCase() !== gone) }));
+  }
   // Spec 397 §11 — ONE act wire, by its ref: forgotten after she revoked it on chain, or re-pointed at its re-issued
   // twin after a rotation (same delegator and delegate; the ref moves with the signature scheme, the capability stays).
   if (typeof body.ref === 'string' && body.ref) {

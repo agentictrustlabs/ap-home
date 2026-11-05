@@ -12,6 +12,7 @@ import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { toCanonicalAgentId } from '@agenticprimitives/identity-directory-adapters';
 import type { CredentialPrincipal, Hex } from '@agenticprimitives/types';
 import { getServer, json, resolveOrigin, type FnContext } from '../_lib/server-broker';
+import { withRecognition } from '../_lib/recognition';
 import { recordCredentialFacet } from '../../src/lib/kv-indexer';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { qualifiedAgentName as fullName } from '../../src/lib/domain';
@@ -115,7 +116,7 @@ const onRequestPostImpl = async ({ request, env }: FnContext): Promise<Response>
     signer,
   );
   await recordCredentialFacet(env.AUTH_CODES, principal, sub);
-  return json({ status: 'issued', token, name });
+  return withRecognition(json({ status: 'issued', token, name }), { request, env }, { sub, principal, assurance: 'onchain-confirmed', ttlSeconds: 3600 });
 };
 
 export const onRequestPost = async (ctx: FnContext): Promise<Response> => {

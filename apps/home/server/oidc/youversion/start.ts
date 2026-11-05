@@ -3,6 +3,7 @@
 // Begin the real YouVersion Platform OIDC flow at the Connect origin. Generates PKCE + state + nonce
 // (connect-auth/youversion), stashes them under `state` (single-use, short TTL), and 302-redirects the
 // browser to YouVersion. YouVersion is a PUBLIC PKCE client — there is no client secret anywhere.
+import { markLoginStart } from '../../_lib/recognition';
 import { beginLogin } from '@agenticprimitives/connect-auth/youversion';
 import { json, type FnContext } from '../../_lib/server-broker';
 
@@ -34,5 +35,5 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     { expirationTtl: 600 },
   );
 
-  return new Response(null, { status: 302, headers: { location: authUrl } });
+  return markLoginStart(new Response(null, { status: 302, headers: { location: authUrl } }), { request, env }, state);
 };

@@ -25,6 +25,10 @@ const ALLOWLIST = {
   'oidc': { class: 'ephemeral', why: 'OIDC authorize state' },
   'oidc-deleg': { class: 'ephemeral', why: 'transient OIDC delegation-request state' },
   'oidc-grant': { class: 'ephemeral', why: 'transient OAuth grant bundle handle' },
+  // Spec 445 — remembered consent. The recognition record is the server half of the HttpOnly cookie; the rest only reports.
+  'recognition': { class: 'ephemeral', why: 'server record of the recognition cookie, keyed by its hash; TTL = the session it was minted beside' },
+  'remembered-stat': { class: 'ephemeral', why: 'approximate decision counters by day and client, TTL 35 days; nothing decides from them' },
+  'remembered-log': { class: 'cache', why: 'Activity list of sign-ins that skipped the sheet, capped, TTL 90 days; a projection of the audit entry written first' },
   // The person's own self-grant (delegator = delegate = them), verified on chain before storage and
   // stored with a TTL that expires with its own timestamp caveat. Rebuildable by definition: losing it
   // costs one signature, which is the prompt this exists to avoid — a rebuild, never a bereavement

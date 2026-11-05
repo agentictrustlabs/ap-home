@@ -65,10 +65,31 @@ export async function driveOnboarding(page: Page, name: string, address: `0x${st
  * A stable cast is worth having precisely because history accumulates, and history means the second run is
  * the normal case rather than the exception.
  */
+/** Signs in as one of the estate's seeded demo people, through the real demo sign-in and the real `#session=` handoff, then
+ *  proves it took. No wallet, no gas. Throws rather than returning a home nobody reached. */
+export async function signInAsSeededPerson(page: Page, handle = process.env.E2E_SEEDED_PERSON ?? 'alice', clientId = 'demo-web', log = (s: string) => console.log(s)): Promise<{ address: `0x${string}`; origin: string; name: string; existing: boolean }> {
+  await page.goto('/jwks');
+  const r = await page.evaluate(async ({ handle, clientId }) => {
+    const res = await fetch('/connect/demo-signin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle, client_id: clientId }) });
+    return { status: res.status, body: await res.json().catch(() => ({})) };
+  }, { handle, clientId });
+  if (r.status !== 200 || !r.body.homeSession) throw new Error(`[signin ${handle}] demo sign-in refused (HTTP ${r.status}): ${JSON.stringify(r.body).slice(0, 160)}`);
+  await page.goto(`/you#session=${encodeURIComponent(r.body.homeSession)}&via=Wallet`);
+  await page.getByRole('link', { name: /^Messages$/ }).first().waitFor({ timeout: 60_000 });
+  const origin = new URL(page.url()).origin;
+  log(`[signin ${handle}] seeded person ${r.body.agent} at ${origin}`);
+  return { address: r.body.agent, origin, name: handle, existing: true };
+}
+
 export async function signInOrOnboard(page: Page, name: string, privateKey: Hex, log = (s: string) => console.log(s)): Promise<{ address: `0x${string}`; origin: string; name: string; existing: boolean }> {
   const { address } = await installMockWallet(page, privateKey);
   await page.goto('/');
-  await page.getByRole('button', { name: /Continue with a wallet/i }).first().click().catch(() => {});
+  // The door decides what can be tested. A front door with no wallet (faithnet: Google and email only) cannot sign a wallet
+  // persona in, and carrying on would walk every "signed-in" page as the sign-in screen, and report them all as passing.
+  const wallet = page.getByRole('button', { name: /Continue with a wallet/i }).first();
+  await page.locator('button').first().waitFor({ timeout: 30_000 });
+  if (!(await wallet.count())) throw new Error('NO_WALLET_DOOR: this Home offers no wallet sign-in. Use signInAsSeededPerson for this estate.');
+  await wallet.click();
 
   // RACE the two outcomes rather than assuming one. A fixed wait would pick a winner by timing, and the
   // recognised path is the fast one — so a generous timeout would make the NEW-user case look recognised.
@@ -87,8 +108,7 @@ export async function signInOrOnboard(page: Page, name: string, privateKey: Hex,
   if (outcome === 'timeout') {
     // Neither appeared. Reported as its own state — "the home is slow" and "the home is broken" are
     // different findings, and returning a plausible origin here would hide both.
-    log(`[signin ${name}] NEITHER name-input nor home appeared — ${(await page.locator('body').innerText().catch(() => '')).replace(/\n+/g, ' ').slice(0, 160)}`);
-    return { address, origin: new URL(page.url()).origin, name, existing: false };
+    throw new Error(`[signin ${name}] NEITHER name-input nor home appeared: ${(await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 160)}`);
   }
   // The wallet is already installed and the CTA already clicked — resume from there rather than starting
   // over, which would re-`exposeFunction` and throw.

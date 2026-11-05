@@ -15,6 +15,7 @@ import { recordOidcFacet, readOidcFacet, readRotation, recordEmailOwner } from '
 import { resolveKmsAgent } from '../../_lib/kms-resolve';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
 import { isSocialCustodyAud, isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
+import { startedInThisBrowser, withRecognition } from '../../_lib/recognition';
 import { getServer, json, resolveOrigin, type FnContext } from '../../_lib/server-broker';
 import { connectorBridge } from '../../connect/connector-calendar';
 
@@ -85,6 +86,12 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     person?: string;
     returnTo?: string;
   };
+
+  // Spec 445 W7 — A SIGN-IN FINISHES ONLY IN THE BROWSER THAT STARTED IT. `state` is checked against the server's store, so a
+  // return link someone prepared for their own account would otherwise sign any browser that opens it in as them. Before the
+  // exchange: nothing is asked of the provider for a link that will be refused. (A connector authorization is not a sign-in: it
+  // is bound to the person whose Home session started it.)
+  if (!stash.purpose && !(await startedInThisBrowser(request, state))) return json({ error: 'sign_in_started_elsewhere', message: 'This sign-in was started in another browser. Please start again here.' }, 403);
 
   // Token exchange (client_secret server-side) + id_token verification.
   const result = await completeLogin({
@@ -253,6 +260,8 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     signer,
   );
 
+  const proved = (res: Response): Promise<Response> => withRecognition(res, { request, env }, { sub: agent, principal: sessionPrincipal, assurance: custodyGrade ? 'onchain-confirmed' : 'asserted', ttlSeconds: 3600 });
+
   // §4a / CN-9: stash under a single-use code; deliver the CODE, not the token. The code-exchange aud is
   // the REQUESTING client (stash.aud) — distinct from the session's internal (home) aud for custody clients.
   const authCode = newAuthCode();
@@ -265,7 +274,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     }
     const dest = new URL(stash.rpRedirect);
     dest.searchParams.set('code', authCode);
-    return new Response(null, { status: 302, headers: { location: dest.toString() } });
+    return proved(new Response(null, { status: 302, headers: { location: dest.toString() } }));
   }
-  return json({ status: 'issued', code: authCode });
+  return proved(json({ status: 'issued', code: authCode }));
 };

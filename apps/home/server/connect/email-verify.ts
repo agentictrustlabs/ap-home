@@ -7,6 +7,7 @@
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { mintAgentSession, importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { readEmailFacet, recordEmailFacet, recordEmailOwner, emailHash, readRotation } from '../../src/lib/kv-indexer';
+import { withRecognition } from '../_lib/recognition';
 import { resolveKmsAgent } from '../_lib/kms-resolve';
 import { isSocialCustodyAud } from '../../src/lib/oidc-clients';
 import { oidcFacetId } from '@agenticprimitives/connect-auth/google';
@@ -144,5 +145,5 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   );
   // `custody:true` tells the client to secure the home on-chain (secureHomeNoName) before proceeding — a
   // fresh KMS home isn't deployed until then. For a linked device home it's already secured.
-  return json({ status: 'issued', token, via: 'email', custody: custodyGrade });
+  return withRecognition(json({ status: 'issued', token, via: 'email', custody: custodyGrade }), { request, env }, { sub: agent, principal: sessionPrincipal, assurance: custodyGrade ? 'onchain-confirmed' : 'asserted', ttlSeconds: 3600 });
 };

@@ -71,6 +71,8 @@ export interface EnrollReq {
   /** Spec 397 — the HOST connecting through a Home MCP (Claude, Muse, …), as the Worker's registration names it. A
    *  display hint for the consent and the Connected card only; the template and delegate come from the registry. */
   viaHost?: string;
+  /** OIDC `login_hint`: who the app expects, as an address or CAIP-10. A silent sign-in needs it (spec 445 §6). */
+  loginHint?: string;
 }
 
 // SEC-005: ALLOWED_RELYING_ORIGINS is now derived from whitelabel.relyingApps[].redirect_uris
@@ -136,6 +138,7 @@ export function parseEnrollReq(): EnrollReq | null {
       prompt: p.get('prompt') ?? undefined,
       requireNamedAgent: p.get('require_named_agent') === 'true' || p.get('require_named_agent') === '1',
       registryEntry: p.get('registry_entry') ?? undefined,
+      loginHint: p.get('login_hint') ?? undefined,
       viaHost: (p.get('via_host') ?? '').replace(/[^\p{L}\p{N} .,'()&_-]/gu, '').trim().slice(0, 60) || undefined,
     };
   } catch {
@@ -343,9 +346,9 @@ export function deliverCollectResult(enroll: EnrollReq, popupMode: boolean, resu
 
 /** OIDC error bounce (spec 230 §4.3 / prompt=none silent SSO): deliver `?error&state` back to the
  *  relying app with NO UI. Popup → postMessage (exact origin) + close; else full-page redirect.
- *  Standard values a relying app's connect client handles: `login_required` (no home session — the
- *  app clears its silent-SSO hint) / `interaction_required` (a session exists but a silent grant
- *  would mint delegations without a consent gesture) / `access_denied`. */
+ *  Standard values a relying app's connect client handles: `login_required` (every silent request that
+ *  does not end in a code: no session and "not this person" answer alike, so a silent probe learns
+ *  nothing, spec 445 §6) / `interaction_required` / `access_denied`. */
 export function deliverEnrollError(enroll: EnrollReq, popupMode: boolean, error: string): void {
   if (popupMode && typeof window !== 'undefined' && window.opener && relyingAllowed(enroll.redirectUri)) {
     postEnrollToOpener(enroll, { type: 'AC_ERROR', state: enroll.state, error });

@@ -31,9 +31,14 @@ import { whitelabel } from '../src/whitelabel/config';
 // Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
 import { resolveClient, isAllowedRelyingOriginAsync } from './_lib/oidc-registry';
 import { CONNECT_DOMAIN } from '../src/lib/domain';
-import { signBridgeCall } from './_lib/bridge-hmac';
 import { demoPersonaFor, signDigestAsDemoPersona } from './_lib/demo-custody';
-import { issueSiteDelegation, toWire } from '../src/lib/delegation';
+import { issueSiteDelegation, siteCaveats, toWire } from '../src/lib/delegation';
+import { covers, mintsPaymentAtSignIn, termsFor } from '../src/lib/consent-terms';
+import { getClient } from '../src/lib/oidc-clients';
+import type { RelyingApp } from '../src/whitelabel/schema';
+import { verifyDelegation } from './_lib/verify-delegation';
+import { readRows, type AppGrantRow } from './oidc/app-grant-row';
+import { checkWires } from './oidc/remembered';
 import { resolveOrigin, getServer, type FnContext } from './_lib/server-broker';
 
 /** The home's own audience (same-origin demo; mirrors server/me/handler.ts `AUD`). */
@@ -184,6 +189,10 @@ async function verifyHomeSession(env: FnContext['env'], request: Request): Promi
   }
   if (!v.ok) return { ok: false, reason: `session_verify_failed:${v.reason ?? 'unknown'}` };
   const session = v.session;
+  // AN ID_TOKEN IS NOT A HOME SESSION. The verifier checks signature, issuer, audience and time, and an id_token passes
+  // all four, and the retry above takes whatever audience the token names. So an app holding a person's id_token could
+  // present it here as `ap_sso` and be handed a token for ANOTHER app. Only a real session names the credential behind it.
+  if (!session.principal?.kind) return { ok: false, reason: 'session_verify_failed:not_a_home_session' };
   let name: string | null = null;
   try {
     const view = await directory.agent(session.sub);
@@ -334,13 +343,24 @@ export const onFedcmGrantOptions = async ({ request, env }: FnContext): Promise<
  *     browser binds `aud` to the requesting origin, and we re-check `Origin ∈ client origins`).
  *  2. Read the home session from the cookie purely to reach CUSTODY (the Google `via` + custody token),
  *     and require it to be the SAME subject as the id_token.
- *  3. Custody boundary: a SERVER-custodied member (Google/KMS) gets the `person → client.delegate` site
- *     delegation minted server-side via the bridge-authenticated demo-a2a KMS sign — ZERO device prompt.
- *     A DEVICE-custodied member (passkey/wallet) gets `needs_device_credential` and the relying app
- *     falls back to the popup, where the device signs the delegation (we cannot sign a device key here).
+ *  3. A SERVER-custodied member (Google/KMS) who allowed this app gets the wire stored at that Allow (spec 445 W7). Everyone
+ *     else gets `needs_device_credential`, and the relying app falls back to the popup, where the sheet is.
  *
  *  The delegation is the substrate's scoped, revocable, value-0 authority object — issued HERE, never as
  *  a FedCM payload. */
+/** May this lane hand back the wire stored for this app? The same questions /oidc/remembered asks, for the one wire this lane
+ *  returns. Pure. Not gated on `remembered_consent`, which decides whether the SHEET may be skipped: this lane has never
+ *  shown one, and handing back what the person agreed to is stricter than the signing it replaces. */
+export function fedcmConsentFailure(client: RelyingApp, row: AppGrantRow | undefined, origin: string, curated: boolean): string | null {
+  if (!curated) return 'member_registered'; // its owner can change the delegate at any time
+  if (mintsPaymentAtSignIn(client)) return 'template_ineligible';
+  if (!row?.terms) return 'no_record';
+  if (row.askEveryTime) return 'ask_every_time';
+  if (!(row.origins ?? []).includes(origin)) return 'new_origin';
+  if (!covers(row.terms, termsFor(client, 'site-login'))) return 'terms_widened';
+  return null;
+}
+
 export const onFedcmGrant = async ({ request, env }: FnContext): Promise<Response> => {
   const rpOrigin = request.headers.get('origin') ?? '';
   // L-1: reflect CORS ONLY for a REGISTERED relying origin — never echo `Access-Control-Allow-Origin` to
@@ -445,70 +465,34 @@ export const onFedcmGrant = async ({ request, env }: FnContext): Promise<Respons
     return json({ delegation: toWire(delegation) }, 200, { ...cors, [slp.name]: slp.value });
   }
 
-  // 3. Custody boundary (H-1) — decide on the VERIFIED principal (kind + role, from the signed
-  //    AgentSession), NOT the client-controlled cookie `via`. Only a custody-grade OIDC credential
-  //    (Google/YouVersion, KMS-custodied) is signable server-side; device credentials (passkey/wallet)
-  //    and login-grade sessions must sign on-device → popup fallback. The demo-a2a bridge re-verifies
-  //    custody-grade independently, so this is the trusted FIRST gate, not the only one.
+  // 3. Spec 445 W7 — NO DELEGATION THE PERSON DID NOT AGREE TO. This lane used to sign a new delegation here, server-side, for
+  //    any registered app the person picked in the browser's chooser, whether or not they had ever allowed it, and record it
+  //    nowhere. Now it hands back the wire stored at their last Allow, or sends them to the popup, where the sheet is.
+  //
+  //    THE PROOF IS STILL `ap_sso`, because the recognition cookie is SameSite=Strict and never rides a FedCM request. That is
+  //    why a device credential (passkey, wallet) stays out, verified on the signed principal: a stolen token must not be able
+  //    to collect those wires, and in the popup they are decided from the cookie. A Home-held key is different: whoever has
+  //    that token can already have the Home sign, so handing back a wire it already holds gives them nothing new.
   const serverCustodied = hs.principal.kind === 'oidc' && hs.principal.role === 'custody-grade';
-  if (!serverCustodied) {
-    audit('needs_device_credential', { sub: hs.sub, kind: hs.principal.kind, role: hs.principal.role ?? null });
-    return json({ needs_device_credential: true, via: hs.via.toLowerCase() || 'unknown' }, 200, cors);
-  }
-
-  if (!env.A2A_CUSTODY_URL || !env.A2A_CUSTODY_BRIDGE_SECRET) {
-    audit('error', { reason: 'custody_bridge_not_configured', sub: hs.sub });
-    return json({ error: 'custody_bridge_not_configured' }, 503, cors);
-  }
+  const toPopup = (outcome: string, reason?: string): Response => {
+    audit(outcome, { sub: hs.sub, kind: hs.principal.kind, role: hs.principal.role ?? null, ...(reason ? { reason } : {}) });
+    // The answer every relying client already handles: connectViaFedcm throws on it, and the caller falls back to the popup.
+    return json({ needs_device_credential: true, via: hs.via.toLowerCase() || 'unknown', ...(reason ? { consent_required: reason } : {}) }, 200, cors);
+  };
+  if (!serverCustodied) return toPopup('needs_device_credential');
   try {
-    // Bridge-authenticated, CONSTRAINED sign: the worker BUILDS the person→delegate site delegation and
-    // C_sub signs THAT (never an arbitrary hash). The custody token proves the member; the HMAC envelope
-    // proves the broker. A broker compromise can at worst mint a scoped, value-0, revocable delegation.
-    const envelope = await signBridgeCall({
-      secret: env.A2A_CUSTODY_BRIDGE_SECRET,
-      audience: 'custody.google.sign-delegation',
-      payload: { custodyToken: hs.custodyToken, delegate: client.delegate, sender: addr },
-    });
-    const res = await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/oidc/sign-site-delegation`, {
-      method: 'POST',
-      headers: envelope.headers,
-      body: envelope.body,
-    });
-    const out = (await res.json().catch(() => ({}))) as { ok?: boolean; delegation?: unknown; error?: string };
-    if (!res.ok || !out.ok || !out.delegation) {
-      audit('error', { reason: `bridge_sign_failed:${out.error ?? res.status}`, sub: hs.sub, delegate: client.delegate });
-      return json({ error: out.error ?? `sign HTTP ${res.status}` }, 502, cors);
-    }
-    audit('granted', { sub: hs.sub, delegate: client.delegate });
-
-    // spec 278 — bind the member's per-person vault key server-side. The FedCM fast path has NO popup/portal
-    // step (where `activateVaultIfNeeded` runs), so without this a social member who connects to a relying
-    // app via FedCM gets the delegation but no vault-key binding → every PII read fails closed with
-    // `vault_key_unauthorized`. demo-a2a builds + C_sub-signs the VaultKeyAuthorization and binds it at
-    // demo-mcp (same struct as the client `bindVaultKey`). Idempotent (no-op if already bound) + best-effort:
-    // the delegation is already minted, so a vault hiccup never blocks connecting (the member can self-heal
-    // on the Home portal). Awaited so the binding is in place before the relying app reads.
-    try {
-      const vkEnvelope = await signBridgeCall({
-        secret: env.A2A_CUSTODY_BRIDGE_SECRET,
-        audience: 'custody.google.activate-vault',
-        payload: { custodyToken: hs.custodyToken, owner: addr },
-      });
-      const vkRes = await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/oidc/activate-vault`, {
-        method: 'POST',
-        headers: vkEnvelope.headers,
-        body: vkEnvelope.body,
-      });
-      const vk = (await vkRes.json().catch(() => ({}))) as { ok?: boolean; skipped?: boolean; error?: string; detail?: string };
-      audit(vk.ok ? (vk.skipped ? 'vault_already_bound' : 'vault_bound') : 'vault_bind_failed', {
-        sub: hs.sub, ...(vk.ok ? {} : { vaultError: vk.detail ?? vk.error }),
-      });
-    } catch (e) {
-      audit('vault_bind_threw', { sub: hs.sub, vaultError: e instanceof Error ? e.message : String(e) });
-    }
-
+    const row = (await readRows(env.AUTH_CODES, addr)).find((r) => r.clientId === client.client_id);
+    const failed = fedcmConsentFailure(client, row, rpOrigin, !!getClient(client.client_id));
+    if (failed) return toPopup('consent_required', failed);
+    const stored = row as AppGrantRow;
+    const wireFailed = await checkWires(
+      [{ wire: stored.delegation, delegate: client.delegate, caveats: siteCaveats(1) }],
+      addr.toLowerCase(), ID_TOKEN_TTL, Date.now(), (d) => verifyDelegation(env, d),
+    );
+    if (wireFailed) return toPopup('consent_required', wireFailed);
+    audit('granted_stored', { sub: hs.sub, delegate: client.delegate });
     const sl = loginStatusHeader('logged-in');
-    return json({ delegation: out.delegation }, 200, { ...cors, [sl.name]: sl.value });
+    return json({ delegation: stored.delegation }, 200, { ...cors, [sl.name]: sl.value });
   } catch (e) {
     audit('error', { reason: `grant_threw:${e instanceof Error ? e.message : String(e)}`, sub: hs.sub });
     return json({ error: `grant_failed:${e instanceof Error ? e.message : String(e)}` }, 500, cors);

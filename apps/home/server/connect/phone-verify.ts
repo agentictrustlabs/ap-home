@@ -13,6 +13,7 @@ import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/ser
 import { mintAgentSession, importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { checkPhoneVerification, normalizeE164 } from '../_lib/sms-sender';
 import { readPhoneFacet, recordPhoneFacet, phoneHash, readRotation } from '../../src/lib/kv-indexer';
+import { withRecognition } from '../_lib/recognition';
 import { resolveKmsAgent } from '../_lib/kms-resolve';
 import { isSocialCustodyAud } from '../../src/lib/oidc-clients';
 import { oidcFacetId } from '@agenticprimitives/connect-auth/google';
@@ -134,5 +135,5 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     signer,
   );
   // `custody:true` → the client secures the home on-chain (secureHomeNoName) THEN prompts a passkey.
-  return json({ status: 'issued', token, via: 'phone', custody: custodyGrade });
+  return withRecognition(json({ status: 'issued', token, via: 'phone', custody: custodyGrade }), { request, env }, { sub: agent, principal: sessionPrincipal, assurance: custodyGrade ? 'onchain-confirmed' : 'asserted', ttlSeconds: 3600 });
 };

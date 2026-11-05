@@ -6,9 +6,9 @@
 // localStorage covers those). Carries `via` too so credential-specific UI (e.g. the Google
 // rotation action) survives a cross-subdomain restore.
 //
-// HARDENING TODO: a server-set HttpOnly `.impact-agent.me` cookie would shrink the XSS surface vs
-// this JS-managed one (today it's the same exposure as the localStorage token). Tracked as a
-// follow-up; the token itself (short-lived, aud/iss-pinned AgentSession) is unchanged.
+// SPEC 445: the server-set HttpOnly recognition cookie (server/_lib/recognition.ts) now proves who is asking
+// when a sign-in skips the sheet, and this one does not. This cookie still carries the bearer the portal and
+// FedCM read, at the same exposure as the localStorage token; moving those off it is spec 445 W7.
 import { CONNECT_DOMAIN } from './domain';
 import { DEPLOYMENT_EPOCH } from './chain';
 
@@ -25,12 +25,9 @@ function onImpactHost(): boolean {
   }
 }
 
-/** Default SSO-session lifetime: 30 days — "authenticated once, recognized for weeks." A returning
- *  member is recognized for the whole window (no fresh login), so a relying app's later step (e.g. an
- *  x402 charge) is one-tap + the per-action credential signature, not a re-connect. The cookie only
- *  CARRIES the (short-lived) session token; for passkey/wallet members recognition doesn't re-use that
- *  token (they re-sign per action), so the long recognition window is safe. (KMS/social custody sessions
- *  still expire on the token's own TTL — those re-auth when the underlying token lapses.) */
+/** How long the COOKIE stays: 30 days. Not how long a person is recognized: the cookie only carries the session
+ *  token, the token lasts one hour, nothing renews it, and `/me/profile` refuses it after that (spec 445 §3.1). So
+ *  recognition lasts the hour, for every credential. Whether it should last longer is spec 445 §3.3, an owner decision. */
 const SSO_MAX_AGE_SEC = 60 * 60 * 24 * 30;
 
 export function setSsoCookie(token: string, via: string, maxAgeSec = SSO_MAX_AGE_SEC): void {

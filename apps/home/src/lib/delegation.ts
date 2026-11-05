@@ -42,7 +42,7 @@ export const toWire = (d: Delegation): DelegationWire => ({ ...d, salt: d.salt.t
 
 /** Least-privilege caveats for a relying site: time-boxed, value 0, scoped to the on-chain
  *  targets a relying site needs to act on the person's behalf (naming + relationship). */
-function siteCaveats(validUntil: number): Caveat[] {
+export function siteCaveats(validUntil: number): Caveat[] {
   return [
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
@@ -1058,6 +1058,15 @@ export const SELF_VAULT_GRANT_VALIDITY_SECONDS = 365 * 24 * 60 * 60;
  * is exactly the incident this spec (345) was written to close (a person's own address showing up
  * in their own org list because a self-referential stewardship entry got written for them).
  */
+/** What a self-vault grant carries. One builder: the grant, and the check that an old grant still matches it (spec 445). */
+export function selfVaultCaveats(scope: { server: string; resources: readonly string[]; ops: readonly string[] }, validUntil = 1): Caveat[] {
+  return [
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
+    buildVaultRecordScopeCaveat([{ server: scope.server, resources: [...scope.resources], ops: [...scope.ops] as ('read' | 'write')[] }]),
+  ];
+}
+
 export function buildApprovedSelfVaultGrant(
   personSA: Address,
   scope: SelfVaultGrantConfig,
@@ -1067,11 +1076,7 @@ export function buildApprovedSelfVaultGrant(
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   let salt = 0n;
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
-  const caveats: Caveat[] = [
-    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
-    buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
-    buildVaultRecordScopeCaveat([{ server: scope.server, resources: [...scope.resources], ops: [...scope.ops] }]),
-  ];
+  const caveats = selfVaultCaveats(scope, validUntil);
   const d: Delegation = { delegator: personSA, delegate: personSA, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
   const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
   d.signature = APPROVED_HASH_SENTINEL;
