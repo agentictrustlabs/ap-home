@@ -309,11 +309,23 @@ test.describe('the ways back to the sheet', () => {
   });
 
   for (const prompt of ['login', 'select_account']) {
-    test(`prompt=${prompt}, naming no Home: no code, whatever the page did`, async ({ page }) => {
+    test(`prompt=${prompt}, naming no Home: asks for a credential, then shows the sheet, and does not loop`, async ({ page, context }) => {
       const s = await signIn(page);
       await allow(page, s);
+      const url = enrollUrl(pkce().challenge, { prompt });
+      await page.goto(url);
+      await expect(page.getByRole('button', { name: /Continue with Google/i })).toBeVisible();
+      await expect.poll(async () => cookieNamed(context, 'ap_sid')).toBeUndefined();
+      // And it stays: nothing pulls them back onto the sheet, or through to the app, without a credential.
+      await page.waitForTimeout(4000);
+      await expect(page.getByRole('button', { name: /Continue with Google/i })).toBeVisible();
+      await expect(page.getByText(SHEET)).toHaveCount(0);
+      expect(page.url()).toContain('localhost');
+      // They prove a credential: a new session and a new cookie. The chooser has been answered, and the app still gets no code without the sheet.
+      const again = await signIn(page);
+      await allow(page, again);
       const answer = page.waitForResponse('**/oidc/remembered');
-      await page.goto(enrollUrl(pkce().challenge, { prompt }));
+      await page.goto(url);
       expect((await (await answer).json()).consent_required).toBe('prompt_login');
       await expect(page.getByText(SHEET).first()).toBeVisible();
       expect(page.url()).toContain('localhost');

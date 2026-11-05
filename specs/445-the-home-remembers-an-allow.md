@@ -148,8 +148,8 @@ can sign into already-allowed apps for 30 days. Three limits go with it:
   no live session such a sign-in is not remembered (`claims_need_session`); the person proves a credential and then
   passes without a sheet. A remembered sign-in carries exactly the claims a sheet sign-in would, or it does not happen.
 
-**Recommendation:** ship **A** with W1–W5. Decide **B** on its own (W6) once shadow numbers show how many Home trips
-arrive after the hour.
+**Decided by the owner, 2026-11-05: A, one hour.** B is looked at again (W6) once shadow numbers show how many Home trips arrive
+after the hour.
 
 ## 4. The consent record (R1)
 
@@ -299,9 +299,9 @@ lines marked.
   `login_hint` yet, so nothing is silent until one does.
 - **After a credential.** A person with no session proves one and re-enters the recognized path, as today. The
   cookie is now set, so the same call is made and the sheet is skipped for an allowed app.
-- `prompt=login` and `prompt=select_account` never skip the sheet (check 4a). A request naming a Home gets the chooser. A
-  request naming no Home does not: `EntryExperience.tsx` marks the chooser done before the recognized path runs, so it
-  gets the sheet, with "Not you?" on it. That predates this spec, and whether it should force the chooser is open (§10.6).
+- `prompt=login` and `prompt=select_account` end the session and ask for a credential, once, whether or not the request names
+  a Home. Then the sheet: they never skip it (check 4a), and the request does not loop. Until 2026-11-05 a request naming no
+  Home did not get the credential prompt, because `EntryExperience.tsx` marked the chooser done first.
 
 ## 7. What the person controls
 
@@ -390,18 +390,14 @@ reason; a revoked wire and an expiring wire each force the sheet; the code from 
 
 ## 10. Open questions
 
-1. **Recognition lifetime**, §3.3. Owner decision. Recommended: A now, B on numbers.
-2. **A request with `session_key`.** The leaf is signed for a key the app makes fresh each time, so there is no
-   stored wire to hand back, and a new signature is the opposite of what this skips. v1 shows the sheet, and Gather27,
-   which sends one on every sign-in, keeps it. For a Home-held key the server could sign the leaf under the remembered
-   Allow; for a passkey or wallet it is a device prompt with no sheet. Gather27's case needs its own design.
+1. **Recognition lifetime**, §3.3. Decided: A now, B on numbers.
+2. **A request with `session_key`.** v1 shows the sheet, and Gather27, which sends one on every sign-in, keeps it. Design in §15,
+   not built.
 3. **Should script see the code at all?** In redirect mode the endpoint could be a form `POST` that answers `303` to
    the app, so a script on the Home never holds a code. Popup mode delivers by message and cannot do this. Worth
    doing if W0 shows redirect is the common mode.
 4. **Member-registered clients: decided, they always ask.** Their owner can change the delegate at any time, and nobody
    at the estate reviewed them. `toOidcClient` drops the flag, so there is nothing to turn on.
-6. **`prompt=login` on a request naming no Home** shows the sheet, not a credential prompt, which is not what OIDC means by
-   it. Fixing it changes what those apps see on merge, so it is a decision of its own.
 5. **Re-signing only the part that lapsed.** When only the 30-day ask wire is near its end, v1 shows the whole sheet.
    A smaller "Renew <App>'s access" step is possible later.
 
@@ -465,3 +461,23 @@ unit tests could not:
 It cannot reach a real wallet, the real chain, the `Allow` click itself (signing needs a bundler; the wires are built by the
 Home's own builders and accepted by the fake chain), `__Secure-` and `Domain` attributes (https only; unit-tested), or a
 social provider's return. W4's live gate is still what proves those.
+
+## 15. Design, not built: remembered consent for an app that sends a session key
+
+**The problem.** The app makes a new key at each sign-in and needs a leaf delegation (spec 270) from the person to that key. A leaf is
+a new signature, so there is no stored wire to hand back, and check 5 keeps the sheet. Gather27 sends one on every sign-in.
+
+**The proposal.** Treat the leaf as part of what an Allow agrees to, and sign it without a sheet only where that is not a device prompt.
+
+- **Terms gain `sessionLeaf: { maxSeconds, caveats digest }`,** from the registry, shown on the sheet ("Stay signed in on this device for
+  up to N hours"), and compared by `covers` like everything else. A leaf is stored by nobody: only the right to ask for one is.
+- **A person whose key the Home holds:** when every line of §5.2 holds, the server signs the leaf for the request's public key under the
+  remembered Allow, through the custody bridge's constrained sign, which builds the leaf itself and signs nothing else. The home still
+  never holds the session's private key.
+- **A passkey or wallet person:** a leaf needs their device. They get one prompt with no sheet ("Confirm it's you"), not a skipped
+  signature. It removes the reading, not the gesture. This needs the same page path, so it can follow.
+- **The cookie is the proof,** as everywhere: a stolen token gets nothing. The audit entry names the leaf.
+- **Shadow first,** as in W3, with `session_key_requested` becoming `would: 'allow'`.
+
+**To decide before building.** Does Gather27 need a new key on every sign-in, or could it reuse one across a stored leaf's life? If it can
+reuse one, a stored leaf and no new signature is simpler than anything above, and the spec's rule that a skipped sheet signs nothing holds.
