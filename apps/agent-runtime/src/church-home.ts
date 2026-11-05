@@ -38,7 +38,7 @@ export const CHURCH_HOME_TOOLS: ToolSpec[] = [
     id: CHURCH_HOME_SAVE,
     verbs: ['my church is', 'I go to', 'set my home church', 'choose my campus', 'I attend'],
     description: 'KEEPS the person\'s choice of church in their vault. churches: a JSON array [{"agent":"0x…","name":"<name>.church","site":"<site id>"|null}] — site is the id the church lists (from its church.describe answer), null for all sites; a church with more than one site needs a site or null. defaultChurch: the agent address of the main one (default: the first). Each church is checked against its .church name and its own description before anything is kept. groups (optional): a JSON array of the groups they are part of — {"church":"0x…","id":"<group id the church lists>"} for a church\'s group, or {"name":"…","kind":"home|men|women|couples|youth|young-adults|bible-study|prayer|serving|other"} for a group of their own; left out, the groups already kept stay; [] clears them. Their own record; tells the church nothing and authorizes nothing.',
-    inputSchema: { type: 'object', properties: { churches: { type: 'string', description: 'JSON array of { agent, name, site? }' }, defaultChurch: { type: 'string' }, groups: { type: 'string', description: 'JSON array of { church, id } (a church\'s group) or { name, kind } (their own)' } }, required: ['churches'] },
+    inputSchema: { type: 'object', properties: { churches: { type: 'string', description: 'JSON array of { agent, name, site? }' }, defaultChurch: { type: 'string' }, groups: { type: 'string', description: 'JSON array of { church, id, shared? } (a church\'s group; shared: { name } notes the name she told its leaders, false takes that note away, left out keeps it) or { name, kind } (their own)' } }, required: ['churches'] },
     capability: { id: CHURCH_HOME_SAVE, action: 'save', resourceArg: 'record', authorityArg: 'holder' },
     risk: 'low', adapter: ADAPTER.sync, carries: CARRIES.churchHome,
     selfAuthorized: true,
@@ -58,7 +58,8 @@ export interface ChurchHomeDeps {
 
 export interface ChurchChoiceV1 { agent: string; name: string; displayName: string; site: { id: string; name: string } | null }
 /** One group she is part of. `church` is the agent of the church that lists it, or null for a group of her own. */
-export interface GroupChoiceV1 { id: string; name: string; kind: ChurchGroupKind; church: string | null }
+/** `shared` (ap-church spec 205): the name she chose to tell this group's leaders, and when. Her own note of it; the church keeps its own entry. */
+export interface GroupChoiceV1 { id: string; name: string; kind: ChurchGroupKind; church: string | null; shared?: { name: string; at: string } }
 export interface ChurchHomeRecordV1 {
   '@id': string; '@type': string; aboutSubject: string;
   churches: ChurchChoiceV1[]; defaultChurch: string | null; groups?: GroupChoiceV1[]; updatedAt: string;
@@ -87,7 +88,7 @@ function groupsArg(v: unknown): Array<Record<string, unknown>> | null | undefine
 const keptGroups = (rec: ChurchHomeRecordV1 | null): GroupChoiceV1[] =>
   (rec && Array.isArray(rec.groups) ? rec.groups : [])
     .filter((g) => !!g && typeof g.id === 'string' && typeof g.name === 'string')
-    .map((g) => ({ id: g.id, name: g.name, kind: groupKindOf(g.kind), church: typeof g.church === 'string' ? g.church.toLowerCase() : null }));
+    .map((g) => ({ id: g.id, name: g.name, kind: groupKindOf(g.kind), church: typeof g.church === 'string' ? g.church.toLowerCase() : null, ...(g.shared?.name ? { shared: g.shared } : {}) }));
 /** An id for a group of her own, from its name — the same name is the same group. */
 const ownGroupId = (name: string) => `own-${name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'group'}`;
 const groupWords = (n: number) => `${n} group${n === 1 ? '' : 's'}`;
@@ -197,7 +198,16 @@ export function churchHomeInvoker(deps: ChurchHomeDeps, person: string | undefin
             const names = (listed.get(church) ?? []).map((x) => `${x.name} (${x.id})`);
             return { refused: names.length ? `${of.displayName} does not list a group "${id}" — its groups are ${names.join(', ')}. Nothing was saved.` : `${of.displayName} lists no groups yet, so "${id}" cannot be chosen — add it as a group of your own. Nothing was saved.` };
           }
-          if (!groups.some((x) => x.church === church && x.id === hit.id)) groups.push({ id: hit.id, name: hit.name, kind: hit.kind, church });
+          // Left unsaid, what she told the leaders stays: an app that does not know rosters must not erase it.
+          const held = before.find((x) => x.church === church && x.id === hit.id)?.shared;
+          let shared = held;
+          if (g.shared === false) shared = undefined;
+          else if (g.shared !== undefined) {
+            const told = str((g.shared as { name?: unknown }).name).replace(/\s+/g, ' ');
+            if (!told || told.length > 120) return { refused: 'say the name the leader should see, in 120 characters or fewer. Nothing was saved.' };
+            shared = { name: told, at: held?.name === told ? held.at : now().toISOString() };
+          }
+          if (!groups.some((x) => x.church === church && x.id === hit.id)) groups.push({ id: hit.id, name: hit.name, kind: hit.kind, church, ...(shared ? { shared } : {}) });
         } else {
           const name = str(g.name).replace(/\s+/g, ' ').slice(0, 120);
           if (!name) return { refused: 'a group of your own needs a name. Nothing was saved.' };
