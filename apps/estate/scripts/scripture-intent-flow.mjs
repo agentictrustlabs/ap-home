@@ -1,12 +1,13 @@
 // Draws the Scripture Agent's ask flow as it is being built: the judge first, the verses chosen before the writer, the writings after the answer.
 //   node scripts/scripture-intent-flow.mjs assets/architecture/scripture-intent-flow.svg
-// The PNG beside it (the link preview) is that SVG rendered at 2x in a browser. It is labelled "in testing": the live flow is scripture-ask-flow.
+// The PNG beside it (the link preview) is that SVG rendered at 2x in a browser. It is labelled "in testing": what readers get today is scripture-ask-flow.
+// The numbered tiles are the steps the page lists beside the picture; their centres are repeated in src/architecture.ts (`at`).
 import { C, picture } from './picture-kit.mjs';
 const W = 1460, H = 960, ROW = 470, S = 64, GREY = '#64748b';
 const { out, tile, arrow, note, finish } = picture(W, H);
 
 out.push(`<rect width="${W}" height="${H}" rx="22" fill="${C.bg}"/>`);
-out.push(`<text x="40" y="52" class="h">The Scripture ask, answer first (in testing, not live)</text>`);
+out.push(`<text x="40" y="52" class="h">How the Scripture Agent answers (in testing, not yet live)</text>`);
 out.push(`<text x="40" y="78" class="s" text-anchor="start">Answer the person, from verses read before writing. Writings sit beside the answer. Code proves every verse, under every skill.</text>`);
 
 const X = { reader: 72, admit: 188, judge: 304, verses: 432, draft: 560, prove: 676, revise: 792, further: 920, receipt: 1048, back: 1378 };
@@ -18,14 +19,14 @@ out.push(`<rect x="${X.draft - 58}" y="${ROW - 62}" width="${X.revise - X.draft 
 out.push(`<text x="${X.prove}" y="${ROW + 92}" text-anchor="middle" class="b">MODEL DRAFTS, CODE PROVES</text>`);
 for (const [a, b] of [['reader', 'admit'], ['admit', 'judge'], ['judge', 'verses'], ['verses', 'draft'], ['draft', 'prove'], ['prove', 'revise'], ['revise', 'further'], ['further', 'receipt'], ['receipt', 'back']]) hop(a, b);
 t(X.reader, ROW, GREY, 'person', 'Reader', ['or their agent']);
-t(X.admit, ROW, '#8b5cf6', 'door', 'Admit', ['who is asking']);
-t(X.judge, ROW, '#ef4444', 'scales', 'Judge', ['what is being asked']);
-t(X.verses, ROW, '#14b8a6', 'book', 'Choose verses', ['and read them']);
-t(X.draft, ROW, '#f59e0b', 'pen', 'Draft', ['only those verses']);
-t(X.prove, ROW, '#22c55e', 'seal', 'Prove', ['every verse']);
-t(X.revise, ROW, '#0ea5e9', 'loop', 'Revise', ['off-list, too long']);
-t(X.further, ROW, '#a855f7', 'books', 'Read further', ['0 to 3 writings']);
-t(X.receipt, ROW, '#6366f1', 'receipt', 'Receipt', ['skills named']);
+t(X.admit, ROW, '#8b5cf6', 'door', 'Admit', ['who is asking'], { n: 1 });
+t(X.judge, ROW, '#ef4444', 'scales', 'Judge', ['what is being asked'], { n: 2 });
+t(X.verses, ROW, '#14b8a6', 'book', 'Choose verses', ['and read them'], { n: 3 });
+t(X.draft, ROW, '#f59e0b', 'pen', 'Draft', ['only those verses'], { n: 4 });
+t(X.prove, ROW, '#22c55e', 'seal', 'Prove', ['every verse'], { n: 5 });
+t(X.revise, ROW, '#0ea5e9', 'loop', 'Revise', ['off-list, too long'], { n: 6 });
+t(X.further, ROW, '#a855f7', 'books', 'Read further', ['0 to 3 writings'], { n: 7 });
+t(X.receipt, ROW, '#6366f1', 'receipt', 'Receipt', ['skills named'], { n: 8 });
 t(X.back, ROW, GREY, 'person', 'Reader', ['answer and links']);
 
 // ── skills flow in

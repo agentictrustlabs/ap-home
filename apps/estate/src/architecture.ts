@@ -389,7 +389,106 @@ const SCRIPTURE_STEPS: Step[] = [
   },
 ];
 
+
+const ANSWER_ALT =
+  "A flow diagram of the design in testing, not yet live. A question goes through admission to a judge, which works out what is being asked. The verses that carry the answer are chosen and read from the signed corpus before anything is written. A model drafts, citing only those verses, and code proves every one. The draft goes back once if it cites another verse or runs long. Up to three writings that truly bear on the answer are chosen to sit beside it, and a receipt names the skills used. Skills come from the registry through a pinned playbook. Passage kinds, standpoints and reader roles are in grey: tested and not earning their place. A people-group skill is reserved and not built.";
+const inherited = (id: string, at: [number, number], over: Partial<Step> = {}): Step => ({ ...SCRIPTURE_STEPS.find((x) => x.id === id)!, at, ...over });
+const ANSWER_STEPS: Step[] = [
+  inherited('admit', [188, 470]),
+  {
+    id: 'judge', name: 'Judge', color: '#ef4444', at: [304, 470],
+    summary: 'What is the reader asking for? That chooses the skill, or none.',
+    why: 'A definition, a question about a verse, a request for practical help and a question about another religion want different answers. The judge reads the question before anything else, so the rest of the run knows what it is for.',
+    what: [
+      'One call to a small model reads the question against twelve intent cards from the playbook and gives a probability for each, and for "none". Each card names a form, which is the shape of the answer.',
+      'Code applies the rule. A clear pick supplies its form. If the judge is unsure, no skill applies and the question still runs answer first.',
+      'A reader with a verse open still goes to the short verse companion, by a rule in code, with no judge.',
+      'In testing the picks looked sensible, but a deliberately wrong skill did about as well. So the gains so far come from the design around the pick, and this step is still earning its place.',
+    ],
+    where: [SCRIPTURE, 'Source: <code>src/harness/intent-stage.ts</code> and <code>intent-rule.ts</code>. The judge is <code>selectByJudgment</code> from <code>@agenticprimitives/orchestration</code>, the same one the agent harness uses.'],
+    by: 'A small model chooses. A rule in code accepts.',
+    reads: ['The question.', 'The intent cards.'],
+    leaves: ['<code>intentStage</code>: every probability, the pick, and each skill\'s version and commitment.'],
+    stops: ['A failed call or an unreadable registry is a hold. The question is still answered.'],
+  },
+  {
+    id: 'verses', name: 'Choose verses', color: '#14b8a6', at: [432, 470],
+    summary: 'The passages that carry the answer, read before anything is written.',
+    why: 'Written from memory, answers said things about verses that the verses do not say. Choosing the verses first and handing the writer their real text took errors from 21 to 4 in a 40-question pilot. Choosing them is also a large part of what makes an answer good.',
+    what: [
+      'A small model chooses two to four passages a careful teacher would open to. It sees what search found, and may add others. Sharing a word with the question does not qualify a verse.',
+      'Code resolves each reference and fetches its text from the signed corpus, in the reader\'s edition.',
+      'A reference that does not resolve is dropped and recorded.',
+    ],
+    where: [SCRIPTURE, 'Source: <code>src/harness/answer-links.ts</code> (<code>chooseVerses</code>).', LIBRARY],
+    by: 'A small model chooses. Code fetches and verifies.',
+    reads: ['The question.', 'The passages found by meaning.', 'The signed corpus.'],
+    leaves: ['<code>chosenVerses</code>: each passage and why it was chosen, and any that did not resolve.'],
+    stops: ['If this step fails, the writer is not restricted, and the proof still checks every reference.', 'At most ten verses are read.'],
+  },
+  {
+    id: 'draft', name: 'Draft', color: '#f59e0b', at: [560, 470],
+    summary: 'Answer the person, from those verses.',
+    why: 'Our answers used to read as reports on whatever search returned. A plain question got a study of the sources, and one question was reinterpreted because of what was found. The writer now answers what was asked, as a knowledgeable teacher would to a friend.',
+    what: [
+      'The writer takes the question in its plain meaning, gives the answer in the first sentence, then the few things most worth knowing. It takes a clear position, and uses what is well established in Scripture and Christian teaching.',
+      'It may cite only the verses chosen, and must not say a verse says more than its words do.',
+      'It does not mention sources or what it was given, and adds no study exercise and no closing summary.',
+      'The chosen form sets the shape of the answer: a definition, counsel with steps, a short list of verses.',
+    ],
+    where: [SCRIPTURE, 'Source: <code>src/harness/draft-prove.ts</code> (<code>ANSWER_FIRST</code>).'],
+    by: 'One model call.',
+    reads: ['The question.', 'The chosen verses, in the edition\'s own words.', 'The chosen form.'],
+    leaves: ['The draft.'],
+    stops: ['A draft cut off by the output limit fails the run and is not shown.'],
+  },
+  inherited('prove', [676, 470]),
+  {
+    id: 'revise', name: 'Revise', color: '#0ea5e9', at: [792, 470],
+    summary: 'Back to the writer when code finds a problem.',
+    why: 'The writer does not reliably follow what it is only told. It ran well past the length it was given. Code can see these failures, so code sends them back.',
+    what: [
+      'The draft goes back once if the proof found a problem, if it cites a verse that was not chosen, if it talks about what it was supplied, or if it runs well over length.',
+      'If a quoted word is still not in the verse it cites, one more call deals with that alone.',
+      'A revision is proved again, and kept only if it is no worse.',
+    ],
+    where: [SCRIPTURE, 'Source: <code>src/harness/draft-prove.ts</code> and <code>answer-links.ts</code>.'],
+    by: 'A model call, only when needed. The decision to keep it is code.',
+    reads: ['The problems found.', 'The cited verses\' own text.'],
+    leaves: ['<code>revised</code> and <code>wordRepair</code>: the problems before and after, and whether the change was kept.'],
+    stops: ['What still fails is stated on the receipt.'],
+  },
+  {
+    id: 'further', name: 'Read further', color: '#a855f7', at: [920, 470],
+    summary: 'Up to three writings that truly bear on the answer, or none.',
+    why: 'The library is what this agent has that others do not, but it was crowding the answer. Moved beside the answer, a writing can be chosen against what the answer actually says, and given a reason.',
+    what: [
+      'After the answer is proved, a small model looks at the writings found and chooses at most three that are truly about what was asked, each with one line on what the reader will find there.',
+      'None is an acceptable result: an unrelated link is worse than no link.',
+      'Neither the writer nor the proof depends on them. In the pilot, 4 of 85 chosen writings were graded off-topic.',
+    ],
+    where: [SCRIPTURE, 'Source: <code>src/harness/answer-links.ts</code> (<code>chooseWritings</code>).', LIBRARY],
+    by: 'A small model.',
+    reads: ['The question and the answer.', 'The writings found, with their excerpts.'],
+    leaves: ['<code>readFurther</code>: each writing, where to find it and why.'],
+    stops: ['If this step fails, the answer simply has no list.'],
+  },
+  inherited('receipt', [1048, 470], { what: [
+    'Every answer carries a run manifest (<code>ask-run/2</code>): the run\'s id, the edition, the configuration and its hash, and the versions of the code, the policy and the writer. The question is recorded as a hash.',
+    'With it come the signed citations, the proof, the judge\'s choice and each skill\'s version and commitment, the verses chosen and why, what was revised, the cost, and the time each stage took.',
+    "The run is kept at the agent, and its provenance is written to the agent's vault. Anyone can check a citation at <code>/verify</code>.",
+  ] }),
+];
+
 const SCRIPTURE_BODY = `
+<h2>Where this stands</h2>
+<p>As of 5 November 2026, the picture and steps above are the design we are testing. They are not yet what answers readers. A 300-question run on fresh questions is under way, and the design goes live only if it holds up.</p>
+
+<h2>What readers get today</h2>
+<p>Today's path reads what it holds first and writes from that. It has ten steps: admit, route, choose a plan, gather, gate, draft, prove, revise, enrich and receipt. A judge chooses one answer plan or none while the agent gathers. Writings are handed to the writer, and more are added to the answer after the proof.</p>
+<figure class="picture"><a href="/architecture/scripture-ask-flow.svg"><img src="/architecture/scripture-ask-flow.svg" width="1460" height="900" alt="${SCRIPTURE_ALT.replace(/"/g, '&quot;')}"></a>
+<figcaption>What answers readers today. Grey arrows are the question. Pink arrows are a skill on its way in. Dashed arrows happen only when needed.</figcaption></figure>
+
 <h2>Where skills come in</h2>
 <p>The Scripture Agent's skills are documents in the skills registry, under the <code>scripture</code> domain. Nothing is compiled into the agent: it reads them when a question arrives, so a newly published version reaches readers within a minute, with no deploy.</p>
 <p>A skill is admitted only if all three of these hold. A skill that fails one is refused, and listed with the reason.</p>
@@ -406,9 +505,7 @@ const SCRIPTURE_BODY = `
 </ul>
 
 <h2>The categories of skills that drive it</h2>
-<p>As of 5 November 2026, two kinds of skill shape live answers: the method for a verse, and one answer plan. The rest of the table is built and in testing. It is not live and not yet in the registry. The picture shows the design being tested: the answer comes first, from verses chosen and read before writing.</p>
-<figure class="picture"><a href="/architecture/scripture-intent-flow.svg"><img src="/architecture/scripture-intent-flow.svg" width="1460" height="960" alt="The Scripture ask as it is being built. A question goes through admission to a judge. The verses that carry the answer are chosen and read before anything is written. A model drafts, citing only those verses, and code proves every one. Up to three writings are chosen to sit beside the answer, and a receipt names the skills used. Passage kinds, standpoints and reader roles are shown in grey: tested and not earning their place."></a>
-<figcaption>The design in testing. It is not what answers readers today; the picture at the top of this page is. Pink arrows are skills. Dashed arrows show what each skill drives. Grey means tested and not earning its place.</figcaption></figure>
+<p>As of 5 November 2026, two kinds of skill shape live answers: the method for a verse, and one answer plan. The rest of the table is built and in testing. It is not live and not yet in the registry. The picture at the top shows the design being tested.</p>
 <div class="table-wrap"><table class="skills-table">
 <thead><tr><th>Category</th><th>What it decides</th><th>Chosen by</th><th>Drives</th><th>How many</th><th>State</th></tr></thead>
 <tbody>
@@ -466,7 +563,7 @@ const SCRIPTURE_BODY = `
 <p>Every other agent in this estate answers through <a href="/architecture/agent-harness">the agent harness</a>. The Scripture Agent uses the same judge and the same kind of skill, in a different shape.</p>
 <ul>
 <li><b>It only reads.</b> It makes no payment and sends no message, so there is no mandate to check at each step. Proof takes the place that authority has in the agent harness.</li>
-<li><b>Its plan is one step.</b> The host plans a single step and the flow in this picture runs inside it. The judge chooses how that step answers, not which step to run.</li>
+<li><b>Its plan is one step.</b> The host plans a single step and the flow in these pictures runs inside it. The judge chooses how that step answers, not which step to run.</li>
 <li><b>It reads the newest published skill.</b> The agent harness pins a skill by digest through a playbook its custodian assigned. Here the owner and the commitment are checked, and the newest published version is used.</li>
 </ul>`;
 
@@ -1409,12 +1506,12 @@ export const POSTS: Post[] = [
     title: 'How the Scripture Agent answers a question',
     date: '2026-11-05',
     description:
-      'The path a question takes through the Scripture Agent, the categories of skills that drive it, the answer-first design in testing, and what we tested that did not work.',
+      'The answer-first design being tested for the Scripture Agent: the verses chosen before writing, code proving every one, the writings beside the answer. Also what readers get today, the categories of skills, and what we tested that did not work.',
     picture: {
-      svg: '/architecture/scripture-ask-flow.svg', png: '/architecture/scripture-ask-flow.png', alt: SCRIPTURE_ALT, width: 1460, height: 900,
-      caption: 'Grey arrows are the question. Pink arrows are a skill on its way in. Dashed arrows happen only when needed.',
+      svg: '/architecture/scripture-intent-flow.svg', png: '/architecture/scripture-intent-flow.png', alt: ANSWER_ALT, width: 1460, height: 960,
+      caption: 'The design in testing, not yet live. Grey arrows are the question. Pink arrows are a skill on its way in. Grey tiles were tested and have not earned their place.',
     },
-    steps: SCRIPTURE_STEPS,
+    steps: ANSWER_STEPS,
     body: SCRIPTURE_BODY,
   },
   {
