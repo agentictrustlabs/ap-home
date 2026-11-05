@@ -1326,7 +1326,8 @@ const TSKILL_STEPS: Step[] = [
       'Each skill carries a short section, "Rules for this kind of text": four or five rules about what this kind of text must not lose. For records: keep each relation pointing the way the source points it. For law: keep must, may and must not apart. For poetry: never fold a second line into the first. For argument: do not turn a reason into a result.',
       'The rules are added to the drafter\'s instructions for that passage. Nothing is removed, and the drafter still sees only the source, the dictionary and the decided names.',
       '<b>This is off.</b> A first test on 32 passages favoured it (more faithful on 18 verses against 10). A second test on new passages, run twice, did not confirm it: one pair favoured the skill and one favoured today\'s plan. A looser version, a paragraph about the whole family, was clearly worse.',
-      'The definitions themselves are now under review, because the tests cannot tell a poor idea from a poor definition of it.',
+      'A review of those tests found they were not a fair trial of the idea. What was added was a paragraph of four or five lines, placed after about 30,000 characters of source material, to a drafter that is told to write at once without reasoning. Three of the four paragraphs changed the wording no more than two identical runs differ. Where a rule did change the wording it did harm more often than good: "use the plain word for a ritual term" turned a Nazirite\'s <i>separation</i> into a <i>vow</i>.',
+      'So the next form is different: a short sheet taken from the source by code before drafting, with the lines of a poem or the cases of a law already marked, and one or two rules that say how to use it.',
     ],
     where: ['The skill files: <code>skills/bible-translation/translate-records</code>, <code>translate-law</code>, <code>translate-poetry</code> and <code>translate-argument</code>.', 'The plan adds them as <code>formGuidance</code> in <code>translate-plan.ts</code>.'],
     by: 'A model drafts (Claude Haiku 5.5). Code decides which rules it is shown.',
@@ -1357,6 +1358,7 @@ const TSKILL_STEPS: Step[] = [
       '<b>Relation direction</b>, for records. With errors planted by code it caught 33 of 37 turned relations, where today\'s checks caught none, and raised no alarm on 91 clean verses.',
       '<b>Legal condition</b>, for law. It caught 26 of 27 lost conditions, where today\'s checks caught 9, with 2 alarms on 100 clean verses.',
       'Run over 1,886 published verses of every kind, the two raised 17 alarms and all 17 were false: an oath, an "except", a rhetorical question. That is the evidence that the category must choose the check.',
+      'The review found a gap the planted errors had hidden. In the law passages of the second test every case opens with the Hebrew word for "when", which the condition check does not count, so it never fired there. The check is being moved from a count per verse to the exact source word: the English aligned to this "when" must say "when" or "if".',
       'Argument uses the connector and question checks that already run on every passage. Poetry has no check of its own yet.',
       'The checks can now run from the category alone, with nothing added to what the drafter is told. That separates the part that measures well from the part that does not.',
     ],
@@ -1463,12 +1465,41 @@ const TSKILL_BODY = `
 </tbody>
 </table></div>
 <p>Every comparison is read by a blind judge from another model family, in both orders, beside a second run of the unchanged plan. That second run matters: two identical runs reword about nine verses in ten, and differ in score by about as much as some of these arms did.</p>
-<h2>What is being changed</h2>
+<h2>What a review found</h2>
+<p>The four skills were written quickly, so a stronger model was asked to read them against the verses where they won and lost. It read every run of the second test. Its main findings:</p>
 <ul>
-<li><b>The definitions are under review.</b> The four skills were written quickly. A stronger model is reading them against the verses where they won and lost, to say whether they were a fair test of the idea and to write better ones.</li>
-<li><b>Checks come first.</b> The category now chooses checks without changing what the drafter is told. That is the part with evidence behind it.</li>
-<li><b>Structure before wording.</b> The next form of a skill for the drafter is not more instructions. It is a short structure taken from the source before drafting: the conditions and parties of a law, the lines of a poem, the claims and connectors of an argument. Much of that can be read by code from the parsing.</li>
-<li><b>A better measure.</b> A general score of faithfulness moves too much between identical runs to show a small gain. Each skill needs its own count: relations kept, conditions kept, lines kept, connectors kept.</li>
+<li><b>The test was of a paragraph, not of a plan.</b> The skill's own checks never fired in 56 runs, and the rounds barely differed, so the only thing tested was four or five lines of advice.</li>
+<li><b>One open decision outweighed all four skills.</b> In Numbers 6 the source says "a man or a woman". One run wrote "he" and another "they", and the judge charged about one major error a verse for the difference. That single passage produced the law skill's best result in one pair and its worst in the other.</li>
+<li><b>The rules restated what the drafter is already told.</b> "Keep every condition" gives a drafter nothing to do that "account for every word" did not. The drafter was already carrying the conditions and relations the rules asked for.</li>
+<li><b>The judge disagrees with itself.</b> Scoring the same drafts twice, it agreed on which verses were wrong about a third of the time. Counting errors by verse cannot show a small gain.</li>
+</ul>
+<h2>The categories proposed in their place</h2>
+<p>The one hundred forms say what a text is. Most of them do not change what a translator does: a praise hymn and a thanksgiving song are translated the same way. The proposal is to cut by how the text is built, which code can read from the parsing and the accents, with no model deciding.</p>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Way of rendering</th><th>What the translator does differently</th><th>Read by code from</th></tr></thead>
+<tbody>
+<tr><td>List</td><td>Names, relations and numbers exactly, in list form</td><td>The share of names, numerals and kinship words</td></tr>
+<tr><td>Ruling</td><td>Case and consequence; shall, shall not and let; one pronoun for the person the rule is about</td><td>Directive verb forms and the words that open a case</td></tr>
+<tr><td>Verse</td><td>Where each line ends; a second line that leans on the first line's verb</td><td>The Hebrew accents</td></tr>
+<tr><td>Reasoning</td><td>Each linking word by its kind; sentences longer than a verse</td><td>The Greek linking words and sentence stops</td></tr>
+<tr><td>Narrative with speech</td><td>The order of events, who is meant, where a speech opens and closes</td><td>Everything else. This is the default</td></tr>
+</tbody>
+</table></div>
+<p>Law and procedure show why. Leviticus 8 tells a rite as something that was done, and Leviticus 15 gives orders. By subject both are law, and the first selector sent both to the law skill. By verb form the first is narrative and the second is a ruling.</p>
+<p>Finer detail comes from features that cross these five and are also read by code: a speech already open at the first verse, quantities, quoted Scripture, the comparison words of a vision. A passage has one way of rendering and as many features as it contains. The one hundred forms stay as vocabulary for selecting and scoring, and do not reach the drafter.</p>
+<h2>How a category should act</h2>
+<ul>
+<li><b>A sheet, not advice.</b> Before drafting, code prints a few lines for the passage: the lines of a poem, the cases and ruling verbs of a law, the names of a list in order. The drafter cannot reason before it writes, so the analysis has to arrive done.</li>
+<li><b>Checks at the exact word.</b> "The English aligned to this word says if or when" is exact where a count per verse is not. A category also switches off general checks that misfire on its kind of text.</li>
+<li><b>Decided terms.</b> About thirty words for offerings, rites and sacred times drift between runs. Deciding them once removes more difference than any rule did.</li>
+</ul>
+<p>None of this is proven. Two earlier results in this harness count against adding material to what the drafter reads, and the review does not expect a large gain from any category.</p>
+<h2>What comes first</h2>
+<ul>
+<li><b>Settle the open decisions.</b> The generic "he" or "they", a people spoken of in the singular, the LORD addressed by name, quotation marks across a cut, and "shall" for a ruling. Each moves a whole passage.</li>
+<li><b>Stop false alarms from driving revision.</b> Most law and list passages ran both revision rounds, some on checks that were wrong.</li>
+<li><b>Measure the room, free.</b> Run the new extractors over the thousand verses already drafted. A category whose measure today's drafts already pass is dropped before anything is spent.</li>
+<li><b>Then one test with a better ruler.</b> Passages as the unit, three runs of each arm, and closed questions with answer keys ("who is the father of X?", "is this a duty or a permission?") read from the English alone.</li>
 </ul>
 `;
 
@@ -1678,7 +1709,7 @@ export const POSTS: Post[] = [
       'A genealogy, a law, a poem and an argument fail in different ways. How the category of a passage chooses a skill, what a skill may change at five steps of a run (draft, align, check, revise, keep), and what has been measured so far.',
     picture: {
       svg: '/architecture/translation-skills-flow.svg', png: '/architecture/translation-skills-flow.png', alt: TSKILL_ALT, width: 1460, height: 1150,
-      caption: 'Grey arrows are the text. Pink arrows are what the skill sets. The border of each cell says how far that part has got.',
+      caption: 'Grey arrows are the text. Pink arrows are what the skill sets. The grid shows the four skills as first built, and the border of each cell says how far that part has got. The categories proposed in their place are below.',
     },
     steps: TSKILL_STEPS,
     body: TSKILL_BODY,
