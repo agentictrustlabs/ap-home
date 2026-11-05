@@ -792,8 +792,9 @@ const faithImpact: WhiteLabelConfig = {
       read_grant: { resources: ['vault:impact-profile'] },
       // People keep the reader open for days; a one-hour sign-in signed them out mid-read. Seven days, this app only.
       session_ttl_seconds: 7 * 24 * 60 * 60,
-      // Spec 445 W3 — decide and record, still showing the sheet. `'on'` (W4) follows a week of clean decisions.
-      remembered_consent: 'shadow',
+      // Spec 445 W4 — the first app that skips the sheet for a person who already allowed it. Turned on by the owner on 2026-11-05,
+      // ahead of the shadow week, with no operational users yet.
+      remembered_consent: 'on',
     },
     // specs 266/267 — "Bible Explorer" relying app: the Verifiable Content Substrate +
     // scripture vertical demo (demo-bible-ontology Worker). Connects via Global.Church
