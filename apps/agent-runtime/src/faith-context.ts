@@ -92,7 +92,19 @@ export function faithContextInvoker(deps:FaithDeps,asker:string|undefined,addres
   const category=/compar|three.*(?:messages|sermons)|campus.*messages/i.test(req.question)?'comparison':/sermon|message|spoke|preach/i.test(req.question)?'sermon':/prayer|pray/i.test(req.question)?'prayer':/journey|faith life/i.test(req.question)?'journey':null;
   const score=(e:z.infer<typeof entry>)=>(e.category==='guidance'?30:0)+(e.category===category?20:0)+(/service|sunday|gathering|worship time/i.test(req.question)&&e.recordType.startsWith('church.service:')?30:0)+words.reduce((n,w)=>n+(e.topics.join(' ').toLowerCase().includes(w)?1:0),0);
   const matching=candidates.filter(e=>!native.some(r=>r.entry.recordType===e.recordType)||score(e)>0);
-  const selected=[...matching].sort((a,b)=>score(b)-score(a)||(b.date??'').localeCompare(a.date??'')||a.recordType.localeCompare(b.recordType)).slice(0,8);
+  const ranked=[...matching].sort((a,b)=>score(b)-score(a)||(b.date??'').localeCompare(a.date??'')||a.recordType.localeCompare(b.recordType));
+  let selected=ranked.slice(0,8);
+  if(role==='org'&&category==='comparison'){
+   // A comparison needs a dated bundle: overview, sermon metadata/links, then excerpts from the same services.
+   // Generic church/community matches must not consume the slots needed by the requested campus messages.
+   const dated=ranked.filter(e=>['comparison','sermon'].includes(e.category));
+   const named=req.question.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b/i)?.[0];
+   const explicit=req.date??req.question.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0]??(named&&Number.isFinite(Date.parse(named))?new Date(named).toISOString().slice(0,10):undefined);
+   const date=explicit??dated.map(e=>e.date??'').sort().at(-1);
+   const group=dated.filter(e=>!date||e.date===date);
+   selected=[...group.filter(e=>e.category==='comparison').slice(0,1),...group.filter(e=>e.class.endsWith('#Sermon')),...group.filter(e=>e.class.endsWith('#SermonTranscript'))].slice(0,8);
+   binding.scope.date=date??null;
+  }
   const records=await Promise.all(selected.map(async e=>({entry:e,value:native.find(r=>r.entry.recordType===e.recordType)?.value??await read(e.recordType)})));
   const gaps:string[]=[];const sources:Array<{recordType:string;class:string;category:string;fields:Array<{path:string;value:string|number|boolean;truncated:boolean;start?:number;end?:number}>;date?:string;campusIds:string[];passages:string[]}>=[];
   for(const {entry:e,value} of records){
@@ -101,11 +113,15 @@ export function faithContextInvoker(deps:FaithDeps,asker:string|undefined,addres
    const types=Array.isArray(value['@type'])?value['@type']:[value['@type']];
    // Legacy preference records predate JSON-LD. Their only releasable values are answer style/language.
    if(e.recordType!=='person.preferences'&&!types.includes(e.class)){gaps.push('An authorized source has an unexpected class.');continue;}
-   let budget=1500;const fields=[];
-   for(const path of e.fields){
+   const comparison=role==='org'&&e.category==='comparison';
+   let budget=comparison?6500:1500;const fields=[];
+   const body=(p:string)=>/\/(?:description|transcript|text|body|summary)$/i.test(p)?1:0;
+   // Retain citation identity, dates, speakers and URLs before assigning the remaining excerpt budget.
+   const paths=role==='org'?[...e.fields].sort((a,b)=>body(a)-body(b)):e.fields;
+   for(const path of paths){
     if(e.recordType==='person.preferences'&&!['/answer/language','/answer/style'].includes(path))continue;
     const v=field(value,path);if(!['string','number','boolean'].includes(typeof v)||budget<=0)continue;
-    const n=Math.min(budget,1200);let start=0,best=0;
+    const n=Math.min(budget,comparison?6000:1200);let start=0,best=0;
     if(typeof v==='string'&&v.length>n)for(let i=0;i<v.length;i+=600){const window=v.slice(i,i+n).toLowerCase();const score=words.reduce((sum,w)=>sum+(window.includes(w)?1:0),0);if(score>best){best=score;start=i;}}
     const out=typeof v==='string'?v.slice(start,start+n):v as number|boolean;
     fields.push({path,value:out,truncated:typeof v==='string'&&(start>0||v.length>n),...(typeof v==='string'?{start,end:start+out.toString().length}:{})});budget-=String(out).length;

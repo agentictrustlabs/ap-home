@@ -497,6 +497,7 @@ export async function buildInteractionsGrantForScript(
   principal: string,
   signHash: (digest: Hex) => Promise<string>,
   get: (path: string) => Promise<{ ok?: boolean; address?: string }>,
+  principalKind: 'person' | 'org' = 'person',
 ): Promise<{ grant: DelegationWire; sessionLeaf?: DelegationWire }> {
   const service = INTERACTIONS_SERVICE_SA;
   if (!service) throw new Error('NEXT_PUBLIC_INTERACTIONS_SERVICE_SA is unset — nothing to delegate to');
@@ -507,7 +508,7 @@ export async function buildInteractionsGrantForScript(
   const sk = await get('/agent/interactions-session-key').catch(() => null);
   if (sk?.ok && sk.address && /^0x[0-9a-fA-F]{40}$/.test(sk.address)) {
     // Spec 408 §2.1 — the DO's session key presents the person's grants to the two service agents only.
-    sessionLeaf = toWire(await issueSessionDelegation(principal as Address, sk.address as Address, signHash as (h: Hex) => Promise<Hex>, [service, ...(DELIVERY_SERVICE_SA ? [DELIVERY_SERVICE_SA] : [])]));
+    sessionLeaf = toWire(await issueSessionDelegation(principal as Address, sk.address as Address, signHash as (h: Hex) => Promise<Hex>, [service, ...(DELIVERY_SERVICE_SA ? [DELIVERY_SERVICE_SA] : [])], principalKind === 'org' ? ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS : PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS));
   }
   return { grant: toWire(delegation), ...(sessionLeaf ? { sessionLeaf } : {}) };
 }

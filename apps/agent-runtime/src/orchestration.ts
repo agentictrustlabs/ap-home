@@ -534,10 +534,12 @@ export function gatewayModels(env: Pick<PlannerEnv, 'INFERENCE_URL' | 'INFERENCE
 export type OnReceipt = (r: ReceiptSummaryV1) => void;
 const bridgeOpts = (profile: string, purpose: string, onReceipt?: OnReceipt): BridgeOpts => ({ profile, purpose, ...(onReceipt ? { onReceipt } : {}) });
 
-export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; provider?: LlmProvider; /** Told what each composing call used, as the provider reported it. */ onUsage?: (u: ModelUsageV1) => void ; onReceipt?: OnReceipt}): AnswerComposer | null {
+export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; provider?: LlmProvider; /** Told what each composing call used, as the provider reported it. */ onUsage?: (u: ModelUsageV1) => void ; onReceipt?: OnReceipt; profile?: string; maxTokens?: number; requireComplete?: boolean}): AnswerComposer | null {
   if (gatewayOn(env)) {
     const cap = (env.COMPOSER_MAX_TOKENS ?? '').trim();
-    return composerFromModelsOpenAi(gatewayModels(env), { ...bridgeOpts(GATEWAY_PROFILE.compose, 'compose', opts?.onReceipt), maxEvidenceChars: 24_000, ...(cap && /^\d{2,5}$/.test(cap) ? { maxTokens: Number(cap) } : {}), ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}) });
+    const models=gatewayModels(env);
+    const complete=opts?.requireComplete?{...models,generate:async(req:Parameters<ModelClient['generate']>[0])=>{const result=await models.generate(req);if(result.stopReason!=='end')throw new Error('The answer generation did not finish ('+result.stopReason+'). Please try the question again.');return result;}}:models;
+    return composerFromModelsOpenAi(complete, { ...bridgeOpts(opts?.profile??GATEWAY_PROFILE.compose, 'compose', opts?.onReceipt), maxEvidenceChars: 24_000, ...(opts?.maxTokens?{maxTokens:opts.maxTokens}:cap && /^\d{2,5}$/.test(cap) ? { maxTokens: Number(cap) } : {}), ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}) });
   }
   const p = providerFor(env, opts?.provider);
   if (p === null) return null;
@@ -595,10 +597,10 @@ export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; 
 }
 
 /** Spec 388 — the composer for THIS reply, chosen by what it must carry (the evidence), with the reason recorded. */
-export async function selectComposerRouted(env: PlannerEnv, opts: { systemPrompt?: string; provider?: LlmProvider; need: RouteNeed; onUsage?: (u: ModelUsageV1) => void }): Promise<{ composer: AnswerComposer | null; route: RouteDecision }> {
+export async function selectComposerRouted(env: PlannerEnv, opts: { systemPrompt?: string; provider?: LlmProvider; need: RouteNeed; onUsage?: (u: ModelUsageV1) => void; profile?: string; maxTokens?: number; requireComplete?: boolean }): Promise<{ composer: AnswerComposer | null; route: RouteDecision }> {
   const route = await routeProvider(env, opts.provider, opts.need);
   if (route.provider === null) return { composer: null, route };
-  return { composer: selectComposer(env, { ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}), provider: route.provider, ...(opts.onUsage ? { onUsage: opts.onUsage } : {}) }), route };
+  return { composer: selectComposer(env, { profile:opts.profile,maxTokens:opts.maxTokens,requireComplete:opts.requireComplete,...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}), provider: route.provider, ...(opts.onUsage ? { onUsage: opts.onUsage } : {}) }), route };
 }
 
 /** What a reasoning model may spend THINKING before it calls a tool. The completion bound covers reasoning

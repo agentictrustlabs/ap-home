@@ -28,7 +28,7 @@ if (orgName) {
   principal = org.orgAgent.toLowerCase();
 }
 const sign = async (digest: `0x${string}`): Promise<string> => { const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${si.homeSession}` }, body: JSON.stringify({ digest }) })); if (!b.signature) throw new Error(`persona-sign: ${JSON.stringify(b).slice(0, 160)}`); return b.signature; };
-const { grant, sessionLeaf } = await buildInteractionsGrantForScript(principal, sign, async (path) => j(await fetch(`${A2A}${path}`)));
+const { grant, sessionLeaf } = await buildInteractionsGrantForScript(principal, sign, async (path) => j(await fetch(`${A2A}${path}`)), orgName ? 'org' : 'person');
 const csrfRes = await fetch(`${A2A}/auth/csrf`, { headers: { origin: HOME } });
 const csrf = (await j(csrfRes)) as { token?: string };
 const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0], 'x-csrf-token': csrf.token ?? '' };

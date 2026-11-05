@@ -15,6 +15,20 @@ function setup(m:unknown=manifest(),role='person',owner=me,records:Record<string
  return {read,call:(a:Record<string,unknown>=args)=>call(role==='person'?'faith.context.prepare':'church.context.prepare',a,{} as never)};
 }
 describe('faith intent release before retrieval',()=>{
+ it('keeps the requested dated campus bundle and links ahead of irrelevant matches and long excerpts',async()=>{
+  const entries:any[]=[],records:Record<string,unknown>={};
+  const add=(key:string,kind:string,category:string,date:string,campus:string,fields:string[],data:any)=>{const e={recordType:key,class:'https://churchcore.ai/ontology/church#'+kind,category,date,campusIds:[campus],fields,topics:['Calvary Bible church compare messages'],release:{visibility:'public',purposes:['faith-ask']}};entries.push(e);records[key]={'@type':e.class,owner:org,title:key,data};};
+  for(const date of ['2026-11-01','2026-10-25'])add('church.sermon-insight:'+date,'SermonInsight','comparison',date,'erie',['/title','/data/description'],{description:'Comparison of campus emphases. '.repeat(100)});
+  for(const campus of ['erie','boulder','thornton']){
+   add('church.sermon:'+campus,'Sermon','sermon','2026-11-01',campus,['/title','/data/description','/data/publicationUrl','/data/speaker'],{description:'Very long sermon description. '.repeat(200),publicationUrl:'https://publishing.faithnet.io/'+campus,speaker:campus+' speaker'});
+   add('church.sermon:transcript-'+campus,'SermonTranscript','sermon','2026-11-01',campus,['/title','/data/transcript'],{transcript:'Actual sermon evidence. '.repeat(200)});
+   add('church.community:'+campus,'Community','community','2026-11-01',campus,['/title'],{});
+  }
+  const result=await setup(manifest(entries,'org',org),'org',org,records).call({...args,question:'Compare Calvary Bible church messages from November 1, 2026.'}) as any;
+  expect(result.sources).toHaveLength(7);expect(result.scope.date).toBe('2026-11-01');
+  expect(JSON.stringify(result.sources)).not.toContain('2026-10-25');expect(result.sources.some((s:any)=>s.category==='community')).toBe(false);
+  for(const campus of ['erie','boulder','thornton'])expect(JSON.stringify(result.sources)).toContain('https://publishing.faithnet.io/'+campus);
+ });
  it('projects only released fields and binds recipients, source and skill',async()=>{const {call}=setup();const r=await call() as any;expect(r.sources[0].fields).toEqual([{path:'/text',value:'Please help me be patient.',truncated:false,start:0,end:26}]);expect(r.recipients).toEqual([scripture,app]);expect(r.skill.commitments).toBeTruthy();expect(JSON.stringify(r)).not.toContain('must not leave');});
  for(const [label,release] of [['private',{visibility:'private'}],['revoked',{revoked:true}],['expired',{expiresAt:'2020-01-01T00:00:00.000Z'}],['missing app',{recipients:[scripture]}],['missing downstream',{recipients:[app]}],['personal public',{visibility:'public'}]] as const){
   it(`${label} is never fetched or disclosed`,async()=>{const {call,read}=setup(manifest([{...source,recordType:'faith.prayer:SECRET',release:{...source.release,...release}}]));const r=await call();expect(read).toHaveBeenCalledTimes(1);expect(JSON.stringify(r)).not.toContain('SECRET');});
