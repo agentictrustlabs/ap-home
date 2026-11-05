@@ -1253,6 +1253,7 @@ const TRANSLATION_STEPS: Step[] = [
 ];
 
 const TRANSLATION_BODY = `
+<p class="quiet">A companion page: <a href="/architecture/translation-skills">how a passage's category chooses its translation skill</a>, and what a skill changes at the Draft, Align, Check, Revise and Keep steps.</p>
 <h2>How this differs from answering a question</h2>
 <p>The <a href="/architecture/scripture-ask">Scripture Agent's ask</a> and this harness share a shape: gather what is held, a model writes, code proves, revise if needed, and leave a record. Three things are different.</p>
 <ul>
@@ -1269,12 +1270,206 @@ const TRANSLATION_BODY = `
 <li><b>The story and meaning.</b> For each book, the scenes, who is present and who each pronoun means. It is built from the source and sources of the book's own time, and code removes any sentence resting on a later interpretation. It decides structure, such as who is speaking, and never wording.</li>
 <li><b>The brief and skills.</b> What the drafter is told, as published skills under the <code>bible-translation</code> domain.</li>
 <li><b>The ontology.</b> Spelling rules, number words, free words and check kinds are generated from it, and a repository check refuses any drift.</li>
-<li><b>A taxonomy of passage forms.</b> One hundred forms, such as genealogy, lament and case law, are held in the ontology as values. Routing a drafter by them is being tested and is off: a first test on 20 passages showed nothing beyond the difference between two identical runs.</li>
+<li><b>A taxonomy of passage forms.</b> One hundred forms, such as genealogy, lament and case law, are held in the ontology as values. The category of a passage can choose a skill, and the skill can change how the passage is drafted, aligned, checked, revised and kept. The checks chosen this way are measured to work; the drafting rules are not yet, and are off. <a href="/architecture/translation-skills">How a passage's category chooses its translation skill</a> has the whole strategy.</li>
 </ul>
 <h2>How a change is measured</h2>
 <p>The harness carries its own tests. Experiments run arms side by side over locked sets of passages, including a floor (the tables' word-by-word glosses) and a ceiling (a published human translation), so a score means something. Errors are planted to measure the checker. A change is accepted by a blind judge on a frozen set of hard passages, because this project's own checks have rewarded changes that a blind reader preferred less.</p>
 <h2>Where it stands</h2>
 <p>The edition is RBS, a draft model-made translation from the Hebrew, Aramaic and Greek under CC BY 4.0. The current release, <code>2026-11-05-v4.0.2</code>, has 31,085 verses, of which 26,445 are ready and 4,640 are published as open, each saying what is open. <b>No person has reviewed it.</b> The status on a verse says what the machine checked and nothing more.</p>
+`;
+
+// ───────────────────────────────────────────────────────────────── categories and skills in the translation harness
+
+const TSKILL_ALT =
+  'A flow diagram over a grid. Once, on the source, a model reads a passage whole and names its category, one of twelve families, which is kept as data; ' +
+  'outside evidence such as study notes reaches that step only and never the drafter. Code selects a skill from the category, or holds at the general plan. ' +
+  'The skill sets five steps of the run for one passage: Draft, Align, Check, Revise and Keep, and the run records the skill and why. ' +
+  'The grid below has a row for the general plan and for the records, law, poetry and argument skills, and a column for each of the five steps, ' +
+  'saying what each skill changes there. A coloured border says whether a cell is as today, built and measured to catch planted errors, built and tested but off, or proposed.';
+
+const TSKILL_STEPS: Step[] = [
+  {
+    id: 'categorise', name: 'Categorise', color: '#8b5cf6', at: [330, 220],
+    summary: 'A model reads the passage whole, in the source, and names what kind of text it is.',
+    why: 'A genealogy goes wrong when a relation is turned around. A law goes wrong when a condition is lost. A poem goes wrong when two lines are folded into one. A general plan watches for all of these equally, which means it watches for none of them closely. Knowing the kind of text is what lets the rest of the run look in the right place.',
+    what: [
+      'A model is shown the whole passage in Hebrew, Aramaic or Greek and returns its units: which verses belong together, which of twelve families each unit is, which of one hundred forms if it can tell, and how confident it is.',
+      'It may also be shown outside evidence about the passage, such as section headings and study notes. That evidence goes to this step and nowhere else, so no edition or tradition can lead the wording of a translation.',
+      'The category belongs to the source, not to English. It is decided once and serves every language the passage is translated into.',
+    ],
+    where: ['A script on the operator\'s machine (<code>scripts/select-passages.mts</code>), with the label set and its validation in <code>scripts/lib/passage-forms.mts</code>.', 'The families and forms are values in the skills ontology (<code>scr:LiteraryGenre</code>), generated from a frozen guide.'],
+    by: 'A model (Claude Haiku 5.5) proposes. Code validates every unit: a known family, a known form, verses inside the passage, no overlap.',
+    reads: ['The source tokens of the whole passage.', 'The list of families and forms, with their cues.', 'Outside evidence, when there is any.'],
+    leaves: ['The passage\'s units, each with a family, a form where known, and a confidence.'],
+    stops: ['A unit that names an unknown family or form, or verses outside the passage, is dropped.', 'With no valid unit the passage has no category, and the general plan runs.'],
+  },
+  {
+    id: 'select', name: 'Select', color: '#14b8a6', at: [770, 220],
+    summary: 'Code turns the category into one skill, or holds at the general plan.',
+    why: 'The model is good at saying what a passage is and should not also decide what to do about it. Selection is a small, fixed rule, so the same category always runs the same plan, and a doubtful category runs the plan that is known.',
+    what: [
+      'The family that covers most of the passage\'s verses chooses the skill. Records choose the records skill; law and procedure choose the law skill; songs and prayers choose the poetry skill; argument chooses the argument skill.',
+      'Selection holds at the general plan when confidence is low, when no family covers a majority, or when the family has no skill yet. Narrative, wisdom, teaching, prophecy, vision and letters hold today.',
+      'A hold changes nothing about the run. That is tested: a held passage produces the same plan as a passage with no category.',
+    ],
+    where: ['<code>selectPassageSkill</code> in <code>packages/translation-orchestration/src/passage-skills.ts</code>, beside the table of skills (<code>PASSAGE_SKILLS</code>).'],
+    by: 'Code only. No model is called.',
+    reads: ['The validated units and their confidence.', 'The table of skills and the families each one serves.'],
+    leaves: ['The skill, the reason for it in a sentence, and whether it was a hold.'],
+    stops: ['Low confidence, no majority, or a family without a skill: the general plan runs.'],
+  },
+  {
+    id: 'draft', name: 'Draft', color: '#f59e0b', at: [330, 480],
+    summary: 'The skill may add a few rules for this kind of text to what the drafter is told.',
+    why: 'This is the step where a category could help most, and the step where it has been hardest to show. A drafter that knows it is reading case law might keep each consequence with its condition. A drafter given more to read might also attend less to the source in front of it.',
+    what: [
+      'Each skill carries a short section, "Rules for this kind of text": four or five rules about what this kind of text must not lose. For records: keep each relation pointing the way the source points it. For law: keep must, may and must not apart. For poetry: never fold a second line into the first. For argument: do not turn a reason into a result.',
+      'The rules are added to the drafter\'s instructions for that passage. Nothing is removed, and the drafter still sees only the source, the dictionary and the decided names.',
+      '<b>This is off.</b> A first test on 32 passages favoured it (more faithful on 18 verses against 10). A second test on new passages, run twice, did not confirm it: one pair favoured the skill and one favoured today\'s plan. A looser version, a paragraph about the whole family, was clearly worse.',
+      'The definitions themselves are now under review, because the tests cannot tell a poor idea from a poor definition of it.',
+    ],
+    where: ['The skill files: <code>skills/bible-translation/translate-records</code>, <code>translate-law</code>, <code>translate-poetry</code> and <code>translate-argument</code>.', 'The plan adds them as <code>formGuidance</code> in <code>translate-plan.ts</code>.'],
+    by: 'A model drafts (Claude Haiku 5.5). Code decides which rules it is shown.',
+    reads: ['The source tokens, the dictionary and the decided names, as in every run.', 'The skill\'s rules, when the skill plan is on.'],
+    leaves: ['A draft and its alignment, as in every run.'],
+    stops: ['A hold adds nothing.', 'With the skill plan off, no rules are added for any passage.'],
+  },
+  {
+    id: 'align', name: 'Align', color: '#eab308', at: [550, 480],
+    summary: 'The skill names what the alignment must account for, beyond every content word.',
+    why: 'The alignment is how code sees a translation: which English words answer which source words. Every check reads it. If a kind of text depends on particular words, those are the words whose owners must be exact.',
+    what: [
+      'Today the alignment is made the same way for every passage: the drafter returns it with the draft, and code parses it and reports any source word with no English owner.',
+      'For records this is already used by kind. The relation check reads the names inside the aligned words on each side of "son of", so a relation turned around is seen even when every name is present.',
+      'For the other three skills this is the proposal, not yet built: a law\'s every "if" and "unless", a poem\'s every line, and an argument\'s every connector must each have an owner in the English, and a missing one is named to the reviser.',
+    ],
+    where: ['Parsing and the missing-owner count: <code>local.unblind</code> in <code>packages/translation-orchestration/src/tools.ts</code>.', 'The category checks that read it: <code>apps/translation-mcp/src/skill-checks.ts</code>.'],
+    by: 'Code only. The alignment itself was written by the drafter.',
+    reads: ['The drafter\'s alignment, one line per verse.', 'The source tokens and their parsing.'],
+    leaves: ['For every verse, which English words answer which source words.'],
+    stops: ['A draft that leaves many source words unowned is asked for again before any check runs.'],
+  },
+  {
+    id: 'check', name: 'Check', color: '#22c55e', at: [770, 480],
+    summary: 'Each kind of text has checks that only it runs. This is the part measured to work.',
+    why: 'A check written for law misreads everything that is not law. Run on every passage, it raises false alarms; run only where the category says, it finds what the general checks cannot.',
+    what: [
+      '<b>Relation direction</b>, for records. With errors planted by code it caught 33 of 37 turned relations, where today\'s checks caught none, and raised no alarm on 91 clean verses.',
+      '<b>Legal condition</b>, for law. It caught 26 of 27 lost conditions, where today\'s checks caught 9, with 2 alarms on 100 clean verses.',
+      'Run over 1,886 published verses of every kind, the two raised 17 alarms and all 17 were false: an oath, an "except", a rhetorical question. That is the evidence that the category must choose the check.',
+      'Argument uses the connector and question checks that already run on every passage. Poetry has no check of its own yet.',
+      'The checks can now run from the category alone, with nothing added to what the drafter is told. That separates the part that measures well from the part that does not.',
+    ],
+    where: ['<code>apps/translation-mcp/src/skill-checks.ts</code>, called by the checker only when the plan names them.', 'The category-only option: <code>checksOnlyFor</code> in <code>passage-skills.ts</code>.'],
+    by: 'Code only. No model is called.',
+    reads: ['The draft, its alignment and the source tokens.', 'The list of checks the skill names.'],
+    leaves: ['Per verse, what failed and why, in words the reviser can act on.'],
+    stops: ['A failing category check sends the draft to revision, as a failing general check does.'],
+  },
+  {
+    id: 'revise', name: 'Revise', color: '#0ea5e9', at: [990, 480],
+    summary: 'The skill sets how many rounds a draft may take, and which failures send it back.',
+    why: 'Revision repairs some verses and damages others. How much of it a passage should get depends on the kind of text: a list can be corrected word by word, and a poem that is revised twice tends to come back as prose.',
+    what: [
+      'Records, law and argument take up to two rounds, as the general plan does. Poetry takes one.',
+      'A skill may let a check send a draft back that otherwise only reports. For argument, a connector or a question that changed its force sends the draft back; in the general plan those are reported and the draft stands.',
+      'The reviser is told what failed and nothing else about the kind of text. A narrower revision, in which only the words a check names may change, was tested and did worse than the full revision (preferred on 9 verses against 22), so the full revision stays.',
+    ],
+    where: ['The settings per skill: <code>PASSAGE_SKILLS</code> and <code>planOptionsFor</code> in <code>passage-skills.ts</code>.', 'The revise steps: <code>translate-plan.ts</code>.'],
+    by: 'A model revises (Claude Haiku 5.5). Code decides whether it runs and how often.',
+    reads: ['The draft and the failing checks.', 'The number of rounds the skill allows.'],
+    leaves: ['A revised draft, checked again in the same way.'],
+    stops: ['No failing check: no revision.', 'The rounds the skill allows are used up.'],
+  },
+  {
+    id: 'keep', name: 'Keep', color: '#ef4444', at: [1210, 480],
+    summary: 'The pass with the fewest failing checks is kept, and the skill\'s checks count.',
+    why: 'A later draft is not always a better one. Keeping the best pass means a revision that made things worse is thrown away. What "best" means should include the checks that matter for this kind of text.',
+    what: [
+      'Code compares every pass of the passage by its failing checks and keeps the one with the fewest. A tie goes to the earlier draft.',
+      'When a skill names checks, they are part of that count. A records passage whose revision fixed a missing word and turned a relation around does not win.',
+      'Two finer rules were tested and are not used: keeping the best pass verse by verse, and drafting three times and picking per verse. Neither beat a second run of the plain plan on a sealed set.',
+    ],
+    where: ['<code>local.best_pass</code> in <code>packages/translation-orchestration/src/tools.ts</code>.'],
+    by: 'Code only. No model is called.',
+    reads: ['Every pass of the passage and its check results.'],
+    leaves: ['One pass, and which one it was.'],
+    stops: ['A pass with a broken sentence can never be kept over one without.'],
+  },
+  {
+    id: 'record', name: 'Record', color: '#a855f7', at: [1390, 480],
+    summary: 'The run says which skill it used and why.',
+    why: 'A translation made under a skill should be traceable to it. When a verse is questioned later, the record shows whether it was drafted as law or as narrative, and on what evidence.',
+    what: [
+      'The run\'s record carries the skill, the sentence that explains the choice, and whether it was a hold. It also says when only the checks were chosen by category.',
+      'Once a gain is shown, the category itself is stored with the passage in the ontology, so that every later run, in any language, starts from it.',
+    ],
+    where: ['The <code>selection</code> step of the plan, kept in the run record with every other step.'],
+    by: 'Code only.',
+    reads: ['The selection.'],
+    leaves: ['The skill and the reason, on the run and on the proposal it makes.'],
+    stops: ['Nothing stops here.'],
+  },
+];
+
+const TSKILL_BODY = `
+<h2>Where this fits</h2>
+<p>This page goes with <a href="/architecture/translation-harness">How the translation agent translates the Bible</a>. That page follows one passage through the whole run. This one is about a single idea inside it: that the kind of text should change how five of those steps work.</p>
+<h2>The categories</h2>
+<p>The categories come from a guide of one hundred passage forms in twelve families. They are held in the skills ontology as values, not as new classes, so they can be revised without changing the model.</p>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Family</th><th>What it covers</th><th>Forms</th><th>Skill today</th></tr></thead>
+<tbody>
+<tr><td>Records and lists</td><td>Genealogies, censuses, itineraries, inventories</td><td>8</td><td>Records</td></tr>
+<tr><td>Law and covenant</td><td>Commands, case law, covenants, transactions</td><td>8</td><td>Law</td></tr>
+<tr><td>Procedures</td><td>Sacrifice, purity, building and measuring</td><td>6</td><td>Law</td></tr>
+<tr><td>Songs and poems</td><td>Hymns, laments, thanksgiving, love poetry</td><td>12</td><td>Poetry</td></tr>
+<tr><td>Prayer</td><td>Petition, intercession, confession, blessing</td><td>7</td><td>Poetry</td></tr>
+<tr><td>Argument and exhortation</td><td>Exposition, objection and reply, ethical appeal</td><td>7</td><td>Argument</td></tr>
+<tr><td>Narrative</td><td>Events, people, settings, point of view</td><td>12</td><td>General</td></tr>
+<tr><td>Wisdom</td><td>Proverbs, instruction, reflection</td><td>8</td><td>General</td></tr>
+<tr><td>Teaching</td><td>Parables, sayings, public address, dialogue</td><td>8</td><td>General</td></tr>
+<tr><td>Prophetic discourse</td><td>Oracles, disputes, appeals, symbolic acts</td><td>9</td><td>General</td></tr>
+<tr><td>Vision and apocalypse</td><td>Dreams, symbolic visions, interpretations</td><td>7</td><td>General</td></tr>
+<tr><td>Letters</td><td>Greetings, thanksgivings, requests, closings</td><td>8</td><td>General</td></tr>
+</tbody>
+</table></div>
+<p>There are four skills and not one hundred plans, for two reasons. The model names the family correctly about nine times in ten on clear passages and the form about three times in four, and does worse on hard ones, so one hundred labels are finer than it can hold. And most forms do not need different handling: a census and a genealogy fail in the same way.</p>
+<p>Twelve further skills in the guide cut across the families: names and kinship, quantities and dates, legal scope, poetic structure, argument logic, figurative language, wordplay and others. They describe a feature a passage has, not what kind of passage it is. A psalm with a number in it has both.</p>
+<h2>What a skill definition contains</h2>
+<p>A skill is a short published file and a row of settings. The strategy is that each skill answers the same six questions, one for the selection and one for each step it may change.</p>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Question</th><th>Step</th><th>Example: law</th></tr></thead>
+<tbody>
+<tr><td>When does it apply?</td><td>Select</td><td>Most of the passage is law or procedure, with confidence</td></tr>
+<tr><td>What must this text not lose?</td><td>Draft</td><td>Conditions, parties, consequences, and their order</td></tr>
+<tr><td>Which source words must each have an owner?</td><td>Align</td><td>Every "if", "unless" and "when" of a case</td></tr>
+<tr><td>Which checks are its own?</td><td>Check</td><td>Legal condition</td></tr>
+<tr><td>What sends a draft back, and how often?</td><td>Revise</td><td>A lost condition; up to two rounds</td></tr>
+<tr><td>What counts when the best pass is chosen?</td><td>Keep</td><td>The condition check, with the general checks</td></tr>
+</tbody>
+</table></div>
+<p>Two rules hold for every skill. It may add care and may not remove anything the general plan requires, so a wrong category costs little. And it may shape structure but never wording: no skill names an English word to prefer, and none is shown an existing translation.</p>
+<h2>What has been measured</h2>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Part</th><th>Result</th><th>State</th></tr></thead>
+<tbody>
+<tr><td>Category checks, on planted errors</td><td>Relations: 33 of 37 caught. Conditions: 26 of 27 caught. Few alarms on text of their own kind.</td><td>Kept, scoped to their kind</td></tr>
+<tr><td>The same checks on every kind of text</td><td>17 alarms in 1,886 verses, all false</td><td>Never run unscoped</td></tr>
+<tr><td>Skill rules for the drafter, first test</td><td>More faithful on 18 verses, less on 10, of 317</td><td>Promising</td></tr>
+<tr><td>Skill rules for the drafter, second test</td><td>Two repeats disagreed: 22 to 11 for the skill, then 25 to 20 against</td><td>Not confirmed. Off</td></tr>
+<tr><td>A paragraph about the family, in place of rules</td><td>Less faithful on 12 verses, more on 4</td><td>Rejected</td></tr>
+<tr><td>Revising only the words a check names</td><td>Preferred on 9 verses, the full revision on 22</td><td>Rejected</td></tr>
+</tbody>
+</table></div>
+<p>Every comparison is read by a blind judge from another model family, in both orders, beside a second run of the unchanged plan. That second run matters: two identical runs reword about nine verses in ten, and differ in score by about as much as some of these arms did.</p>
+<h2>What is being changed</h2>
+<ul>
+<li><b>The definitions are under review.</b> The four skills were written quickly. A stronger model is reading them against the verses where they won and lost, to say whether they were a fair test of the idea and to write better ones.</li>
+<li><b>Checks come first.</b> The category now chooses checks without changing what the drafter is told. That is the part with evidence behind it.</li>
+<li><b>Structure before wording.</b> The next form of a skill for the drafter is not more instructions. It is a short structure taken from the source before drafting: the conditions and parties of a law, the lines of a poem, the claims and connectors of an argument. Much of that can be read by code from the parsing.</li>
+<li><b>A better measure.</b> A general score of faithfulness moves too much between identical runs to show a small gain. Each skill needs its own count: relations kept, conditions kept, lines kept, connectors kept.</li>
+</ul>
 `;
 
 const TEST_ALT =
@@ -1474,6 +1669,19 @@ export const POSTS: Post[] = [
     },
     steps: TRANSLATION_STEPS,
     body: TRANSLATION_BODY,
+  },
+  {
+    slug: 'translation-skills',
+    title: "How a passage's category chooses its translation skill",
+    date: '2026-11-05',
+    description:
+      'A genealogy, a law, a poem and an argument fail in different ways. How the category of a passage chooses a skill, what a skill may change at five steps of a run (draft, align, check, revise, keep), and what has been measured so far.',
+    picture: {
+      svg: '/architecture/translation-skills-flow.svg', png: '/architecture/translation-skills-flow.png', alt: TSKILL_ALT, width: 1460, height: 1150,
+      caption: 'Grey arrows are the text. Pink arrows are what the skill sets. The border of each cell says how far that part has got.',
+    },
+    steps: TSKILL_STEPS,
+    body: TSKILL_BODY,
   },
   {
     slug: 'sign-in',

@@ -1,0 +1,207 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1460 1150" width="1460" height="1150" role="img" aria-labelledby="t d">
+<title id="t">How a passage's category chooses its translation skill</title>
+<desc id="d">Once, on the source, a model reads a passage whole and names its category, one of twelve families; outside evidence such as study notes reaches this step only. Code selects a skill from the category or holds at the general plan. The skill sets five steps of the run for one passage: what the drafter is told, what the alignment must account for, which checks run, what sends a draft back and how often, and how the best pass is chosen. The run records the skill and why. A grid shows what the general plan and the records, law, poetry and argument skills each change at those five steps, and whether each is as today, measured to work, built but off, or proposed.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#8b95b5"/></marker><marker id="b" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#8b95b5"/></marker><marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#f472b6"/></marker><marker id="bs" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#f472b6"/></marker>
+<style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#eef1fb}.h{font-size:30px;font-weight:700}.n{font-size:16px;font-weight:650}.t{font-size:13px;font-weight:600}.k{font-size:12px;font-weight:700}.s{font-size:13px;fill:#9aa5c7}.b{font-size:12px;font-weight:700;letter-spacing:.09em;fill:#9aa5c7}</style></defs>
+<rect width="1460" height="1150" rx="22" fill="#0b1020"/>
+<text x="40" y="52" class="h">How a passage's category chooses its translation skill</text>
+<text x="40" y="78" class="s" text-anchor="start">A genealogy, a law, a poem and an argument fail in different ways. The category of a passage chooses a skill, and the skill sets five steps of the run.</text>
+<text x="40" y="120" class="b" text-anchor="start" style="fill:#f472b6">ONCE, ON THE SOURCE: THE SAME FOR EVERY LANGUAGE</text>
+<path d="M150 220H286" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M370 220H506" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M590 220H726" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M810 220H946" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<g>
+<rect x="78" y="188" width="64" height="64" rx="16" fill="#111933" stroke="#64748b" stroke-width="2.2"/>
+<g transform="translate(93.36,203.36) scale(1.3866666666666667)" fill="none" stroke="#64748b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h10.5a2.5 2.5 0 0 1 2.5 2.5v12.5H7.5A2.5 2.5 0 0 1 5 17z"/><path d="M5 17a2.5 2.5 0 0 1 2.5-2.5H18"/><path d="M9 8.5h5.5"/></g>
+<text x="110" y="276" text-anchor="middle" class="n">A passage</text>
+<text x="110" y="295" text-anchor="middle" class="s">Hebrew, Aramaic</text>
+<text x="110" y="311" text-anchor="middle" class="s">or Greek</text>
+</g>
+<g>
+<rect x="298" y="188" width="64" height="64" rx="18" fill="#8b5cf6"/>
+<g transform="translate(313.36,203.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></g>
+<circle cx="301" cy="191" r="11" fill="#0b1020" stroke="#8b5cf6" stroke-width="2"/><text x="301" y="195" text-anchor="middle" class="k">1</text>
+<text x="330" y="276" text-anchor="middle" class="n">Categorise</text>
+<text x="330" y="295" text-anchor="middle" class="s">a model reads it whole</text>
+</g>
+<g>
+<rect x="518" y="188" width="64" height="64" rx="16" fill="#111933" stroke="#f472b6" stroke-width="2.2"/>
+<g transform="translate(533.36,203.36) scale(1.3866666666666667)" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.3"/><circle cx="18" cy="7" r="2.3"/><circle cx="12" cy="18" r="2.3"/><path d="M8.2 6.4l7.5.400M7.2 8l3.7 8M16.8 9l-3.7 7"/></g>
+<text x="550" y="276" text-anchor="middle" class="n">Its category</text>
+<text x="550" y="295" text-anchor="middle" class="s">one of 12 families,</text>
+<text x="550" y="311" text-anchor="middle" class="s">kept as data</text>
+</g>
+<g>
+<rect x="738" y="188" width="64" height="64" rx="18" fill="#14b8a6"/>
+<g transform="translate(753.36,203.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h5M9 12c3.5 0 3-5.5 6.5-5.5H19M9 12c3.5 0 3 5.5 6.5 5.5H19"/><path d="M17 4.5l2 2-2 2M17 15.5l2 2-2 2"/></g>
+<circle cx="741" cy="191" r="11" fill="#0b1020" stroke="#14b8a6" stroke-width="2"/><text x="741" y="195" text-anchor="middle" class="k">2</text>
+<text x="770" y="276" text-anchor="middle" class="n">Select</text>
+<text x="770" y="295" text-anchor="middle" class="s">by code, or hold</text>
+</g>
+<g>
+<rect x="958" y="188" width="64" height="64" rx="16" fill="#111933" stroke="#f472b6" stroke-width="2.2"/>
+<g transform="translate(973.36,203.36) scale(1.3866666666666667)" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5h7l4 4v13h-11z"/><path d="M13.5 3.5v4h4"/><path d="M9 12h6M9 15.5h6"/></g>
+<text x="990" y="276" text-anchor="middle" class="n">The skill</text>
+<text x="990" y="295" text-anchor="middle" class="s">its definition</text>
+<text x="990" y="311" text-anchor="middle" class="s">and its settings</text>
+</g>
+<g>
+<rect x="1222" y="192" width="56" height="56" rx="16" fill="#111933" stroke="#64748b" stroke-width="2.2"/>
+<g transform="translate(1235.44,205.44) scale(1.2133333333333334)" fill="none" stroke="#64748b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 4.5h4v15h-4zM8.5 4.5h4v15h-4z"/><path d="M14.2 6l3.6-1 3 13.5-3.6 1z"/></g>
+<text x="1250" y="272" text-anchor="middle" class="n">Outside evidence</text>
+<text x="1250" y="291" text-anchor="middle" class="s">study notes, headings:</text>
+<text x="1250" y="307" text-anchor="middle" class="s">for step 1 only</text>
+</g>
+<path d="M1250 180V166Q1250 150 1234 150H346Q330 150 330 162V176" fill="none" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/>
+<text x="790" y="140" text-anchor="middle" class="s">never shown to the drafter</text>
+<path d="M1030 220H1100Q1116 220 1116 236V366Q1116 382 1100 382H330" fill="none" stroke="#f472b6" stroke-width="2"/>
+<path d="M1116 382H1210" fill="none" stroke="#f472b6" stroke-width="2"/>
+<path d="M330 382V436" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
+<path d="M550 382V436" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
+<path d="M770 382V436" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
+<path d="M990 382V436" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
+<path d="M1210 382V436" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
+<text x="40" y="386" class="b" text-anchor="start">ONE PASSAGE</text>
+<text x="1132" y="368" text-anchor="start" class="s" style="fill:#f472b6">the skill sets these five steps</text>
+<path d="M370 480H506" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M590 480H726" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M1030 480H1166" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M1250 480H1346" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M810 480H946" fill="none" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/>
+<path d="M110 480H286" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<text x="150" y="450" text-anchor="middle" class="s">the source, read as today</text>
+<g>
+<rect x="298" y="448" width="64" height="64" rx="18" fill="#f59e0b"/>
+<g transform="translate(313.36,463.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5l1-4.5L16 4.5 19.5 8 9 18.5z"/><path d="M13.5 7l3.5 3.5"/></g>
+<circle cx="301" cy="451" r="11" fill="#0b1020" stroke="#f59e0b" stroke-width="2"/><text x="301" y="455" text-anchor="middle" class="k">3</text>
+<text x="330" y="536" text-anchor="middle" class="n">Draft</text>
+<text x="330" y="555" text-anchor="middle" class="s">what the drafter is told</text>
+</g>
+<g>
+<rect x="518" y="448" width="64" height="64" rx="18" fill="#eab308"/>
+<g transform="translate(533.36,463.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.2 1.2"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.2-1.2"/></g>
+<circle cx="521" cy="451" r="11" fill="#0b1020" stroke="#eab308" stroke-width="2"/><text x="521" y="455" text-anchor="middle" class="k">4</text>
+<text x="550" y="536" text-anchor="middle" class="n">Align</text>
+<text x="550" y="555" text-anchor="middle" class="s">what must be accounted for</text>
+</g>
+<g>
+<rect x="738" y="448" width="64" height="64" rx="18" fill="#22c55e"/>
+<g transform="translate(753.36,463.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 7.8-7.5 9.5-4.3-1.7-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></g>
+<circle cx="741" cy="451" r="11" fill="#0b1020" stroke="#22c55e" stroke-width="2"/><text x="741" y="455" text-anchor="middle" class="k">5</text>
+<text x="770" y="536" text-anchor="middle" class="n">Check</text>
+<text x="770" y="555" text-anchor="middle" class="s">checks only this kind runs</text>
+</g>
+<g>
+<rect x="958" y="448" width="64" height="64" rx="18" fill="#0ea5e9"/>
+<g transform="translate(973.36,463.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12a7 7 0 1 1-2.2-5.1"/><path d="M19.5 4v4h-4"/></g>
+<circle cx="961" cy="451" r="11" fill="#0b1020" stroke="#0ea5e9" stroke-width="2"/><text x="961" y="455" text-anchor="middle" class="k">6</text>
+<text x="990" y="536" text-anchor="middle" class="n">Revise</text>
+<text x="990" y="555" text-anchor="middle" class="s">what sends it back, how often</text>
+</g>
+<g>
+<rect x="1178" y="448" width="64" height="64" rx="18" fill="#ef4444"/>
+<g transform="translate(1193.36,463.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M7 20h10M5 7h14"/><path d="M5 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/><path d="M19 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/></g>
+<circle cx="1181" cy="451" r="11" fill="#0b1020" stroke="#ef4444" stroke-width="2"/><text x="1181" y="455" text-anchor="middle" class="k">7</text>
+<text x="1210" y="536" text-anchor="middle" class="n">Keep</text>
+<text x="1210" y="555" text-anchor="middle" class="s">how the best pass is chosen</text>
+</g>
+<g>
+<rect x="1358" y="448" width="64" height="64" rx="18" fill="#a855f7"/>
+<g transform="translate(1373.36,463.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h12v17l-2.4-1.6-2.4 1.6-2.4-1.6-2.4 1.6L6 20.5z"/><path d="M9 8.5h6M9 12h6M9 15.5h3.5"/></g>
+<circle cx="1361" cy="451" r="11" fill="#0b1020" stroke="#a855f7" stroke-width="2"/><text x="1361" y="455" text-anchor="middle" class="k">8</text>
+<text x="1390" y="536" text-anchor="middle" class="n">Record</text>
+<text x="1390" y="555" text-anchor="middle" class="s">the skill, and why</text>
+</g>
+<text x="40" y="626" class="n" text-anchor="start">General</text>
+<text x="40" y="646" class="s" text-anchor="start">all other kinds, or a hold</text>
+<rect x="226" y="596" width="208" height="68" rx="12" fill="#111933" stroke="#64748b" stroke-width="1.2"/>
+<text x="330" y="625" text-anchor="middle" class="t">The brief and base skill</text>
+<text x="330" y="644" text-anchor="middle" class="s">nothing added</text>
+<rect x="446" y="596" width="208" height="68" rx="12" fill="#111933" stroke="#64748b" stroke-width="1.2"/>
+<text x="550" y="625" text-anchor="middle" class="t">Every content word</text>
+<text x="550" y="644" text-anchor="middle" class="s">has an English owner</text>
+<rect x="666" y="596" width="208" height="68" rx="12" fill="#111933" stroke="#64748b" stroke-width="1.2"/>
+<text x="770" y="625" text-anchor="middle" class="t">The general checks</text>
+<text x="770" y="644" text-anchor="middle" class="s">on every verse</text>
+<rect x="886" y="596" width="208" height="68" rx="12" fill="#111933" stroke="#64748b" stroke-width="1.2"/>
+<text x="990" y="625" text-anchor="middle" class="t">Up to two rounds</text>
+<text x="990" y="644" text-anchor="middle" class="s">told what failed</text>
+<rect x="1106" y="596" width="208" height="68" rx="12" fill="#111933" stroke="#64748b" stroke-width="1.2"/>
+<text x="1210" y="625" text-anchor="middle" class="t">Fewest failing checks</text>
+<text x="1210" y="644" text-anchor="middle" class="s">the first draft wins a tie</text>
+<text x="40" y="710" class="n" text-anchor="start">Records</text>
+<text x="40" y="730" class="s" text-anchor="start">genealogies and lists</text>
+<rect x="226" y="680" width="208" height="68" rx="12" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="330" y="709" text-anchor="middle" class="t">Names, relations, counts</text>
+<text x="330" y="728" text-anchor="middle" class="s">no harmonizing of lists</text>
+<rect x="446" y="680" width="208" height="68" rx="12" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="550" y="709" text-anchor="middle" class="t">Each name and number</text>
+<text x="550" y="728" text-anchor="middle" class="s">to its own source word</text>
+<rect x="666" y="680" width="208" height="68" rx="12" fill="#111933" stroke="#22c55e" stroke-width="2"/>
+<text x="770" y="709" text-anchor="middle" class="t">Relation direction</text>
+<text x="770" y="728" text-anchor="middle" class="s">caught 33 of 37 planted</text>
+<rect x="886" y="680" width="208" height="68" rx="12" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="990" y="709" text-anchor="middle" class="t">Two rounds</text>
+<text x="990" y="728" text-anchor="middle" class="s">a turned relation goes back</text>
+<rect x="1106" y="680" width="208" height="68" rx="12" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="1210" y="709" text-anchor="middle" class="t">The relation check</text>
+<text x="1210" y="728" text-anchor="middle" class="s">counts in the choice</text>
+<text x="40" y="794" class="n" text-anchor="start">Law</text>
+<text x="40" y="814" class="s" text-anchor="start">law and procedure</text>
+<rect x="226" y="764" width="208" height="68" rx="12" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="330" y="793" text-anchor="middle" class="t">Conditions, parties,</text>
+<text x="330" y="812" text-anchor="middle" class="s">consequences, order</text>
+<rect x="446" y="764" width="208" height="68" rx="12" fill="#111933" stroke="#f59e0b" stroke-width="2"/>
+<text x="550" y="793" text-anchor="middle" class="t">Each "if" and "unless"</text>
+<text x="550" y="812" text-anchor="middle" class="s">to its English</text>
+<rect x="666" y="764" width="208" height="68" rx="12" fill="#111933" stroke="#22c55e" stroke-width="2"/>
+<text x="770" y="793" text-anchor="middle" class="t">Legal condition</text>
+<text x="770" y="812" text-anchor="middle" class="s">caught 26 of 27 planted</text>
+<rect x="886" y="764" width="208" height="68" rx="12" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="990" y="793" text-anchor="middle" class="t">Two rounds</text>
+<text x="990" y="812" text-anchor="middle" class="s">a lost condition goes back</text>
+<rect x="1106" y="764" width="208" height="68" rx="12" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="1210" y="793" text-anchor="middle" class="t">The condition check</text>
+<text x="1210" y="812" text-anchor="middle" class="s">counts in the choice</text>
+<text x="40" y="878" class="n" text-anchor="start">Poetry</text>
+<text x="40" y="898" class="s" text-anchor="start">songs, prayers</text>
+<rect x="226" y="848" width="208" height="68" rx="12" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="330" y="877" text-anchor="middle" class="t">Lines, images,</text>
+<text x="330" y="896" text-anchor="middle" class="s">movement left unresolved</text>
+<rect x="446" y="848" width="208" height="68" rx="12" fill="#111933" stroke="#f59e0b" stroke-width="2"/>
+<text x="550" y="877" text-anchor="middle" class="t">Line by line</text>
+<text x="550" y="896" text-anchor="middle" class="s">no second line folded away</text>
+<rect x="666" y="848" width="208" height="68" rx="12" fill="#111933" stroke="#f59e0b" stroke-width="2"/>
+<text x="770" y="877" text-anchor="middle" class="t">No check of its own yet</text>
+<text x="770" y="896" text-anchor="middle" class="s">a line check is proposed</text>
+<rect x="886" y="848" width="208" height="68" rx="12" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="990" y="877" text-anchor="middle" class="t">One round only</text>
+<text x="990" y="896" text-anchor="middle" class="s">revision flattens lines</text>
+<rect x="1106" y="848" width="208" height="68" rx="12" fill="#111933" stroke="#64748b" stroke-width="1.2"/>
+<text x="1210" y="887" text-anchor="middle" class="t">As the general plan</text>
+<text x="40" y="962" class="n" text-anchor="start">Argument</text>
+<text x="40" y="982" class="s" text-anchor="start">reasoning, exhortation</text>
+<rect x="226" y="932" width="208" height="68" rx="12" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="330" y="961" text-anchor="middle" class="t">Connectors, dependence,</text>
+<text x="330" y="980" text-anchor="middle" class="s">whose voice it is</text>
+<rect x="446" y="932" width="208" height="68" rx="12" fill="#111933" stroke="#f59e0b" stroke-width="2"/>
+<text x="550" y="961" text-anchor="middle" class="t">Each connector</text>
+<text x="550" y="980" text-anchor="middle" class="s">to its English</text>
+<rect x="666" y="932" width="208" height="68" rx="12" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="770" y="961" text-anchor="middle" class="t">Connector and</text>
+<text x="770" y="980" text-anchor="middle" class="s">question checks</text>
+<rect x="886" y="932" width="208" height="68" rx="12" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="990" y="961" text-anchor="middle" class="t">Two rounds</text>
+<text x="990" y="980" text-anchor="middle" class="s">those checks send it back</text>
+<rect x="1106" y="932" width="208" height="68" rx="12" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="1210" y="961" text-anchor="middle" class="t">Those checks</text>
+<text x="1210" y="980" text-anchor="middle" class="s">count in the choice</text>
+<text x="40" y="578" class="b" text-anchor="start">WHAT EACH SKILL CHANGES</text>
+<rect x="40" y="1035" width="22" height="14" rx="4" fill="#111933" stroke="#64748b" stroke-width="2"/><text x="72" y="1047" class="s" text-anchor="start">as today, for every passage</text>
+<rect x="290" y="1035" width="22" height="14" rx="4" fill="#111933" stroke="#22c55e" stroke-width="2"/><text x="322" y="1047" class="s" text-anchor="start">built, and measured to catch planted errors</text>
+<rect x="630" y="1035" width="22" height="14" rx="4" fill="#111933" stroke="#3b82f6" stroke-width="2"/><text x="662" y="1047" class="s" text-anchor="start">built and tested: no gain shown yet, so it is off</text>
+<rect x="1000" y="1035" width="22" height="14" rx="4" fill="#111933" stroke="#f59e0b" stroke-width="2"/><text x="1032" y="1047" class="s" text-anchor="start">proposed, not built</text>
+<text x="40" y="1084" text-anchor="start" class="s">A wrong category must cost little: a skill adds care for one kind of text and takes away nothing the general plan requires. A hold changes nothing.</text>
+<text x="1420" y="1124" class="s" text-anchor="end">faithnet.estate/architecture</text>
+</svg>
