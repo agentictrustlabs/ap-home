@@ -1777,6 +1777,24 @@ const TEVAL_BODY = `
 <li><b>A free gate before any spend.</b> A change must first alter the wording more than two identical runs differ. If it does not, there is nothing to judge.</li>
 <li><b>Decide what was left open.</b> Five conventions of English that varied between runs are now decided in the brief, so that they stop appearing as errors.</li>
 </ul>
+<h2>In plain terms: what makes a translation good or bad</h2>
+<p>There is no single score. A verse is asked three questions, and each has its own reader.</p>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Question</th><th>Who answers</th><th>A bad answer looks like</th></tr></thead>
+<tbody>
+<tr><td><b>Is everything there, and nothing extra?</b></td><td>Code, word by word against the source</td><td>A source word with no English, an English word with no source, a "not" lost, a number or a name changed</td></tr>
+<tr><td><b>Does it mean what the source means?</b></td><td>A model from another family, reading the source and the English together</td><td>The wrong sense of a word, the wrong person doing the action, a reason turned into a result</td></tr>
+<tr><td><b>Can a reader follow it?</b></td><td>A model shown our English only</td><td>A sentence that does not finish, or one that says something no reader could make sense of</td></tr>
+</tbody>
+</table></div>
+<p>A verse is <b>bad</b> when any one of these finds a fault that holds up when checked. The faults are graded. A critical fault reverses or loses the meaning. A major fault drops, adds or mistakes a word or a clause. A minor fault is awkward English or a slightly loose word. A verse is <b>good</b> when none of the three finds anything.</p>
+<p>That is a narrower claim than it sounds, in three ways.</p>
+<ul>
+<li><b>Good means no fault was found, not that the verse was approved.</b> The first question is exact. The second is a model's judgement, and that model misses some errors and invents others, which is why a finding is verified before it counts. No scholar has read these verses.</li>
+<li><b>Most of our measuring is a comparison.</b> We rarely ask whether a verse is good. We ask whether version B is better than version A on the same verse, read blind. That is a question a model answers more steadily than "how good is this", and it is the one a change to the harness needs answered.</li>
+<li><b>Good does not mean familiar.</b> A verse is never scored by how close it is to an existing Bible, and never rewarded for being different either. Sounding like a translation people know is not evidence that it is right.</li>
+</ul>
+<p>What a reader of the edition sees is the outcome of the three questions: a verse marked <b>ready</b> has passed all of them, and a verse marked <b>open</b> says which one it has not.</p>
 `;
 
 const TEST_ALT =
