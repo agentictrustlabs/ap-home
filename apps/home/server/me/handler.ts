@@ -42,6 +42,8 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const v = await verifyAgentSession(token, { keys, expectedAud: AUD, expectedIss: (i) => i === iss || isOwnConnectOrigin(i) });
   if (!v.ok) return json({ error: `invalid AgentSession: ${v.reason}` }, 401);
   const session = v.session;
+  // An app's id_token has the same signature and shape. Only a real session names the credential behind it (spec 445 §8).
+  if (!session.principal?.kind) return json({ error: 'invalid AgentSession: not a Home session' }, 401);
   if (session.iss !== iss && !isOwnConnectOrigin(session.iss)) {
     return json({ error: 'invalid AgentSession: issuer not trusted' }, 401);
   }

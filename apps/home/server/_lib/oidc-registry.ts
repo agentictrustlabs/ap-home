@@ -158,6 +158,11 @@ export async function getRegisteredApp(env: RegistryEnv, clientId: string): Prom
 }
 
 /** Project a member registration onto the shape the OIDC gates already consume. */
+/** The audience the Home's own sessions carry. Read from the environment the way the session verifiers read it. */
+export function isHomeAudience(clientId: string): boolean {
+  return clientId === 'demo-sso' || clientId === (process.env.DEMO_SSO_AUD ?? '').trim();
+}
+
 export function toOidcClient(app: RegisteredApp): RelyingApp {
   return {
     client_id: app.client_id,
@@ -181,6 +186,8 @@ export function toOidcClient(app: RegisteredApp): RelyingApp {
 export async function resolveClient(env: RegistryEnv, clientId: string): Promise<RelyingApp | null> {
   const staticHit = getStaticClient(clientId);
   if (staticHit) return staticHit;
+  // The Home's own audience is not an app (spec 445 §8): a token issued to a client of that name would pass as a Home session.
+  if (isHomeAudience(clientId)) return null;
   const dyn = await getRegisteredApp(env, clientId);
   if (!dyn || dyn.disabled) return null;
   return toOidcClient(dyn);
@@ -370,7 +377,7 @@ export async function createApp(
   // A curated client_id is not available, even though the lookup would ignore a shadow. Letting
   // someone "register" a name that resolves to somebody else's entry produces an app that
   // appears configured and never works.
-  if (getStaticClient(normalized.client_id)) {
+  if (getStaticClient(normalized.client_id) || isHomeAudience(normalized.client_id)) {
     refuse('client_id_reserved', `"${normalized.client_id}" is reserved by this Home.`);
   }
   if (await getRegisteredApp(env, normalized.client_id)) {

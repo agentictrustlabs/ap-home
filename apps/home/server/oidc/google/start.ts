@@ -4,6 +4,7 @@
 // nonce (connect-auth), stashes them under `state` (single-use, short TTL), and
 // 302-redirects the browser to Google. The client SECRET is never used here —
 // only on the callback (token exchange).
+import { markLoginStart } from '../../_lib/recognition';
 import { beginLogin } from '@agenticprimitives/connect-auth/google';
 import { json, type FnContext } from '../../_lib/server-broker';
 
@@ -32,5 +33,5 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     { expirationTtl: 600 },
   );
 
-  return new Response(null, { status: 302, headers: { location: authUrl } });
+  return markLoginStart(new Response(null, { status: 302, headers: { location: authUrl } }), { request, env }, state);
 };

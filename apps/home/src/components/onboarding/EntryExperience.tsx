@@ -18,6 +18,7 @@ import { appRequestOf, rememberAppRequest } from '../../lib/app-request';
 import { EmailAuthCard } from '../portal/EmailAuthCard';
 import { PhoneAuthCard } from '../portal/PhoneAuthCard';
 import { readSsoCookie } from '../../lib/sso-cookie';
+import { askRemembered } from './remembered';
 import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName, parseAgentSubdomain } from '../../lib/domain';
 
 const googleEnabled = whitelabel.onboarding.credentialMethods.includes('google');
@@ -258,13 +259,20 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       setView({ k: 'blocked' });
       return;
     }
-    // OIDC prompt=none — SILENT SSO (spec 230): the relying app asked for a no-UI outcome, so never
-    // render the connect experience. No home session (no ap_sso cookie) → `login_required` (the app
-    // clears its silent-SSO hint and shows its own Connect button). A recognized session → still
-    // `interaction_required`: a silent grant here would mint a delegation without a consent gesture,
-    // and this broker keeps no per-client remembered-consent store (yet) to justify skipping it.
+    // OIDC prompt=none — SILENT SSO (spec 230): the relying app asked for a no-UI outcome, so never render the connect
+    // experience. A code comes back only for the person the app named (`login_hint`), who allowed it before, for an app
+    // asking nothing more (spec 445 §6). EVERY other case is the same `login_required`: no session, the wrong person, never
+    // allowed. An answer that differed would tell any registered app whether this visitor has a Home session at all.
     if (api.enroll.prompt === 'none') {
-      api.deliverError(readSsoCookie() ? 'interaction_required' : 'login_required');
+      const silent = api.enroll;
+      const sso = readSsoCookie();
+      if (!sso?.token) { api.deliverError('login_required'); return; }
+      void (async () => {
+        const person = (await fetchProfile(sso.token).catch(() => null))?.agent?.split(':').pop();
+        const asked = person ? await askRemembered(silent, person as Address) : null;
+        if (asked?.kind === 'code') api.deliverCode(asked.code);
+        else api.deliverError('login_required');
+      })();
       return;
     }
     void (async () => {

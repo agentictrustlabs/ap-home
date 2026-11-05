@@ -18,6 +18,7 @@ export function ConsentSheet({
   appDomain,
   appLogo,
   template,
+  newLines = [],
   busy = false,
   authorizeLabel,
   declineLabel = 'Not now',
@@ -31,6 +32,8 @@ export function ConsentSheet({
   appDomain: string;
   appLogo?: string;
   template: ConsentTemplate;
+  /** Spec 445 §5.4 — lines this app did not ask for when the person last allowed it. */
+  newLines?: string[];
   busy?: boolean;
   authorizeLabel: string;
   declineLabel?: string;
@@ -77,7 +80,7 @@ export function ConsentSheet({
           <p className="consent-group">This app can</p>
           <ul className="consent-list can" aria-label="What this app can do">
             {template.canDo.map((c) => (
-              <li key={c}><span className="consent-icon ok" aria-hidden="true"><CheckIcon size={14} /></span>{c}</li>
+              <li key={c}><span className="consent-icon ok" aria-hidden="true"><CheckIcon size={14} /></span>{c}{newLines.includes(c) && <strong> (new)</strong>}</li>
             ))}
           </ul>
         </>

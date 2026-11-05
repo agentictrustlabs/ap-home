@@ -14,6 +14,7 @@ import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { toCanonicalAgentId } from '@agenticprimitives/identity-directory-adapters';
 import type { Address, CredentialPrincipal, Hex } from '@agenticprimitives/types';
 import { getServer, json, resolveOrigin, type FnContext } from '../_lib/server-broker';
+import { withRecognition } from '../_lib/recognition';
 import { recordCredentialFacet, readCredentialFacet } from '../../src/lib/kv-indexer';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 
@@ -95,5 +96,5 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     signer,
   );
   await recordCredentialFacet(env.AUTH_CODES, principal, sub);
-  return json({ status: 'issued', token, agent: sa });
+  return withRecognition(json({ status: 'issued', token, agent: sa }), { request, env }, { sub, principal, assurance: 'onchain-confirmed', ttlSeconds: 3600 });
 };

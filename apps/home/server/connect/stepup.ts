@@ -14,6 +14,7 @@ import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { addressOf } from '@agenticprimitives/identity-directory-adapters';
 import type { CredentialPrincipal, Hex } from '@agenticprimitives/types';
 import { getServer, json, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
+import { withRecognition } from '../_lib/recognition';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -86,5 +87,5 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     { sub: agentId, principal, assurance: 'onchain-confirmed', aud: body.aud, iss, ttlSeconds: 3600 },
     signer,
   );
-  return json({ status: 'issued', token });
+  return withRecognition(json({ status: 'issued', token }), { request, env }, { sub: agentId, principal, assurance: 'onchain-confirmed', ttlSeconds: 3600 });
 };

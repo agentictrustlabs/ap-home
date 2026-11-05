@@ -184,6 +184,10 @@ async function verifyHomeSession(env: FnContext['env'], request: Request): Promi
   }
   if (!v.ok) return { ok: false, reason: `session_verify_failed:${v.reason ?? 'unknown'}` };
   const session = v.session;
+  // AN ID_TOKEN IS NOT A HOME SESSION. The verifier checks signature, issuer, audience and time, and an id_token passes
+  // all four, and the retry above takes whatever audience the token names. So an app holding a person's id_token could
+  // present it here as `ap_sso` and be handed a token for ANOTHER app. Only a real session names the credential behind it.
+  if (!session.principal?.kind) return { ok: false, reason: 'session_verify_failed:not_a_home_session' };
   let name: string | null = null;
   try {
     const view = await directory.agent(session.sub);

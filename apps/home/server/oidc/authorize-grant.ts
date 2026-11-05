@@ -29,10 +29,11 @@ import { clientAllowsRedirect, clientAllowsTemplate, getClientDelegateFor } from
 import { resolveClient, isAllowedRelyingOriginAsync } from '../_lib/oidc-registry';
 import { sharesProfileName } from '../../src/lib/new-member';
 import { sharesEmailClaim } from '../../src/whitelabel/provisioning';
+import type { RelyingApp } from '../../src/whitelabel/schema';
 
 const GRANT_TTL_SEC = 600; // 10 min — covers ceremony + one retry
 
-interface AuthorizeGrantBody {
+export interface GrantRequestBody {
   client_id?: string;
   redirect_uri?: string;
   agent_name?: string;
@@ -64,32 +65,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return json({ error: 'authorize-grant must be called from the home origin' }, 403);
   }
 
-  const body = (await request.json().catch(() => null)) as AuthorizeGrantBody | null;
-  // spec 257 §11: `agent_name` is OPTIONAL (name-deferred Google connect). Every OTHER field —
-  // client_id, redirect_uri, code_challenge, delegation_template — stays REQUIRED, and the
-  // registry/redirect/template/origin checks below are unchanged (only the NAME became optional).
-  if (!body?.client_id || !body.redirect_uri || !body.code_challenge || !body.delegation_template) {
-    return json({ error: 'client_id + redirect_uri + code_challenge + delegation_template required' }, 400);
-  }
-  if (body.code_challenge_method && body.code_challenge_method !== 'S256') {
-    return json({ error: 'code_challenge_method must be S256' }, 400);
-  }
-
-  // Client registry — exact redirect + allowed template (CN-1, spec 230 §6).
-  const client = await resolveClient(env, body.client_id);
-  if (!client) return json({ error: `unknown client_id "${body.client_id}"` }, 400);
-  if (!clientAllowsRedirect(client, body.redirect_uri)) {
-    return json({ error: 'redirect_uri not allowed for client' }, 400);
-  }
-  if (!clientAllowsTemplate(client, body.delegation_template)) {
-    return json({ error: `delegation_template "${body.delegation_template}" not allowed` }, 400);
-  }
-  // SEC-005: defense in depth — the redirect_uri's origin must ALSO be in the global
-  // relying-origins allowlist (which is derived from this same registry, so this is a
-  // sanity check; failure means the registry itself is misconfigured).
-  if (!(await isAllowedRelyingOriginAsync(env, body.redirect_uri))) {
-    return json({ error: 'redirect_uri origin not in allowlist' }, 400);
-  }
+  const body = (await request.json().catch(() => null)) as GrantRequestBody | null;
+  const valid = await validateGrantRequest(env, body);
+  if (!valid.ok) return valid.response;
+  const { client } = valid;
+  const req = body as GrantRequestBody & { client_id: string; redirect_uri: string; code_challenge: string; delegation_template: string };
 
   // Mint the grant. Same code shape as the existing single-use auth codes.
   const { signer } = await getServer(env); // touch to require BROKER_PRIVATE_JWK upfront
@@ -99,33 +79,59 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   await env.AUTH_CODES.put(
     `oidc-grant:${grant_id}`,
     JSON.stringify({
-      client_id: body.client_id,
-      redirect_uri: body.redirect_uri,
-      agent_name: body.agent_name ?? '',
+      client_id: req.client_id,
+      redirect_uri: req.redirect_uri,
+      agent_name: req.agent_name ?? '',
       // spec: `profile` scope. The gate is the CURATED registry entry, not a `scope=` request
       // parameter: request scopes are attacker-supplied and this broker parses none today, so
       // deriving permission from one would let any origin that can form a URL ask for a member's
       // name. Same rule as the app's name and logo at consent — registry, never the URL.
-      profile_name: sharesProfileName(client) ? (body.profile_name ?? '').trim().slice(0, 80) : '',
+      profile_name: sharesProfileName(client) ? (req.profile_name ?? '').trim().slice(0, 80) : '',
       // Same rule for the member's email, gated on the registry's `idTokenClaims` rather than a
       // requested scope, and for the same reason: a request parameter is attacker-supplied, so
       // deriving permission from one would let any origin that can form a URL ask for a contact
       // address. 254 is the practical ceiling on an address.
-      profile_email: sharesEmailClaim(client) ? (body.profile_email ?? '').trim().toLowerCase().slice(0, 254) : '',
+      profile_email: sharesEmailClaim(client) ? (req.profile_email ?? '').trim().toLowerCase().slice(0, 254) : '',
       // SEC-001 anti-spoof: the delegate this grant binds to is taken FROM THE REGISTRY,
       // not from the request. The SPA reads this back in the response and uses it when
       // constructing the delegation; /oidc/grant verifies the supplied delegation's
       // delegate equals this stored value.
-      delegate: getClientDelegateFor(client, body.delegation_template),
-      code_challenge: body.code_challenge,
-      nonce: body.nonce ?? '',
-      delegation_template: body.delegation_template,
+      delegate: getClientDelegateFor(client, req.delegation_template),
+      code_challenge: req.code_challenge,
+      nonce: req.nonce ?? '',
+      delegation_template: req.delegation_template,
       exp_ms,
     }),
     { expirationTtl: GRANT_TTL_SEC },
   );
-  return json({ grant_id, delegate: getClientDelegateFor(client, body.delegation_template), expires_in: GRANT_TTL_SEC });
+  return json({ grant_id, delegate: getClientDelegateFor(client, req.delegation_template), expires_in: GRANT_TTL_SEC });
 };
+
+/** The registry gate for a sign-in request, shared by /oidc/authorize-grant and /oidc/remembered (spec 445 §5.2 check 2):
+ *  one request, judged one way, whichever door it comes to. */
+export async function validateGrantRequest(
+  env: FnContext['env'],
+  body: GrantRequestBody | null,
+): Promise<{ ok: true; client: RelyingApp } | { ok: false; response: Response }> {
+  const refuse = (error: string): { ok: false; response: Response } => ({ ok: false, response: json({ error }, 400) });
+  // spec 257 §11: `agent_name` is OPTIONAL (name-deferred Google connect). Every OTHER field —
+  // client_id, redirect_uri, code_challenge, delegation_template — stays REQUIRED, and the
+  // registry/redirect/template/origin checks below are unchanged (only the NAME became optional).
+  if (!body?.client_id || !body.redirect_uri || !body.code_challenge || !body.delegation_template) {
+    return refuse('client_id + redirect_uri + code_challenge + delegation_template required');
+  }
+  if (body.code_challenge_method && body.code_challenge_method !== 'S256') return refuse('code_challenge_method must be S256');
+  // Client registry — exact redirect + allowed template (CN-1, spec 230 §6).
+  const client = await resolveClient(env, body.client_id);
+  if (!client) return refuse(`unknown client_id "${body.client_id}"`);
+  if (!clientAllowsRedirect(client, body.redirect_uri)) return refuse('redirect_uri not allowed for client');
+  if (!clientAllowsTemplate(client, body.delegation_template)) return refuse(`delegation_template "${body.delegation_template}" not allowed`);
+  // SEC-005: defense in depth — the redirect_uri's origin must ALSO be in the global
+  // relying-origins allowlist (which is derived from this same registry, so this is a
+  // sanity check; failure means the registry itself is misconfigured).
+  if (!(await isAllowedRelyingOriginAsync(env, body.redirect_uri))) return refuse('redirect_uri origin not in allowlist');
+  return { ok: true, client };
+}
 
 function generateGrantId(): string {
   const bytes = new Uint8Array(24);

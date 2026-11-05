@@ -1,15 +1,34 @@
 // Spec 397 W4 — the apps a person authorized with THEIR OWN wire (the Home MCP's ask-as-me), read from the Home and
 // revoked on chain from here. The chain is the record; the Home keeps a pointer so the row can be shown.
 import type { DelegationWire } from './delegation';
+import type { ConsentTermsV1 } from './consent-terms';
 
 /** Spec 397 §11 — one standing wire of an act-as-me set, as the Home lists it. */
 export interface AppGrantWire { v: 1; template: string; capability: string; wire: DelegationWire; ref: `0x${string}`; requirement: { type: string; actions: string[]; validUntil: number; limits?: Record<string, unknown> }; validUntil: number | null }
-export interface AppGrant { clientId: string; appName: string; template: string; delegate: string; delegation: DelegationWire; issuedAt: number; validUntil: number | null; /** Spec 397 §11 — present on an act-as-me row. */ wires?: AppGrantWire[] }
+export interface AppGrant { clientId: string; appName: string; template: string; delegate: string; delegation: DelegationWire; issuedAt: number; validUntil: number | null; /** Spec 445 §4 — what the Allow agreed to; absent on a row with no remembered consent. */ terms?: ConsentTermsV1; lastUsedAt?: number; askEveryTime?: true; ref?: string | null; askDelegation?: DelegationWire; selfVaultGrant?: DelegationWire; ask?: { ref: string | null; validUntil: number | null }; vault?: { ref: string | null; validUntil: number | null }; /** Older wires for this app, still live on chain until their own expiry. */ superseded?: Array<{ ref: string; kind: 'site' | 'ask' | 'vault'; validUntil: number | null; wire: DelegationWire }>; /** Spec 397 §11 — present on an act-as-me row. */ wires?: AppGrantWire[] }
 
 export async function listAppGrants(token: string): Promise<AppGrant[]> {
   const r = await fetch('/connect/app-grants', { headers: { authorization: `Bearer ${token}` } });
   const b = (await r.json().catch(() => ({}))) as { grants?: AppGrant[] };
   return b.grants ?? [];
+}
+
+const post = (token: string, body: Record<string, unknown>) =>
+  fetch('/connect/app-grants', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+
+/** Spec 445 §7 — the next sign-in shows the sheet. The row and its wires stay, so they can still be revoked. */
+export const forgetAppConsent = (token: string, clientId: string) => post(token, { clientId, forget: true });
+export const setAskEveryTime = (token: string, clientId: string, askEveryTime: boolean) => post(token, { clientId, askEveryTime });
+/** After revoking one wire of a row on chain. */
+export const forgetAppPart = (token: string, clientId: string, part: 'ask' | 'vault') => post(token, { clientId, part, revoked: true });
+export const forgetSupersededWire = (token: string, clientId: string, supersededRef: string) => post(token, { clientId, supersededRef, revoked: true });
+
+export interface RememberedSignIn { clientId: string; at: string; auditRef: string }
+/** Spec 445 §7 — each sign-in that passed with no sheet and no new permission. */
+export async function listRememberedSignIns(token: string): Promise<RememberedSignIn[]> {
+  const r = await fetch('/connect/app-grants', { headers: { authorization: `Bearer ${token}` } });
+  const b = (await r.json().catch(() => ({}))) as { rememberedSignIns?: RememberedSignIn[] };
+  return b.rememberedSignIns ?? [];
 }
 
 export async function forgetAppGrant(token: string, clientId: string): Promise<void> {
