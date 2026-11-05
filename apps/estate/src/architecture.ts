@@ -922,7 +922,248 @@ const SIGNIN_BODY = `
 <li><a href="#next-design">The next design</a> does all of this, with what a second review added.</li>
 </ul>`;
 
+// ───────────────────────────────────────────────────────────────── the translation harness
+
+const TRANSLATION_ALT =
+  'A flow diagram in two rows. Five things are built before any draft and feed the run from above: the frozen source, the knowledge base, ' +
+  'the story and meaning of each book, the brief and skills, and the ontology. The first row is one passage: the Bible is cut into passages, ' +
+  'and for each one the agent reads only the source, admits what it may use, a model drafts words and an alignment, code aligns and checks every verse, ' +
+  'a model revises up to twice if a check fails, the best pass is kept, and it is proposed to the translation store. The second row is the whole edition: ' +
+  'the published edition and the proposals are assembled verse by verse, with a reader model. Another model family audits the result, and a confirmed defect ' +
+  'goes back to be drafted again. The edition is then published under a signed root, with a defended change row for every changed verse, and reaches the reader as a signed corpus.';
+
+const TR_RUNTIME = 'The translation runtime (<code>apps/translation-runtime</code>), a Cloudflare Worker at <code>translation.faithnet.io</code>. The same code also runs on a local machine, which is where RBS v4.0 was drafted.';
+const TR_MCP = 'The translation store and checker (<code>apps/translation-mcp</code>), an internal Worker over D1, reached only through the runtime.';
+
+const TRANSLATION_STEPS: Step[] = [
+  {
+    id: 'cut', name: 'Cut', color: '#8b5cf6', at: [188, 410],
+    summary: 'A book becomes chapters, and chapters become passages a model can hold.',
+    why: 'A verse alone has lost its sentence, and a whole book is too much for one call. A passage is the unit where a pronoun can still find its person. Cutting at a fixed count of verses split poems across their stanzas, so the cut follows the text.',
+    what: [
+      'A driver walks the books in order and cuts each chapter into passages, using the section headings and acrostic marks of the source tables for their positions only, never their wording. A passage longer than 14 verses is split at a paragraph opening. The last whole-Bible cut made 3,817 passages.',
+      'Each passage becomes one request to the runtime, as if someone had asked for it: "Translate Jonah 1:1-6 from the Hebrew into American English."',
+      'A ledger records every passage, so a stopped run resumes where it stopped, and a passage that failed is recorded and passed over.',
+    ],
+    where: ['The driver, <code>scripts/translate-bible.mts</code>, on the operator\'s machine.', 'The cut itself: <code>scripts/build-pericopes.mts</code>, written to <code>source/pericopes.json</code>.'],
+    by: 'Code only. No model is called.',
+    reads: ['The list of books and chapters.', 'The passage boundaries.', 'The ledger of what has already run.'],
+    leaves: ['One line per passage in the ledger: cost, what still blocks, and the run it made.'],
+    stops: ['A spending cap ends the run (<code>--max-usd</code>).', 'A failed passage is recorded and the run goes on; it is not retried until asked.'],
+  },
+  {
+    id: 'read', name: 'Read', color: '#3b82f6', at: [304, 410],
+    summary: 'The source and what is known about it. Never an English Bible.',
+    why: 'A model has read every English Bible. If it sees one, or even sees a verse\'s reference, it recites. This step decides what the drafter is shown, and nothing here is another translation\'s wording. Drifting toward an existing Bible is the failure this design is built to avoid.',
+    what: [
+      'Tools fetch the frozen tokens of the passage (the word, its parsing, its Strong\'s number), the dictionary sense of each word, and the decided rendering of every name through the knowledge base, so that a person\'s name follows the person and not the spelling.',
+      'The verses are relabelled <code>v1</code>, <code>v2</code> and so on, so the book and chapter are not there to prompt a memory.',
+      'Where the book has a story built, the drafter also gets the scene: who is on stage, who is speaking to whom, and which person each pronoun means, along with what the scene does and leaves open.',
+      'Reference editions such as the WEB are held by the store for grading only, and the tool that serves them is marked as evaluation only. A test asserts their wording never reaches the drafter\'s prompt.',
+    ],
+    where: [TR_RUNTIME, TR_MCP, 'Source: <code>translate-plan.ts</code> in <code>packages/translation-orchestration</code>.'],
+    by: 'Code only. These are tool calls.',
+    reads: ['The frozen source tokens and the lexicon.', 'The knowledge base of people, places and concepts.', 'The story of the book.'],
+    leaves: ['Each result, as a step on the run record.'],
+    stops: ['A missing optional layer is skipped, and the record shows it was absent.', 'A request outside this agent\'s work is declined: "Translate X into Irish" is declined by code, because the agent\'s Irish English is not Gaeilge.'],
+  },
+  {
+    id: 'admit', name: 'Admit', color: '#14b8a6', at: [420, 410],
+    summary: 'Each piece of evidence is judged before a drafter may read it.',
+    why: 'Some of what the agent holds was written by a model and has never been reviewed. Letting that shape a translation silently would launder a guess into Scripture. The drafter therefore reads evidence only through a receipt that says what each piece is.',
+    what: [
+      'The plan declares each evidence step: where it came from, whether anyone reviewed it, and what it was built from. Code judges each one for the purpose of drafting and writes a receipt.',
+      'The drafter, the reviser and the critic all read through that receipt, so a piece that is withheld is withheld everywhere.',
+      'Today this runs in <code>record</code> mode: every piece passes, and the receipt says what would have been withheld. An <code>enforce</code> mode withholds it.',
+    ],
+    where: [TR_RUNTIME, 'Source: <code>evidence-policy.ts</code> and <code>local.admit_evidence</code> in <code>packages/translation-orchestration</code>.'],
+    by: 'Code only. No model is called.',
+    reads: ['The output of every evidence step.', 'What the plan declares about each.'],
+    leaves: ['An admission receipt with a digest, carried on the proposal.'],
+    stops: ['In <code>enforce</code> mode, a rejected piece does not reach the drafter. The run continues without it.'],
+  },
+  {
+    id: 'draft', name: 'Draft', color: '#f59e0b', at: [560, 410],
+    summary: 'A model writes each verse and says which words render which token.',
+    why: 'Words alone cannot be checked against a source by code. Asking the drafter to account for every token as it writes is what makes the next steps possible, because every word of English now has to point at something in the Hebrew or Greek.',
+    what: [
+      'One model call, on Claude Haiku 5.5, under the brief for American English. It answers with one entry per verse: the text, and one string that maps tokens to English (<code>1=In the beginning; 2-3=God created</code>).',
+      'If it stops after the first verse or two, which happened on about 7% of the passages of RBS v4.0, it is now asked once more before any check reads the draft. A verse still missing is put back empty, so the checks block on it and it cannot pass by being absent.',
+      'The drafter, the reviser and an optional critic are separate roles, and each can be a different model. Every run names the models it used.',
+    ],
+    where: [TR_RUNTIME, 'Source: <code>translate-plan.ts</code>, under the published skill <code>skill:bible-translation/translate-from-source</code>.'],
+    by: 'A model. Claude Haiku 5.5, about a cent per passage or less.',
+    reads: ['What was admitted.', 'The brief.', 'The verses under blind labels.'],
+    leaves: ['The draft and its model, tokens and cost on the record.'],
+    stops: ['A malformed answer is refused by name.', 'A model that fails fails the run, recorded as an environment failure on that run and not as a fault of the agent.'],
+  },
+  {
+    id: 'align', name: 'Align', color: '#eab308', at: [676, 410],
+    summary: 'Code tidies the bookkeeping, and never touches the text.',
+    why: 'A drafter often renders a word and forgets to say so, or numbers it against its neighbour. If that went to the checks, a revision would be spent on bookkeeping, and revisions are where errors come from. So code settles what it can first.',
+    what: [
+      'The labels are mapped back to real verse references.',
+      'A token the draft left unaligned, whose English is already in the verse, gets that alignment: a decided name, a word of its dictionary sense, or a rendering our own edition has already used. An entry that names the wrong token by number is moved to the token its own word echoes.',
+      'The text is never changed, so this step cannot make a translation worse. Every repair is recorded as the checker\'s and not the model\'s.',
+    ],
+    where: [TR_MCP, 'Source: <code>repairAlignments</code> in <code>apps/translation-mcp/src/source.ts</code>.'],
+    by: 'Code only. No model is called.',
+    reads: ['The draft.', 'The source tokens, the lexicon and the knowledge base.'],
+    leaves: ['The repaired alignments, each marked with how it was found.'],
+    stops: ['This step is optional. If it fails, the draft goes on as written.'],
+  },
+  {
+    id: 'check', name: 'Check', color: '#22c55e', at: [792, 410],
+    summary: 'Every verse is held to its source by code, on every arm alike.',
+    why: 'What can be decided by code should never be left to a model. A number, a name, a dropped "not" or a word with nothing behind it are facts about the text, and a code check gives the same answer every time.',
+    what: [
+      '<b>Against the source:</b> every token is accounted for, every English word traces to a token, negatives are carried, numbers compose to the right value, and names and divine names read as decided.',
+      '<b>Against the knowledge base:</b> a theological concept keeps its rendering, so faith does not become "trust" because a model wanted variety.',
+      '<b>Against the story:</b> speech is quoted and narration is not, a pronoun agrees with the person it means, and a question stays a question.',
+      '<b>Against English:</b> a verse must end where a sentence ends. This check was added after an audit found the revision loop tacking on words.',
+      'Likeness to an existing Bible is measured and reported, and is never a fault and never a reason to prefer a wording. An edition that merely differs is not better.',
+      'The checker is itself tested: errors are planted in a floor text, and the suite counts how many it catches (781 of 839 today). A change to a rule is measured against this before it is kept.',
+    ],
+    where: [TR_MCP, 'Source: <code>runTranslationChecks</code> in <code>source.ts</code>, with <code>story-checks.ts</code>, <code>meaning-checks.ts</code> and <code>integrity-checks.ts</code>. Word lists and spelling rules are generated from the ontology.'],
+    by: 'Code only. No model is called.',
+    reads: ['The draft and its alignments.', 'The frozen source, the knowledge base, the story and the crux register.'],
+    leaves: ['A result per verse and check: pass, fail or cannot tell, with its severity and the checker\'s version.'],
+    stops: ['A blocking or major failure that a revision could fix sends the draft to Revise.', 'A check that cannot decide says so. It does not pass.'],
+  },
+  {
+    id: 'revise', name: 'Revise', color: '#0ea5e9', at: [908, 410],
+    summary: 'Up to two rounds, told exactly what failed. The riskiest step.',
+    why: 'A failed check names something real often enough to be worth answering. But this is where the worst errors in RBS v4.0 came from, so it is treated with suspicion and nothing it produces is trusted just because the checks now pass.',
+    what: [
+      'The model sees its own draft beside the checks that failed and the instruction to fix what each names and keep what passed. Its revision goes back through Align and Check.',
+      'The measured danger: told "dropped content tokens", the reviser would add a few words after a finished sentence so the token had something to point at. Every check then passed. Confirmed errors per 1,000 verses: 1.4 as first drafted, 3.9 when rewritten, and 55.6 when words were tacked on.',
+      'That shape is now refused by a blocking check and named in the instructions. Removing false alarms from the checks is also part of the fix, because every false alarm is a revision that did not need to happen.',
+    ],
+    where: [TR_RUNTIME, 'Source: the revise loop in <code>translate-plan.ts</code>.'],
+    by: 'A model. Claude Haiku 5.5 in RBS v4.0.',
+    reads: ['Its draft.', 'The failing checks, under blind labels.', 'The same evidence as the draft, from the prompt cache.'],
+    leaves: ['Each round, with its own checks, on the record.'],
+    stops: ['This step is skipped when nothing fails that a revision could fix.', 'It stops after its rounds, whatever still fails.'],
+  },
+  {
+    id: 'keep', name: 'Keep', color: '#ef4444', at: [1024, 410],
+    summary: 'The pass with the fewest failures wins, then stricter checks read it.',
+    why: 'A later revision is not always a better one. Comparing every pass under the same rules means a revision that made things worse is thrown away. Stricter rules then apply once, because a word no token accounts for may be worth a revision but must not be proposed as clean.',
+    what: [
+      'The draft and each revision are compared by their strict failures, and the best is kept.',
+      'The kept pass is checked once more with the strict rules, under which a word no token accounts for blocks. Matthew 10:4 was once proposed with "Judas the son of James", which belongs to Luke\'s list, and this is the check that stops it.',
+      'Still to come: the comparison is per passage, so a good verse can be lost with a bad passage. A per-verse rule that keeps a verse\'s earlier wording unless its revision improved it is the next thing being tested.',
+    ],
+    where: [TR_RUNTIME, TR_MCP, 'Source: <code>local.best_pass</code> in <code>packages/translation-orchestration</code>.'],
+    by: 'Code only. No model is called.',
+    reads: ['Every pass and its checks.'],
+    leaves: ['The kept draft and the strict checks over it.'],
+    stops: ['Failures that remain are not hidden. They go with the proposal, and the verse says so.'],
+  },
+  {
+    id: 'propose', name: 'Propose', color: '#a855f7', at: [1164, 410],
+    summary: 'A proposal with its evidence. Only a person could ever approve it.',
+    why: 'A model\'s output is a proposal and stays one. Recording it with everything behind it means a later reader, or a later release, can ask why any verse reads as it does.',
+    what: [
+      'The translation is written to the store with a decision record, its checks, its admission receipt and a commitment over its content.',
+      'Its status is decided by code: <code>checked</code> when nothing blocks, <code>draft</code> otherwise, and <code>model-reviewed</code> if a second model family also accepted it. <code>approved</code> takes a person, and no verse of RBS has it.',
+      'The driver keeps the whole run record, every step with its inputs and cost, outside any repository.',
+    ],
+    where: [TR_MCP, 'The run records: the operator\'s eval store.'],
+    by: 'Code only. No model is called.',
+    reads: ['The kept draft, its checks and the receipt.'],
+    leaves: ['A proposal in the translation store.', 'A full run record, in the shape of a provenance graph.'],
+    stops: ['A proposal for an edition the store does not have is refused.'],
+  },
+  {
+    id: 'assemble', name: 'Assemble', color: '#6366f1', at: [420, 700],
+    summary: 'A new edition changes a verse only where it is better on the evidence.',
+    why: 'A new draft is not an improvement just because it is new, and every changed verse is something a reader who knew the last edition must be able to trust. So a release starts from the published edition and takes as little as it can.',
+    what: [
+      'For each verse, the published wording and the new draft are scored under one checker and one reader. The draft replaces it only when nothing blocks, the score is lower, and it is no less clear. Ties keep what was published.',
+      'A reader model is shown only our English, never the source or another Bible, and says who does what to whom. It keeps Job 36:33 from reading as passed when it is not a sentence.',
+      'Each verse gets three tiers, with no single "passed": <b>accounted</b> (every source word is there), <b>coherent</b> (a reader can follow it) and <b>disclosed</b> (a hard verse has its note, a lost text its gap). A verse is ready only with all three.',
+      'A register of known difficulties says what each hard verse owes the reader, and a model writes those notes under code checks: no five-word run of any held English Bible, and no source later than the book.',
+    ],
+    where: ['Scripts on the operator\'s machine: <code>assemble-v4-release.py</code>, <code>assemble-patch-release.py</code>, <code>edition-tiers.py</code>, <code>coherence-scan.py</code> and <code>build-reader-notes.py</code>.'],
+    by: 'Code decides. Models read and write notes: Claude Haiku 5.5.',
+    reads: ['The published edition.', 'The proposals.', 'The crux register.'],
+    leaves: ['A release: one chosen verse per source verse, each with its tiers, note and open checks.'],
+    stops: ['A release is refused if a replaced verse reads less clearly than the one it would replace.'],
+  },
+  {
+    id: 'audit', name: 'Audit', color: '#ec4899', at: [660, 700],
+    summary: 'Another model family reads the whole Bible. Fixes pass by rule.',
+    why: 'Checks can only find what they were written to find. No person reviews this edition, so the nearest thing to a second reader is a model from another family, and that model is wrong often enough that its findings need checking too.',
+    what: [
+      'GPT-5.6 Luna reads every passage beside the source and files findings. Claude Haiku 5.5 verifies each serious one, and code separately finds verses that end in a fragment. The whole Bible cost about $21.',
+      'For each confirmed defect, the verses around it go back to Read, with the finding put to the drafter as a claim to test against the tokens, not as a fact.',
+      'A new verse replaces the published one only if: it passes the code checks with no new failure; the verifier reads the finding as gone, twice; a blind judge of the other family does not prefer the old verse in either order; and the reader finds it no less clear. Refusing a verse in which the judge notes a major error was added on 2026-11-05 and is not yet in the script: it was applied by hand to the last pass, and ten verses published before it carry such a note.',
+      'A defect not fixed stays visible: the verse is published as open, with the reason.',
+      'This step is the least settled. The verifier rejects nearly everything, so a defect list built on it is probably too short, and a verse can pass it and still be wrong. Reading 11 accepted verses against their tokens held 2 back (Job 19:13 had changed the verb\'s person).',
+    ],
+    where: ['Scripts on the operator\'s machine: <code>verify-suspects.mts</code> and <code>redraft-defects.mts</code>.', 'The list of open defects: <code>docs/bible-translation/rbs-v4-defects-spec-2026-11-04.md</code>.'],
+    by: 'Two model families, under a rule written in code.',
+    reads: ['The chosen verses and their source.', 'The findings.'],
+    leaves: ['Findings and verdicts.', 'Accepted replacements, and an open list with the reason for each refusal.'],
+    stops: ['Every paid pass has a quoted cost and a hard cap.', 'A verse that fails the rule keeps its published wording.'],
+  },
+  {
+    id: 'publish', name: 'Publish', color: '#10b981', at: [900, 700],
+    summary: 'A signed root over every verse, and every change defended.',
+    why: 'A reader should be able to prove a verse is the one this edition published, and see why it differs from the last. Verses are committed one by one so that a single verse can be proved without the rest.',
+    what: [
+      'Every verse gets a SHA-256 commitment and the commitments form a Merkle tree, whose root identifies the release under <code>rbs-translation.svc</code>. Notes and interpretation records sit beside the verse, outside the tree, so correcting a note does not move the root.',
+      'Each changed verse gets a row: before, after, the reason and the evidence, projected from the records.',
+      'A small release is imported as only the rows that differ, in one atomic file. Production is then read back and held to the full build row by row. A success response is not treated as proof.',
+      'The release is recorded in the ontology and the editions registry, and the reader form is rebuilt from the published verses.',
+    ],
+    where: ['The library Worker (<code>demo-bible-mcp-faithnet</code>) at <code>rbs.faithnet.io</code>, over D1.', 'The Seed reader, at <code>seed-reader.faithnet.io</code>.', 'Build: <code>build-rbs-corpus.ts</code> and <code>patch-import-sql.py</code>.'],
+    by: 'Code only. The owner decides when a release goes out.',
+    reads: ['The release.', 'A dump of what production holds.'],
+    leaves: ['A signed corpus: verses with proofs.', 'A status on every verse: checks passed, or open and why.', 'Change rows in the workbench.'],
+    stops: ['An import that is not a patch is refused.', 'A release is not reported as done until production reads back equal to the full build. A correction is a new release, with its own root.'],
+  },
+];
+
+const TRANSLATION_BODY = `
+<h2>How this differs from answering a question</h2>
+<p>The <a href="/architecture/scripture-ask">Scripture Agent's ask</a> and this harness share a shape: gather what is held, a model writes, code proves, revise if needed, and leave a record. Three things are different.</p>
+<ul>
+<li><b>Nobody is waiting.</b> The ask begins with a person and ends with an answer in seconds. Here a driver asks for each of about 3,800 passages, over hours, and the result is read later by people who never asked.</li>
+<li><b>The unit is not the deliverable.</b> A run produces a proposal for one passage. What a reader receives is an edition, so there is a second flow above the first, which decides verse by verse what the edition says.</li>
+<li><b>The source is a fixed text, and the danger is memory.</b> An ask wants everything relevant. A translator must be kept away from the most relevant thing there is, the existing English Bibles, because a model that sees one recites it.</li>
+</ul>
+<h2>Books, chapters and verses</h2>
+<p>Each level has a job. The <b>book</b> is where the story is built: who the people are, what they are called, and how a book's own key words behave. The <b>passage</b> is what a model drafts, because a sentence and its pronouns need their neighbours. The <b>verse</b> is what everything is judged, chosen, committed and proved at. A passage is drafted whole, and a release can then take one verse of it and leave the rest.</p>
+<h2>What is built before any draft</h2>
+<ul>
+<li><b>The frozen source.</b> Hebrew, Aramaic and Greek tokens with their parsing, kept with a commitment for every verse. A change to the source is a new edition, not an update.</li>
+<li><b>The knowledge base.</b> The people, places and concepts of the Bible, in the skills ontology. Consistency is bound to the referent, not to an English word: Simon's son Judas is one entry in all four Gospels, and the patriarch is another.</li>
+<li><b>The story and meaning.</b> For each book, the scenes, who is present and who each pronoun means. It is built from the source and sources of the book's own time, and code removes any sentence resting on a later interpretation. It decides structure, such as who is speaking, and never wording.</li>
+<li><b>The brief and skills.</b> What the drafter is told, as published skills under the <code>bible-translation</code> domain.</li>
+<li><b>The ontology.</b> Spelling rules, number words, free words and check kinds are generated from it, and a repository check refuses any drift.</li>
+</ul>
+<h2>How a change is measured</h2>
+<p>The harness carries its own tests. Experiments run arms side by side over locked sets of passages, including a floor (the tables' word-by-word glosses) and a ceiling (a published human translation), so a score means something. Errors are planted to measure the checker. A change is accepted by a blind judge on a frozen set of hard passages, because this project's own checks have rewarded changes that a blind reader preferred less.</p>
+<h2>Where it stands</h2>
+<p>The edition is RBS, a draft model-made translation from the Hebrew, Aramaic and Greek under CC BY 4.0. The current release, <code>2026-11-05-v4.0.2</code>, has 31,085 verses, of which 26,445 are ready and 4,640 are published as open, each saying what is open. <b>No person has reviewed it.</b> The status on a verse says what the machine checked and nothing more.</p>
+`;
+
 export const POSTS: Post[] = [
+  {
+    slug: 'translation-harness',
+    title: 'How the translation agent translates the Bible',
+    date: '2026-11-05',
+    description:
+      'The path from a book of the Bible to a signed verse: what a drafter may see, how code holds every verse to its source, why revision is the riskiest step, and how an edition is built with no person reviewing it.',
+    picture: {
+      svg: '/architecture/translation-flow.svg', png: '/architecture/translation-flow.png', alt: TRANSLATION_ALT, width: 1460, height: 1040,
+      caption: 'Grey arrows are the text. Pink arrows are what a run stands on. Dashed arrows happen only when needed.',
+    },
+    steps: TRANSLATION_STEPS,
+    body: TRANSLATION_BODY,
+  },
   {
     slug: 'sign-in',
     title: 'How sign-in works: the first time, a new app, and coming back',
