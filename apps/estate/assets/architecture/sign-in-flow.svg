@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1460 1020" width="1460" height="1020" role="img" aria-labelledby="t d">
 <title id="t">How sign-in works at a faithnet Home: the first time, a new app while signed in, and coming back</title>
-<desc id="d">An app asks the Home to sign a person in. The Home checks the app against its registry and looks for a Home session. Without one the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation signed by the person, its check on chain, a record and a single-use code, and the code exchanged for an id_token. A new app for a person already signed in skips the credential and the new account. An app that still holds its delegation goes straight to the token step. In Chrome, FedCM signs nothing new: it hands back the wire from the last Allow, or goes to a popup with the sheet. A designed path, live in shadow, records its decision and will skip the sheet and the signature for an app allowed before.</desc>
+<desc id="d">An app asks the Home to sign a person in. The Home checks the app against its registry and looks for a Home session. Without one the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation signed by the person, its check on chain, a record and a single-use code, and the code exchanged for an id_token. A new app for a person already signed in skips the credential and the new account. An app that still holds its delegation goes straight to the token step. In Chrome, an app the person already allowed gets the delegation from that Allow, checked on chain, with no sheet and nothing signed; anything else opens the same flow in a popup. Signing out ends the Home session and every app's silent renewal, then walks the apps with a sign-out page.</desc>
 <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#8b95b5"/></marker><marker id="b" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#8b95b5"/></marker><marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#f472b6"/></marker><marker id="bs" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#f472b6"/></marker><marker id="m0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#60a5fa"/></marker><marker id="m0s" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#60a5fa"/></marker><marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#fbbf24"/></marker><marker id="m1s" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#fbbf24"/></marker><marker id="m2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#34d399"/></marker><marker id="m2s" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#34d399"/></marker>
 <style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#eef1fb}.h{font-size:30px;font-weight:700}.n{font-size:16px;font-weight:650}.t{font-size:13px;font-weight:600}.k{font-size:12px;font-weight:700}.s{font-size:13px;fill:#9aa5c7}.b{font-size:12px;font-weight:700;letter-spacing:.09em;fill:#9aa5c7}</style></defs>
 <rect width="1460" height="1020" rx="22" fill="#0b1020"/>
@@ -104,30 +104,23 @@
 <path d="M72 480V146Q72 130 88 130H1243Q1259 130 1259 146V476" fill="none" stroke="#60a5fa" stroke-width="2"  marker-end="url(#m0)"/>
 <text x="665.5" y="152" text-anchor="middle" class="b" style="fill:#60a5fa">COMING BACK TO AN APP</text>
 <text x="665.5" y="170" text-anchor="middle" class="s" style="fill:#60a5fa">the app presents the delegation it holds, and the Home answers with a fresh id_token: no page and no prompt</text>
-<path d="M414 480V252Q414 236 430 236H1006Q1022 236 1022 252V476" fill="none" stroke="#fbbf24" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#m1)"/>
-<text x="725" y="258" text-anchor="middle" class="b" style="fill:#fbbf24">THE NEXT DESIGN, LIVE IN SHADOW</text>
-<text x="725" y="276" text-anchor="middle" class="s" style="fill:#fbbf24">this app was allowed before and asks for nothing more:</text>
-<text x="725" y="292" text-anchor="middle" class="s" style="fill:#fbbf24">no sheet, nothing signed, and the stored wires are checked on chain again</text>
+<path d="M86 480V252Q86 236 102 236H1006Q1022 236 1022 252V476" fill="none" stroke="#fbbf24" stroke-width="2"  marker-end="url(#m1)"/>
+<text x="430" y="258" text-anchor="start" class="b" style="fill:#fbbf24">IN CHROME, AN APP YOU ALREADY ALLOWED</text>
+<text x="430" y="276" text-anchor="start" class="s" style="fill:#fbbf24">no sheet and nothing signed: the wire from your last Allow is checked on chain</text>
+<text x="430" y="292" text-anchor="start" class="s" style="fill:#fbbf24">and goes back to the app. Anything else opens this same flow in a popup.</text>
 <path d="M442 480V372Q442 356 458 356H768Q784 356 784 372V476" fill="none" stroke="#34d399" stroke-width="2"  marker-end="url(#m2)"/>
 <text x="460" y="378" text-anchor="start" class="b" style="fill:#34d399">A NEW APP, ALREADY SIGNED IN</text>
 <text x="460" y="396" text-anchor="start" class="s" style="fill:#34d399">the Home session is found:</text>
 <text x="460" y="412" text-anchor="start" class="s" style="fill:#34d399">no credential, no new account</text>
-<text x="1046" y="282" text-anchor="start" class="b">IN CHROME (FEDCM)</text>
-<text x="1046" y="302" text-anchor="start" class="s">Nothing new is signed. You get</text>
-<text x="1046" y="318" text-anchor="start" class="s">the wire from your last Allow,</text>
-<text x="1046" y="334" text-anchor="start" class="s">or this same flow in a popup,</text>
-<text x="1046" y="350" text-anchor="start" class="s">with the sheet.</text>
 <text x="40" y="852" text-anchor="start" class="b">SIGNING OUT</text>
 <text x="40" y="872" text-anchor="start" class="s">Ends the Home session and every</text>
 <text x="40" y="888" text-anchor="start" class="s">app's silent renewal, then walks</text>
 <text x="40" y="904" text-anchor="start" class="s">the apps with a sign-out page.</text>
 <text x="40" y="920" text-anchor="start" class="s">A token an app already holds</text>
 <text x="40" y="936" text-anchor="start" class="s">lasts until it expires.</text>
-<text x="104" y="262" text-anchor="start" class="b">TODAY</text>
-<text x="104" y="282" text-anchor="start" class="s">Every trip to the Home still ends</text>
-<text x="104" y="298" text-anchor="start" class="s">at the Allow sheet. The Home now</text>
-<text x="104" y="314" text-anchor="start" class="s">looks up whether you allowed this</text>
-<text x="104" y="330" text-anchor="start" class="s">app before, and only records the answer.</text>
+<text x="104" y="282" text-anchor="start" class="b">EVERY TRIP TO THE HOME</text>
+<text x="104" y="302" text-anchor="start" class="s">ends at the Allow sheet,</text>
+<text x="104" y="318" text-anchor="start" class="s">and you choose each time.</text>
 <g>
 <rect x="281" y="690" width="56" height="56" rx="16" fill="#111933" stroke="#3b82f6" stroke-width="2.2"/>
 <g transform="translate(294.44,703.44) scale(1.2133333333333334)" fill="none" stroke="#3b82f6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 4.5h4v15h-4zM8.5 4.5h4v15h-4z"/><path d="M14.2 6l3.6-1 3 13.5-3.6 1z"/></g>
@@ -139,7 +132,8 @@
 <rect x="400" y="690" width="56" height="56" rx="16" fill="#111933" stroke="#14b8a6" stroke-width="2.2"/>
 <g transform="translate(413.44,703.44) scale(1.2133333333333334)" fill="none" stroke="#14b8a6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12.5A8.5 8.5 0 1 1 11.5 3.5a3.5 3.5 0 0 0 4 4 4 4 0 0 0 5 5z"/><circle cx="9" cy="10" r=".900"/><circle cx="8.5" cy="15" r=".900"/><circle cx="13.5" cy="14" r=".900"/></g>
 <text x="428" y="770" text-anchor="middle" class="n">Home session</text>
-<text x="428" y="789" text-anchor="middle" class="s">a token, one hour</text>
+<text x="428" y="789" text-anchor="middle" class="s">token and cookie,</text>
+<text x="428" y="805" text-anchor="middle" class="s">one hour</text>
 </g>
 <path d="M428 636V682" fill="none" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)" marker-start="url(#b)"/>
 <g>
@@ -154,8 +148,8 @@
 <rect x="1112" y="690" width="56" height="56" rx="16" fill="#111933" stroke="#6366f1" stroke-width="2.2"/>
 <g transform="translate(1125.44,703.44) scale(1.2133333333333334)" fill="none" stroke="#6366f1" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6.5" rx="7" ry="2.8"/><path d="M5 6.5v5.5c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8V6.5"/><path d="M5 12v5.5c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8V12"/></g>
 <text x="1140" y="770" text-anchor="middle" class="n">Home records</text>
-<text x="1140" y="789" text-anchor="middle" class="s">a row for each Allow,</text>
-<text x="1140" y="805" text-anchor="middle" class="s">read at sign-in, in shadow</text>
+<text x="1140" y="789" text-anchor="middle" class="s">what each Allow agreed to,</text>
+<text x="1140" y="805" text-anchor="middle" class="s">and every delegation</text>
 </g>
 <path d="M1140 636V682" fill="none" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/>
 <g>
@@ -184,7 +178,7 @@
 <path d="M860 858h44" stroke="#8b95b5" stroke-width="2" marker-end="url(#a)"/><text x="918" y="862" class="s" text-anchor="start">first time in: every step</text>
 <path d="M860 884h44" stroke="#34d399" stroke-width="2" marker-end="url(#m2)"/><text x="918" y="888" class="s" text-anchor="start">a new app, already signed in: skips 4 and 5</text>
 <path d="M860 910h44" stroke="#60a5fa" stroke-width="2" marker-end="url(#m0)"/><text x="918" y="914" class="s" text-anchor="start">coming back to an app: step 10 alone, or no trip at all</text>
-<path d="M860 936h44" stroke="#fbbf24" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#m1)"/><text x="918" y="940" class="s" text-anchor="start">the next design, in shadow: will skip 6 and 7</text>
+<path d="M860 936h44" stroke="#fbbf24" stroke-width="2" marker-end="url(#m1)"/><text x="918" y="940" class="s" text-anchor="start">in Chrome, an app you already allowed: skips 1 to 7</text>
 <path d="M860 962h44" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/><text x="918" y="966" class="s" text-anchor="start">only when needed</text>
 <text x="1420" y="994" class="s" text-anchor="end">faithnet.estate/architecture</text>
 </svg>

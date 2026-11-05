@@ -73,12 +73,13 @@ test('sign-in: the next design is there, reachable from the callout, and every i
   await expect(page.locator('body')).not.toContainText('kept for up to thirty days');
 });
 
-test('sign-in: the picture says the arc is the next design, and the tiles link to their steps', async ({ page }) => {
+test('sign-in: the picture shows only what is live, and the tiles link to their steps', async ({ page }) => {
   const svg = await (await page.request.get('/architecture/sign-in-flow.svg')).text();
-  expect(svg).toContain('THE NEXT DESIGN, LIVE IN SHADOW');
+  expect(svg).not.toContain('NEXT DESIGN');
+  expect(svg).not.toContain('in shadow');
   expect(svg).not.toContain('PROPOSED');
   expect(svg).not.toContain('does not');
-  expect(svg).toContain('IN CHROME (FEDCM)');
+  expect(svg).toContain('IN CHROME, AN APP YOU ALREADY ALLOWED');
   expect(svg).toContain('SIGNING OUT');
   await page.goto('/architecture/sign-in');
   const picLinks = await page.locator('a[href^="#step-"]').count();
