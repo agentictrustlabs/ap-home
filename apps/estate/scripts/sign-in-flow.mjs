@@ -6,7 +6,7 @@
 import { C, I, picture } from './picture-kit.mjs';
 const W = 1460, H = 1020, ROW = 520, S = 64;
 const { out, esc, tile, arrow, note, head, finish } = picture(W, H);
-const SSO = '#34d399', BACK = '#60a5fa', FEDCM = '#fbbf24';
+const SSO = '#34d399', BACK = '#60a5fa', ALLOWED = '#fbbf24';
 
 // ── frame and titles
 out.push(`<rect width="${W}" height="${H}" rx="22" fill="${C.bg}"/>`);
@@ -46,21 +46,24 @@ const said = (x, y, title, lines, color, anchor = 'middle') => {
 // coming back to an app: straight to the token endpoint, no page
 arc(X.app, X.token, 130, { color: BACK });
 said((X.app + X.token) / 2, 152, 'COMING BACK TO AN APP', ['the app presents the delegation it holds, and the Home answers with a fresh id_token: no page and no prompt'], BACK);
-// in Chrome: the browser's own chooser. Nothing new is signed: the wire from the last Allow is checked on chain, or the person goes to the popup
-arc(X.app + 14, X.verify, 236, { color: FEDCM });
-out.push(`<text x="430" y="258" text-anchor="start" class="b" style="fill:${FEDCM}">IN CHROME, AN APP YOU ALREADY ALLOWED</text>`);
-note(430, 276, ['no sheet and nothing signed: the wire from your last Allow is checked on chain', 'and goes back to the app. Anything else opens this same flow in a popup.'], { anchor: 'start', color: FEDCM });
+// an app you already allowed: Paul's fix, live for the first app. The server decides, proved by a cookie script cannot read, and nothing is signed.
+arc(X.rec - 14, X.verify, 236, { color: ALLOWED });
+said((X.rec + X.verify) / 2, 258, 'AN APP YOU ALREADY ALLOWED: NO SHEET', ['the server skips the sheet when the app asks for nothing more than you agreed to and', 'the stored delegation still verifies on chain. An HttpOnly cookie proves who is asking.', 'Nothing is signed. On for Seed Bible Reader, and each other app after review.'], ALLOWED);
 // a new app, already signed in: the session stands in for the credential
 arc(X.rec + 14, X.allow, 356, { color: SSO });
 said(X.rec + 32, 378, 'A NEW APP, ALREADY SIGNED IN', ['the Home session is found:', 'no credential, no new account'], SSO, 'start');
+
+// in Chrome: the same rule, reached through the browser's own chooser
+out.push(`<text x="1046" y="282" text-anchor="start" class="b">IN CHROME (FEDCM)</text>`);
+note(1046, 302, ['The same rule, for a key the', 'Home holds: nothing is signed.', 'Anything else opens this', 'flow in a popup.'], { anchor: 'start' });
 
 // signing out: what reaches every app, and what only some can take part in
 out.push(`<text x="40" y="852" text-anchor="start" class="b">SIGNING OUT</text>`);
 note(40, 872, ['Ends the Home session and every', "app's silent renewal, then walks", 'the apps with a sign-out page.', 'A token an app already holds', 'lasts until it expires.'], { anchor: 'start' });
 
 // what happens today, said where the eye lands first
-out.push(`<text x="104" y="282" text-anchor="start" class="b">EVERY TRIP TO THE HOME</text>`);
-note(104, 302, ['ends at the Allow sheet,', 'and you choose each time.'], { anchor: 'start' });
+out.push(`<text x="104" y="282" text-anchor="start" class="b">OTHER APPS, FOR NOW</text>`);
+note(104, 302, ['Each trip to the Home ends at', 'the Allow sheet, until that app', 'has been reviewed and turned on.'], { anchor: 'start' });
 
 // ── below the row: what each step reads and leaves
 const LOW = ROW + 198, D = ROW + 94;
@@ -69,10 +72,10 @@ const store = (x, color, icon, name, sub, o = {}) => {
   arrow(`M${x} ${D + 22}V${LOW - 36}`, { dash: true, both: o.both });
 };
 store(X.check, '#3b82f6', 'books', 'Registry', ['who may ask'], { both: true });
-store(X.rec, '#14b8a6', 'cookie', 'Home session', ['token and cookie,', 'one hour'], { both: true });
+store(X.rec, '#14b8a6', 'cookie', 'Home session', ['HttpOnly cookie,', 'one hour'], { both: true });
 store(X.sign, '#22c55e', 'link', 'The chain', ['approved, then checked']);
 arrow(`M${X.sign + 36} ${LOW}H${X.verify - 16}Q${X.verify} ${LOW} ${X.verify} ${LOW - 16}V${D}`, { dash: true });
-store(X.record, '#6366f1', 'stack', 'Home records', ['what each Allow agreed to,', 'and every delegation']);
+store(X.record, '#6366f1', 'stack', 'Home records', ['what each Allow agreed to,', 'read at every sign-in']);
 store(X.back, '#64748b', 'vault', 'The app keeps', ['id_token, delegation']);
 
 // prove → what a credential can be
@@ -92,10 +95,10 @@ const key = (i, color, dash, text) => out.push(`<path d="M${LX} ${LY + i * 26}h4
 key(0, C.line, false, 'first time in: every step');
 key(1, SSO, false, 'a new app, already signed in: skips 4 and 5');
 key(2, BACK, false, 'coming back to an app: step 10 alone, or no trip at all');
-key(3, FEDCM, false, 'in Chrome, an app you already allowed: skips 1 to 7');
+key(3, ALLOWED, false, 'an app you already allowed: skips 6 and 7');
 key(4, C.line, true, 'only when needed');
 out.push(`<text x="${W - 40}" y="${H - 26}" class="s" text-anchor="end">faithnet.estate/architecture</text>`);
 
 finish(process.argv[2],
   'How sign-in works at a faithnet Home: the first time, a new app while signed in, and coming back',
-  'An app asks the Home to sign a person in. The Home checks the app against its registry and looks for a Home session. Without one the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation signed by the person, its check on chain, a record and a single-use code, and the code exchanged for an id_token. A new app for a person already signed in skips the credential and the new account. An app that still holds its delegation goes straight to the token step. In Chrome, an app the person already allowed gets the delegation from that Allow, checked on chain, with no sheet and nothing signed; anything else opens the same flow in a popup. Signing out ends the Home session and every app\'s silent renewal, then walks the apps with a sign-out page.');
+  'An app asks the Home to sign a person in. The Home checks the app against its registry and looks for a Home session. Without one the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation signed by the person, its check on chain, a record and a single-use code, and the code exchanged for an id_token. A new app for a person already signed in skips the credential and the new account. An app that still holds its delegation goes straight to the token step. An app the person already allowed goes from Recognize to Verify: the server skips the sheet when it asks for nothing more and the stored delegation still verifies on chain, an HttpOnly cookie proves who is asking, and nothing is signed. This is on for Seed Bible Reader, and each other app joins after review. In Chrome the same rule applies for a key the Home holds. Signing out ends the Home session and every app\'s silent renewal, then walks the apps with a sign-out page.');

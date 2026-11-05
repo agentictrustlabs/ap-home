@@ -62,7 +62,7 @@ test('sign-in: the next design is there, reachable from the callout, and every i
   await page.goto('/architecture/sign-in');
   await page.locator('.callout a[href="#next-design"]').click();
   await expect(page.locator('#next-design')).toBeInViewport();
-  await expect(page.locator('#next-design')).toHaveText('The next design: the Home remembers an Allow');
+  await expect(page.locator('#next-design')).toHaveText('The Home remembers an Allow');
   await expect(page.locator('#signing-out')).toHaveText('Signing out');
   for (const h of ['Who is asking: a cookie script cannot read', 'When the sheet is skipped', 'Silent sign-in', 'What a second review changed', 'Still open']) {
     await expect(page.getByRole('heading', { name: h })).toBeVisible();
@@ -79,7 +79,10 @@ test('sign-in: the picture shows only what is live, and the tiles link to their 
   expect(svg).not.toContain('in shadow');
   expect(svg).not.toContain('PROPOSED');
   expect(svg).not.toContain('does not');
-  expect(svg).toContain('IN CHROME, AN APP YOU ALREADY ALLOWED');
+  expect(svg).toContain('AN APP YOU ALREADY ALLOWED: NO SHEET');
+  expect(svg).toContain('HttpOnly');
+  expect(svg).toContain('verifies on chain');
+  expect(svg).toContain('asks for nothing more');
   expect(svg).toContain('SIGNING OUT');
   await page.goto('/architecture/sign-in');
   const picLinks = await page.locator('a[href^="#step-"]').count();
