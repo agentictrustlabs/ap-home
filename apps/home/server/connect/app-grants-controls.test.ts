@@ -10,6 +10,7 @@ vi.mock('../_lib/recognition', () => ({ readRecognition: async () => h.recogniti
 vi.mock('../../src/lib/chain', async (orig) => { const real = await orig<{ CONTRACTS: object }>(); return { ...real, CONTRACTS: { ...real.CONTRACTS, timestampEnforcer: '0x00000000000000000000000000000000000000aa' } }; });
 
 import { onRequestGet, onRequestPost } from './app-grants';
+import { wireRef } from '../oidc/app-grant-row';
 
 let store: Map<string, string>;
 const env = { AUTH_CODES: { get: async (k: string) => store.get(k) ?? null, put: async (k: string, v: string) => { store.set(k, v); }, delete: async (k: string) => { store.delete(k); } } } as never;
@@ -53,6 +54,27 @@ describe('the controls', () => {
     h.recognition.value = null;
     expect((await post({ clientId: 'reader', askEveryTime: true })).status).toBe(200);
     expect((await post({ clientId: 'reader', forget: true })).status).toBe(200);
+  });
+  // Spec 445 §16 — as signing out everywhere does: the app's next renewal fails and it has to send the person to the Home.
+  const bind = () => { const refs = [wire(2_000_000_000), wire(1_900_000_000)].map((w) => `oidc-deleg:${wireRef(w as never).toLowerCase()}`); for (const k of refs) store.set(k, 'reader'); return refs; };
+  it('forget ends the app\'s silent renewal on every wire of the row, and leaves the wires listed', async () => {
+    const refs = bind();
+    await post({ clientId: 'reader', forget: true });
+    for (const k of refs) expect(store.has(k)).toBe(false);
+    expect(saved().delegation).toBeDefined();
+  });
+  it('ask every time, turned on, ends it too; turned off, it touches nothing', async () => {
+    let refs = bind();
+    await post({ clientId: 'reader', askEveryTime: true });
+    for (const k of refs) expect(store.has(k)).toBe(false);
+    refs = bind();
+    await post({ clientId: 'reader', askEveryTime: false });
+    for (const k of refs) expect(store.has(k)).toBe(true);
+  });
+  it('ends nothing for a caller with no session', async () => {
+    const refs = bind();
+    await post({ clientId: 'reader', forget: true }, 'bad');
+    for (const k of refs) expect(store.has(k)).toBe(true);
   });
   it('an id_token under the Home\'s audience is not a session here', async () => {
     expect((await post({ clientId: 'reader', forget: true }, 'id-token')).status).toBe(401);

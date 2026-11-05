@@ -24,7 +24,7 @@ async function personLeaving(request: Request, env: FnContext['env']): Promise<s
 }
 
 /** Every wire on the row, current or older: an app may be renewing on either. */
-function refsOf(r: AppGrantRow): string[] {
+export function refsOf(r: Pick<AppGrantRow, 'delegation' | 'askDelegation' | 'selfVaultGrant' | 'superseded'>): string[] {
   const wires = [r.delegation, r.askDelegation, r.selfVaultGrant, ...(r.superseded ?? []).map((s) => s.wire)];
   return wires.flatMap((w) => { try { return w ? [wireRef(w).toLowerCase()] : []; } catch { return []; } });
 }
