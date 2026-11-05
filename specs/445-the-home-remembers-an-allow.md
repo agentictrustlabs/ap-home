@@ -479,5 +479,6 @@ a new signature, so there is no stored wire to hand back, and check 5 keeps the 
 - **The cookie is the proof,** as everywhere: a stolen token gets nothing. The audit entry names the leaf.
 - **Shadow first,** as in W3, with `session_key_requested` becoming `would: 'allow'`.
 
-**To decide before building.** Does Gather27 need a new key on every sign-in, or could it reuse one across a stored leaf's life? If it can
-reuse one, a stored leaf and no new signature is simpler than anything above, and the spec's rule that a skipped sheet signs nothing holds.
+**To check before building.** The owner's own Gather27 does not need a new key on every sign-in (2026-11-05). So a stored leaf and no new
+signature looks simpler than anything above, and keeps the rule that a skipped sheet signs nothing. The real Gather27 runs on a separate
+estate, and has not been read: confirm it there first. Its registration and this spec's rollout are that estate's to decide.
