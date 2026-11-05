@@ -1,190 +1,182 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1040" width="1920" height="1040" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1460 960" width="1460" height="960" role="img" aria-labelledby="t d">
 <title id="t">How an ask runs at an agent: the agent harness, with skills flowing in</title>
-<desc id="d">An ask goes from the asker through admission, the playbook, grounding, the skill judge, planning and a plan check. Then every step is authorized by a mandate, executed and receipted, and the answer returns. Skills enter from the top: a SKILL.md is published to the skills registry, compiled with the domain ontology into an archetype, and assigned to the agent as its playbook, pinned by digest. The judge reads each skill's card; the skill's body is read by its pinned digest when the step runs.</desc>
+<desc id="d">An ask goes from the asker through admission, the playbook, grounding, the skill judge, planning and a plan check. Then every step is authorized by a mandate, executed and receipted, and the answer returns. Skills enter from the top: a SKILL.md is published to the skills registry, compiled with the domain ontology into an archetype, and assigned to the agent as its playbook. The judge reads each skill's card; the skill's body is read by its pinned digest when the step runs.</desc>
 <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#8b95b5"/></marker><marker id="b" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#8b95b5"/></marker><marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#f472b6"/></marker><marker id="bs" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#f472b6"/></marker>
-<style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#eef1fb}.h{font-size:30px;font-weight:700}.n{font-size:16px;font-weight:650}.t{font-size:13px;font-weight:600}.s{font-size:13px;fill:#9aa5c7}.b{font-size:12px;font-weight:700;letter-spacing:.09em;fill:#9aa5c7}</style></defs>
-<rect width="1920" height="1040" rx="22" fill="#0b1020"/>
-<text x="48" y="58" class="h">How an ask runs at an agent</text>
-<text x="48" y="84" class="s" text-anchor="start">The agent harness of a faithnet Home, with the skills that flow into it. Intelligence may be probabilistic. Authority must not be.</text>
-<rect x="1094" y="408" width="482" height="228" rx="20" fill="none" stroke="#3a4670" stroke-width="2" stroke-dasharray="7 7"/>
-<text x="1114" y="434" text-anchor="start" class="b">PER STEP, NEVER PER RUN</text>
-<path d="M146 500H200" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
-<path d="M296 500H350" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
-<path d="M446 500H500" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
-<path d="M596 500H650" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
-<path d="M746 500H800" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
-<path d="M896 500H950" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
-<path d="M1046 500H1130" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
-<path d="M1226 500H1285" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
-<path d="M1381 500H1440" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
-<path d="M1536 500H1620" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
-<path d="M1716 500H1770" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#eef1fb}.h{font-size:30px;font-weight:700}.n{font-size:16px;font-weight:650}.t{font-size:13px;font-weight:600}.k{font-size:12px;font-weight:700}.s{font-size:13px;fill:#9aa5c7}.b{font-size:12px;font-weight:700;letter-spacing:.09em;fill:#9aa5c7}</style></defs>
+<rect width="1460" height="960" rx="22" fill="#0b1020"/>
+<text x="40" y="52" class="h">How an ask runs at an agent</text>
+<text x="40" y="78" class="s" text-anchor="start">The agent harness of a faithnet Home, with the skills that flow into it. Intelligence may be probabilistic. Authority must not be.</text>
+<rect x="834" y="384" width="364" height="196" rx="20" fill="none" stroke="#3a4670" stroke-width="2" stroke-dasharray="7 7"/>
+<text x="850" y="408" text-anchor="start" class="b">FOR EVERY STEP</text>
+<path d="M112 470H142" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M226 470H256" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M340 470H370" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M454 470H484" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M568 470H598" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M682 470H712" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M796 470H856" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M940 470H972" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M1056 470H1088" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M1172 470H1218" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M1302 470H1334" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
 <g>
-<rect x="62" y="462" width="76" height="76" rx="18" fill="#64748b"/>
-<g transform="translate(80.24,480.24) scale(1.6466666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20c.8-4 3.8-6 7.5-6s6.7 2 7.5 6"/></g>
-<text x="100" y="562" text-anchor="middle" class="n">Asker</text>
-<text x="100" y="581" text-anchor="middle" class="s">a person, an app</text>
-<text x="100" y="597" text-anchor="middle" class="s">or another agent</text>
+<rect x="40" y="438" width="64" height="64" rx="18" fill="#64748b"/>
+<g transform="translate(55.36,453.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20c.8-4 3.8-6 7.5-6s6.7 2 7.5 6"/></g>
+<text x="72" y="526" text-anchor="middle" class="n">Asker</text>
+<text x="72" y="545" text-anchor="middle" class="s">person, app, agent</text>
 </g>
 <g>
-<rect x="212" y="462" width="76" height="76" rx="18" fill="#8b5cf6"/>
-<g transform="translate(230.24,480.24) scale(1.6466666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4h8v16h-8"/><path d="M3 12h10"/><path d="M9.5 8.5 13 12l-3.5 3.5"/></g>
-<text x="250" y="562" text-anchor="middle" class="n">Admit</text>
-<text x="250" y="581" text-anchor="middle" class="s">Home session, signed</text>
-<text x="250" y="597" text-anchor="middle" class="s">wire or A2A</text>
+<rect x="154" y="438" width="64" height="64" rx="18" fill="#8b5cf6"/>
+<g transform="translate(169.36,453.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4h8v16h-8"/><path d="M3 12h10"/><path d="M9.5 8.5 13 12l-3.5 3.5"/></g>
+<circle cx="157" cy="441" r="11" fill="#0b1020" stroke="#8b5cf6" stroke-width="2"/><text x="157" y="445" text-anchor="middle" class="k">1</text>
+<text x="186" y="526" text-anchor="middle" class="n">Admit</text>
+<text x="186" y="545" text-anchor="middle" class="s">who is asking</text>
 </g>
 <g>
-<rect x="362" y="462" width="76" height="76" rx="18" fill="#3b82f6"/>
-<g transform="translate(380.24,480.24) scale(1.6466666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h10.5a2.5 2.5 0 0 1 2.5 2.5v12.5H7.5A2.5 2.5 0 0 1 5 17z"/><path d="M5 17a2.5 2.5 0 0 1 2.5-2.5H18"/><path d="M9 8.5h5.5"/></g>
-<text x="400" y="562" text-anchor="middle" class="n">Playbook</text>
-<text x="400" y="581" text-anchor="middle" class="s">checked against</text>
-<text x="400" y="597" text-anchor="middle" class="s">its digest</text>
+<rect x="268" y="438" width="64" height="64" rx="18" fill="#3b82f6"/>
+<g transform="translate(283.36,453.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h10.5a2.5 2.5 0 0 1 2.5 2.5v12.5H7.5A2.5 2.5 0 0 1 5 17z"/><path d="M5 17a2.5 2.5 0 0 1 2.5-2.5H18"/><path d="M9 8.5h5.5"/></g>
+<circle cx="271" cy="441" r="11" fill="#0b1020" stroke="#3b82f6" stroke-width="2"/><text x="271" y="445" text-anchor="middle" class="k">2</text>
+<text x="300" y="526" text-anchor="middle" class="n">Playbook</text>
+<text x="300" y="545" text-anchor="middle" class="s">pinned by digest</text>
 </g>
 <g>
-<rect x="512" y="462" width="76" height="76" rx="18" fill="#14b8a6"/>
-<g transform="translate(530.24,480.24) scale(1.6466666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.6"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></g>
-<text x="550" y="562" text-anchor="middle" class="n">Ground</text>
-<text x="550" y="581" text-anchor="middle" class="s">a typed reading,</text>
-<text x="550" y="597" text-anchor="middle" class="s">before any model</text>
+<rect x="382" y="438" width="64" height="64" rx="18" fill="#14b8a6"/>
+<g transform="translate(397.36,453.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.6"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></g>
+<circle cx="385" cy="441" r="11" fill="#0b1020" stroke="#14b8a6" stroke-width="2"/><text x="385" y="445" text-anchor="middle" class="k">3</text>
+<text x="414" y="526" text-anchor="middle" class="n">Ground</text>
+<text x="414" y="545" text-anchor="middle" class="s">read by code</text>
 </g>
 <g>
-<rect x="662" y="462" width="76" height="76" rx="18" fill="#ef4444"/>
-<g transform="translate(680.24,480.24) scale(1.6466666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M7 20h10M5 7h14"/><path d="M5 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/><path d="M19 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/></g>
-<text x="700" y="562" text-anchor="middle" class="n">Judge</text>
-<text x="700" y="581" text-anchor="middle" class="s">which ONE skill,</text>
-<text x="700" y="597" text-anchor="middle" class="s">or none of them</text>
+<rect x="496" y="438" width="64" height="64" rx="18" fill="#ef4444"/>
+<g transform="translate(511.36,453.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M7 20h10M5 7h14"/><path d="M5 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/><path d="M19 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/></g>
+<circle cx="499" cy="441" r="11" fill="#0b1020" stroke="#ef4444" stroke-width="2"/><text x="499" y="445" text-anchor="middle" class="k">4</text>
+<text x="528" y="526" text-anchor="middle" class="n">Judge</text>
+<text x="528" y="545" text-anchor="middle" class="s">one skill, or none</text>
 </g>
 <g>
-<rect x="812" y="462" width="76" height="76" rx="18" fill="#f59e0b"/>
-<g transform="translate(830.24,480.24) scale(1.6466666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="6" r="2"/><circle cx="5.5" cy="18" r="2"/><circle cx="18.5" cy="12" r="2"/><path d="M7.5 6h4a3 3 0 0 1 3 3v.500M7.5 18h4a3 3 0 0 0 3-3v-.500"/></g>
-<text x="850" y="562" text-anchor="middle" class="n">Plan</text>
-<text x="850" y="581" text-anchor="middle" class="s">the pick, or with</text>
-<text x="850" y="597" text-anchor="middle" class="s">what feeds it</text>
+<rect x="610" y="438" width="64" height="64" rx="18" fill="#f59e0b"/>
+<g transform="translate(625.36,453.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="6" r="2"/><circle cx="5.5" cy="18" r="2"/><circle cx="18.5" cy="12" r="2"/><path d="M7.5 6h4a3 3 0 0 1 3 3v.500M7.5 18h4a3 3 0 0 0 3-3v-.500"/></g>
+<circle cx="613" cy="441" r="11" fill="#0b1020" stroke="#f59e0b" stroke-width="2"/><text x="613" y="445" text-anchor="middle" class="k">5</text>
+<text x="642" y="526" text-anchor="middle" class="n">Plan</text>
+<text x="642" y="545" text-anchor="middle" class="s">around the pick</text>
 </g>
 <g>
-<rect x="962" y="462" width="76" height="76" rx="18" fill="#eab308"/>
-<g transform="translate(980.24,480.24) scale(1.6466666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 7.8-7.5 9.5-4.3-1.7-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></g>
-<text x="1000" y="562" text-anchor="middle" class="n">Check the plan</text>
-<text x="1000" y="581" text-anchor="middle" class="s">refuse, ask,</text>
-<text x="1000" y="597" text-anchor="middle" class="s">or replan once</text>
+<rect x="724" y="438" width="64" height="64" rx="18" fill="#eab308"/>
+<g transform="translate(739.36,453.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 7.8-7.5 9.5-4.3-1.7-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></g>
+<circle cx="727" cy="441" r="11" fill="#0b1020" stroke="#eab308" stroke-width="2"/><text x="727" y="445" text-anchor="middle" class="k">6</text>
+<text x="756" y="526" text-anchor="middle" class="n">Check the plan</text>
+<text x="756" y="545" text-anchor="middle" class="s">rules, no model</text>
 </g>
 <g>
-<rect x="1142" y="462" width="76" height="76" rx="18" fill="#22c55e"/>
-<g transform="translate(1160.24,480.24) scale(1.6466666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M17.5 12v3.5M20.5 12v2.5"/></g>
-<text x="1180" y="562" text-anchor="middle" class="n">Authority</text>
-<text x="1180" y="581" text-anchor="middle" class="s">a signed mandate</text>
-<text x="1180" y="597" text-anchor="middle" class="s">allows the step</text>
+<rect x="868" y="438" width="64" height="64" rx="18" fill="#22c55e"/>
+<g transform="translate(883.36,453.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M17.5 12v3.5M20.5 12v2.5"/></g>
+<circle cx="871" cy="441" r="11" fill="#0b1020" stroke="#22c55e" stroke-width="2"/><text x="871" y="445" text-anchor="middle" class="k">7</text>
+<text x="900" y="526" text-anchor="middle" class="n">Authority</text>
+<text x="900" y="545" text-anchor="middle" class="s">a signed mandate</text>
 </g>
 <g>
-<rect x="1297" y="462" width="76" height="76" rx="18" fill="#0ea5e9"/>
-<g transform="translate(1315.24,480.24) scale(1.6466666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M10 8.5v7l6-3.5z"/></g>
-<text x="1335" y="562" text-anchor="middle" class="n">Execute</text>
-<text x="1335" y="581" text-anchor="middle" class="s">reconcile first,</text>
-<text x="1335" y="597" text-anchor="middle" class="s">then run once</text>
+<rect x="984" y="438" width="64" height="64" rx="18" fill="#0ea5e9"/>
+<g transform="translate(999.36,453.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M10 8.5v7l6-3.5z"/></g>
+<circle cx="987" cy="441" r="11" fill="#0b1020" stroke="#0ea5e9" stroke-width="2"/><text x="987" y="445" text-anchor="middle" class="k">8</text>
+<text x="1016" y="526" text-anchor="middle" class="n">Execute</text>
+<text x="1016" y="545" text-anchor="middle" class="s">once</text>
 </g>
 <g>
-<rect x="1452" y="462" width="76" height="76" rx="18" fill="#6366f1"/>
-<g transform="translate(1470.24,480.24) scale(1.6466666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h12v17l-2.4-1.6-2.4 1.6-2.4-1.6-2.4 1.6L6 20.5z"/><path d="M9 8.5h6M9 12h6M9 15.5h3.5"/></g>
-<text x="1490" y="562" text-anchor="middle" class="n">Receipt</text>
-<text x="1490" y="581" text-anchor="middle" class="s">what ran, under</text>
-<text x="1490" y="597" text-anchor="middle" class="s">which skill</text>
+<rect x="1100" y="438" width="64" height="64" rx="18" fill="#6366f1"/>
+<g transform="translate(1115.36,453.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h12v17l-2.4-1.6-2.4 1.6-2.4-1.6-2.4 1.6L6 20.5z"/><path d="M9 8.5h6M9 12h6M9 15.5h3.5"/></g>
+<circle cx="1103" cy="441" r="11" fill="#0b1020" stroke="#6366f1" stroke-width="2"/><text x="1103" y="445" text-anchor="middle" class="k">9</text>
+<text x="1132" y="526" text-anchor="middle" class="n">Receipt</text>
+<text x="1132" y="545" text-anchor="middle" class="s">what ran</text>
 </g>
 <g>
-<rect x="1632" y="462" width="76" height="76" rx="18" fill="#3b82f6"/>
-<g transform="translate(1650.24,480.24) scale(1.6466666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16v11H11l-4.5 3.5v-3.5H4z"/><path d="M8 9.5h8M8 12.8h5"/></g>
-<text x="1670" y="562" text-anchor="middle" class="n">Answer</text>
-<text x="1670" y="581" text-anchor="middle" class="s">as the skill wrote it,</text>
-<text x="1670" y="597" text-anchor="middle" class="s">or grounded</text>
+<rect x="1230" y="438" width="64" height="64" rx="18" fill="#3b82f6"/>
+<g transform="translate(1245.36,453.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16v11H11l-4.5 3.5v-3.5H4z"/><path d="M8 9.5h8M8 12.8h5"/></g>
+<circle cx="1233" cy="441" r="11" fill="#0b1020" stroke="#3b82f6" stroke-width="2"/><text x="1233" y="445" text-anchor="middle" class="k">10</text>
+<text x="1262" y="526" text-anchor="middle" class="n">Answer</text>
+<text x="1262" y="545" text-anchor="middle" class="s">checked</text>
 </g>
 <g>
-<rect x="1782" y="462" width="76" height="76" rx="18" fill="#64748b"/>
-<g transform="translate(1800.24,480.24) scale(1.6466666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20c.8-4 3.8-6 7.5-6s6.7 2 7.5 6"/></g>
-<text x="1820" y="562" text-anchor="middle" class="n">Asker</text>
-<text x="1820" y="581" text-anchor="middle" class="s">answer, prompt</text>
-<text x="1820" y="597" text-anchor="middle" class="s">or refusal</text>
+<rect x="1346" y="438" width="64" height="64" rx="18" fill="#64748b"/>
+<g transform="translate(1361.36,453.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20c.8-4 3.8-6 7.5-6s6.7 2 7.5 6"/></g>
+<text x="1378" y="526" text-anchor="middle" class="n">Asker</text>
+<text x="1378" y="545" text-anchor="middle" class="s">answer or prompt</text>
 </g>
-<text x="48" y="144" class="b" text-anchor="start" style="fill:#f472b6">SKILLS FLOW IN</text>
+<text x="40" y="134" class="b" text-anchor="start" style="fill:#f472b6">SKILLS FLOW IN</text>
 <g>
-<rect x="62" y="168" width="76" height="76" rx="16" fill="#111933" stroke="#f472b6" stroke-width="2.2"/>
-<g transform="translate(80.24,186.24) scale(1.6466666666666667)" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5h7l4 4v13h-11z"/><path d="M13.5 3.5v4h4"/><path d="M9 12h6M9 15.5h6"/></g>
-<text x="100" y="268" text-anchor="middle" class="n">SKILL.md</text>
-<text x="100" y="287" text-anchor="middle" class="s">written by</text>
-<text x="100" y="303" text-anchor="middle" class="s">its author</text>
+<rect x="40" y="164" width="64" height="64" rx="16" fill="#111933" stroke="#f472b6" stroke-width="2.2"/>
+<g transform="translate(55.36,179.36) scale(1.3866666666666667)" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5h7l4 4v13h-11z"/><path d="M13.5 3.5v4h4"/><path d="M9 12h6M9 15.5h6"/></g>
+<text x="72" y="252" text-anchor="middle" class="n">SKILL.md</text>
+<text x="72" y="271" text-anchor="middle" class="s">by its author</text>
 </g>
 <g>
-<rect x="212" y="168" width="76" height="76" rx="16" fill="#111933" stroke="#f472b6" stroke-width="2.2"/>
-<g transform="translate(230.24,186.24) scale(1.6466666666666667)" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6.5" rx="7" ry="2.8"/><path d="M5 6.5v5.5c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8V6.5"/><path d="M5 12v5.5c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8V12"/></g>
-<text x="250" y="268" text-anchor="middle" class="n">Skills registry</text>
-<text x="250" y="287" text-anchor="middle" class="s">published, with</text>
-<text x="250" y="303" text-anchor="middle" class="s">a commitment</text>
+<rect x="184" y="164" width="64" height="64" rx="16" fill="#111933" stroke="#f472b6" stroke-width="2.2"/>
+<g transform="translate(199.36,179.36) scale(1.3866666666666667)" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6.5" rx="7" ry="2.8"/><path d="M5 6.5v5.5c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8V6.5"/><path d="M5 12v5.5c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8V12"/></g>
+<text x="216" y="252" text-anchor="middle" class="n">Skills registry</text>
+<text x="216" y="271" text-anchor="middle" class="s">with a commitment</text>
 </g>
 <g>
-<rect x="362" y="168" width="76" height="76" rx="16" fill="#111933" stroke="#f472b6" stroke-width="2.2"/>
-<g transform="translate(380.24,186.24) scale(1.6466666666666667)" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l7.5 4v9l-7.5 4-7.5-4v-9z"/><path d="M4.5 7.5l7.5 4 7.5-4M12 11.5v9"/></g>
-<text x="400" y="268" text-anchor="middle" class="n">Archetype</text>
-<text x="400" y="287" text-anchor="middle" class="s">one tool per skill,</text>
-<text x="400" y="303" text-anchor="middle" class="s">one digest</text>
+<rect x="328" y="164" width="64" height="64" rx="16" fill="#111933" stroke="#f472b6" stroke-width="2.2"/>
+<g transform="translate(343.36,179.36) scale(1.3866666666666667)" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l7.5 4v9l-7.5 4-7.5-4v-9z"/><path d="M4.5 7.5l7.5 4 7.5-4M12 11.5v9"/></g>
+<text x="360" y="252" text-anchor="middle" class="n">Archetype</text>
+<text x="360" y="271" text-anchor="middle" class="s">one digest</text>
 </g>
 <g>
-<rect x="512" y="168" width="76" height="76" rx="16" fill="#111933" stroke="#f472b6" stroke-width="2.2"/>
-<g transform="translate(530.24,186.24) scale(1.6466666666666667)" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.3"/><circle cx="18" cy="7" r="2.3"/><circle cx="12" cy="18" r="2.3"/><path d="M8.2 6.4l7.5.400M7.2 8l3.7 8M16.8 9l-3.7 7"/></g>
-<text x="550" y="268" text-anchor="middle" class="n">Domain ontology</text>
-<text x="550" y="287" text-anchor="middle" class="s">covers, produces,</text>
-<text x="550" y="303" text-anchor="middle" class="s">consumes</text>
+<rect x="472" y="164" width="64" height="64" rx="16" fill="#111933" stroke="#f472b6" stroke-width="2.2"/>
+<g transform="translate(487.36,179.36) scale(1.3866666666666667)" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.3"/><circle cx="18" cy="7" r="2.3"/><circle cx="12" cy="18" r="2.3"/><path d="M8.2 6.4l7.5.400M7.2 8l3.7 8M16.8 9l-3.7 7"/></g>
+<text x="504" y="252" text-anchor="middle" class="n">Domain ontology</text>
+<text x="504" y="271" text-anchor="middle" class="s">what each covers</text>
 </g>
-<path d="M146 206H200" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
-<path d="M296 206H350" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
-<path d="M504 206H450" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
-<path d="M400 318V450" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
-<text x="414" y="342" text-anchor="start" class="s" style="fill:#f472b6">assigned by the agent's custodian,</text>
-<text x="414" y="358" text-anchor="start" class="s" style="fill:#f472b6">pinned by digest</text>
-<path d="M426 454V416Q426 400 442 400H684Q700 400 700 416V450" fill="none" stroke="#f472b6" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#as)"/>
-<text x="450" y="390" text-anchor="start" class="s" style="fill:#f472b6">each skill's card: purpose, produces, not for</text>
-<path d="M250 160V124Q250 108 266 108H1319Q1335 108 1335 124V450" fill="none" stroke="#f472b6" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#as)"/>
-<text x="800" y="132" text-anchor="middle" class="s" style="fill:#f472b6">the skill's body, read at answer time by the digest the playbook pinned. A body that moved is refused, never applied.</text>
+<path d="M112 196H172" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
+<path d="M256 196H316" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
+<path d="M464 196H404" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
+<path d="M360 286V314Q360 330 344 330H316Q300 330 300 346V426" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
+<text x="288" y="366" text-anchor="end" class="s" style="fill:#f472b6">assigned by the</text>
+<text x="288" y="382" text-anchor="end" class="s" style="fill:#f472b6">agent's custodian</text>
+<path d="M322 430V394Q322 378 338 378H512Q528 378 528 394V426" fill="none" stroke="#f472b6" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#as)"/>
+<text x="344" y="368" text-anchor="start" class="s" style="fill:#f472b6">each skill's card</text>
+<path d="M216 156V120Q216 104 232 104H1000Q1016 104 1016 120V426" fill="none" stroke="#f472b6" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#as)"/>
+<text x="702" y="126" text-anchor="middle" class="s" style="fill:#f472b6">the skill's body, read when its step runs, by the digest the playbook pinned</text>
 <g>
-<rect x="668" y="713" width="64" height="64" rx="16" fill="#111933" stroke="#f59e0b" stroke-width="2.2"/>
-<g transform="translate(683.36,728.36) scale(1.3866666666666667)" fill="none" stroke="#f59e0b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l1.9 5.6 5.6 1.9-5.6 1.9L12 18.5l-1.9-5.6L4.5 11l5.6-1.9z"/><path d="M18.5 16.5v3M17 18h3"/></g>
-<text x="700" y="801" text-anchor="middle" class="n">Planner model</text>
-<text x="700" y="820" text-anchor="middle" class="s">no skill fits: plans over</text>
-<text x="700" y="836" text-anchor="middle" class="s">the agent's other tools</text>
+<rect x="500" y="640" width="56" height="56" rx="16" fill="#111933" stroke="#f59e0b" stroke-width="2.2"/>
+<g transform="translate(513.44,653.44) scale(1.2133333333333334)" fill="none" stroke="#f59e0b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l1.9 5.6 5.6 1.9-5.6 1.9L12 18.5l-1.9-5.6L4.5 11l5.6-1.9z"/><path d="M18.5 16.5v3M17 18h3"/></g>
+<text x="528" y="720" text-anchor="middle" class="n">Planner model</text>
+<text x="528" y="739" text-anchor="middle" class="s">when no skill fits</text>
 </g>
-<path d="M700 618V705" fill="none" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/>
-<path d="M740 745H834Q850 745 850 729V618" fill="none" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/>
+<path d="M528 564V632" fill="none" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/>
+<path d="M564 668H626Q642 668 642 652V564" fill="none" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/>
 <g>
-<rect x="1118" y="713" width="64" height="64" rx="16" fill="#111933" stroke="#22c55e" stroke-width="2.2"/>
-<g transform="translate(1133.36,728.36) scale(1.3866666666666667)" fill="none" stroke="#22c55e" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 4.5l8 7"/><path d="M6.5 10v9.5h11V10"/><path d="M10 19.5v-5h4v5"/></g>
-<text x="1150" y="801" text-anchor="middle" class="n">The person's Home</text>
-<text x="1150" y="820" text-anchor="middle" class="s">no mandate yet: they sign,</text>
-<text x="1150" y="836" text-anchor="middle" class="s">and the same run resumes</text>
+<rect x="848" y="640" width="56" height="56" rx="16" fill="#111933" stroke="#22c55e" stroke-width="2.2"/>
+<g transform="translate(861.44,653.44) scale(1.2133333333333334)" fill="none" stroke="#22c55e" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 4.5l8 7"/><path d="M6.5 10v9.5h11V10"/><path d="M10 19.5v-5h4v5"/></g>
+<text x="876" y="720" text-anchor="middle" class="n">The person's Home</text>
+<text x="876" y="739" text-anchor="middle" class="s">they sign, the run resumes</text>
 </g>
-<path d="M1150 618V705" fill="none" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)" marker-start="url(#b)"/>
+<path d="M876 586V632" fill="none" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)" marker-start="url(#b)"/>
 <g>
-<rect x="1488" y="713" width="64" height="64" rx="16" fill="#111933" stroke="#6366f1" stroke-width="2.2"/>
-<g transform="translate(1503.36,728.36) scale(1.3866666666666667)" fill="none" stroke="#6366f1" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="14" rx="2"/><circle cx="12" cy="11.5" r="3"/><path d="M12 8.5v-1M7 18.5v2M17 18.5v2"/></g>
-<text x="1520" y="801" text-anchor="middle" class="n">The agent's vault</text>
-<text x="1520" y="820" text-anchor="middle" class="s">the run record and</text>
-<text x="1520" y="836" text-anchor="middle" class="s">its provenance</text>
+<rect x="1138" y="640" width="56" height="56" rx="16" fill="#111933" stroke="#6366f1" stroke-width="2.2"/>
+<g transform="translate(1151.44,653.44) scale(1.2133333333333334)" fill="none" stroke="#6366f1" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="14" rx="2"/><circle cx="12" cy="11.5" r="3"/><path d="M12 8.5v-1M7 18.5v2M17 18.5v2"/></g>
+<text x="1166" y="720" text-anchor="middle" class="n">The agent's vault</text>
+<text x="1166" y="739" text-anchor="middle" class="s">the run and its provenance</text>
 </g>
-<path d="M1520 618V705" fill="none" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/>
-<path d="M1335 618V878" fill="none" stroke="#8b95b5" stroke-width="2"/>
-<path d="M1155 906V894Q1155 878 1171 878H1499Q1515 878 1515 894V906M1275 878V906M1395 878V906" fill="none" stroke="#8b95b5" stroke-width="2"/>
-<rect x="1131" y="910" width="48" height="48" rx="13" fill="#111933" stroke="#0ea5e9" stroke-width="2"/>
-<g transform="translate(1143,922)" fill="none" stroke="#0ea5e9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l1.9 5.6 5.6 1.9-5.6 1.9L12 18.5l-1.9-5.6L4.5 11l5.6-1.9z"/><path d="M18.5 16.5v3M17 18h3"/></g>
-<text x="1155" y="980" text-anchor="middle" class="t">A skill</text>
-<rect x="1251" y="910" width="48" height="48" rx="13" fill="#111933" stroke="#0ea5e9" stroke-width="2"/>
-<g transform="translate(1263,922)" fill="none" stroke="#0ea5e9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5a4 4 0 0 0-4.8 5.2L4.5 15.4l2.6 2.6 5.2-5.2A4 4 0 0 0 17.5 8l-2.5 2.5-2-2z"/></g>
-<text x="1275" y="980" text-anchor="middle" class="t">An act</text>
-<rect x="1371" y="910" width="48" height="48" rx="13" fill="#111933" stroke="#0ea5e9" stroke-width="2"/>
-<g transform="translate(1383,922)" fill="none" stroke="#0ea5e9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5v4.5M15 3.5v4.5M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0zM12 17v3.5"/></g>
-<text x="1395" y="980" text-anchor="middle" class="t">A connector</text>
-<rect x="1491" y="910" width="48" height="48" rx="13" fill="#111933" stroke="#0ea5e9" stroke-width="2"/>
-<g transform="translate(1503,922)" fill="none" stroke="#0ea5e9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8" width="14" height="10.5" rx="3"/><path d="M12 8V4.5"/><circle cx="12" cy="3.8" r="1"/><circle cx="9.3" cy="13" r="1.2"/><circle cx="14.7" cy="13" r="1.2"/></g>
-<text x="1515" y="980" text-anchor="middle" class="t">Another agent</text>
-<text x="1335" y="1002" text-anchor="middle" class="s">what a step can be</text>
-<path d="M48 900h44" stroke="#8b95b5" stroke-width="2" marker-end="url(#a)"/><text x="106" y="904" class="s" text-anchor="start">the ask</text>
-<path d="M48 926h44" stroke="#f472b6" stroke-width="2" marker-end="url(#as)"/><text x="106" y="930" class="s" text-anchor="start">a skill, on its way in</text>
-<path d="M48 952h44" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/><text x="106" y="956" class="s" text-anchor="start">only when needed</text>
-<text x="48" y="992" class="s" text-anchor="start">Choosing a skill never permits anything: the chosen step still meets every gate after it.</text>
-<text x="1872" y="1010" class="s" text-anchor="end">faithnet.estate/architecture</text>
+<path d="M1166 586V632" fill="none" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/>
+<path d="M1016 564V788" fill="none" stroke="#8b95b5" stroke-width="2"/>
+<path d="M842 816V804Q842 788 858 788H1174Q1190 788 1190 804V816M958 788V816M1074 788V816" fill="none" stroke="#8b95b5" stroke-width="2"/>
+<rect x="818" y="820" width="48" height="48" rx="13" fill="#111933" stroke="#0ea5e9" stroke-width="2"/>
+<g transform="translate(830,832)" fill="none" stroke="#0ea5e9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l1.9 5.6 5.6 1.9-5.6 1.9L12 18.5l-1.9-5.6L4.5 11l5.6-1.9z"/><path d="M18.5 16.5v3M17 18h3"/></g>
+<text x="842" y="890" text-anchor="middle" class="t">A skill</text>
+<rect x="934" y="820" width="48" height="48" rx="13" fill="#111933" stroke="#0ea5e9" stroke-width="2"/>
+<g transform="translate(946,832)" fill="none" stroke="#0ea5e9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5a4 4 0 0 0-4.8 5.2L4.5 15.4l2.6 2.6 5.2-5.2A4 4 0 0 0 17.5 8l-2.5 2.5-2-2z"/></g>
+<text x="958" y="890" text-anchor="middle" class="t">An act</text>
+<rect x="1050" y="820" width="48" height="48" rx="13" fill="#111933" stroke="#0ea5e9" stroke-width="2"/>
+<g transform="translate(1062,832)" fill="none" stroke="#0ea5e9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5v4.5M15 3.5v4.5M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0zM12 17v3.5"/></g>
+<text x="1074" y="890" text-anchor="middle" class="t">A connector</text>
+<rect x="1166" y="820" width="48" height="48" rx="13" fill="#111933" stroke="#0ea5e9" stroke-width="2"/>
+<g transform="translate(1178,832)" fill="none" stroke="#0ea5e9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8" width="14" height="10.5" rx="3"/><path d="M12 8V4.5"/><circle cx="12" cy="3.8" r="1"/><circle cx="9.3" cy="13" r="1.2"/><circle cx="14.7" cy="13" r="1.2"/></g>
+<text x="1190" y="890" text-anchor="middle" class="t">Another agent</text>
+<text x="1016" y="912" text-anchor="middle" class="s">what a step can be</text>
+<path d="M40 800h44" stroke="#8b95b5" stroke-width="2" marker-end="url(#a)"/><text x="98" y="804" class="s" text-anchor="start">the ask</text>
+<path d="M40 826h44" stroke="#f472b6" stroke-width="2" marker-end="url(#as)"/><text x="98" y="830" class="s" text-anchor="start">a skill, on its way in</text>
+<path d="M40 852h44" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/><text x="98" y="856" class="s" text-anchor="start">only when needed</text>
+<text x="40" y="892" text-anchor="start" class="s">Choosing a skill never permits anything:</text>
+<text x="40" y="908" text-anchor="start" class="s">the chosen step still meets every gate after it.</text>
+<text x="1420" y="934" class="s" text-anchor="end">faithnet.estate/architecture</text>
 </svg>

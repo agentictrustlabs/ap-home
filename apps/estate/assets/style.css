@@ -21,14 +21,39 @@ button.primary { background:var(--accent); border-color:var(--accent); color:#ff
 input { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg); width:7rem; }
 .err { color:var(--bad); } .note { padding:10px 12px; border-left:3px solid var(--warn); background:var(--card); }
 
-/* the architecture posts: prose at a reading width, the picture wider than the text and scrollable on a small screen */
+/* the architecture posts: prose at a reading width; the flow (picture, its steps to the right) wider than the text */
 .post, .post-card { max-width:46rem; } .post h1 { font-size:2rem; line-height:1.2; margin:6px 0 10px; text-wrap:balance; }
 .post h2 { font-size:1.25rem; margin:36px 0 8px; } .post p, .post li { line-height:1.6; } .post li { margin:8px 0; }
 .lede { font-size:1.15rem; color:var(--muted); margin:0 0 20px; }
-.post code { font:0.92em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:var(--card); border:1px solid var(--line); border-radius:5px; padding:1px 5px; }
-.picture { margin:24px 0 8px; width:min(1500px, calc(100vw - 32px)); } .picture .scroll { overflow-x:auto; border-radius:14px; background:#0b1020; }
-.picture img { display:block; width:100%; min-width:1180px; height:auto; } .picture figcaption { font-size:.85rem; color:var(--muted); margin-top:8px; max-width:46rem; }
-@media (min-width:1000px) { .picture { margin-left:calc((min(1500px, 100vw - 32px) - 928px) / -2); } }
+.post code { font:0.92em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:var(--card); border:1px solid var(--line); border-radius:5px; padding:1px 5px; overflow-wrap:anywhere; }
+.flow { --w:min(1720px, calc(100vw - 32px)); width:var(--w); margin:24px 0 8px; display:grid; grid-template-columns:minmax(0,1fr); gap:20px; align-items:start; }
+.picture { margin:0; min-width:0; } .picture .scroll { overflow-x:auto; border-radius:14px; background:#0b1020; }
+.canvas { position:relative; min-width:980px; } .canvas img { display:block; width:100%; height:auto; }
+.picture figcaption { font-size:.85rem; color:var(--muted); margin-top:8px; max-width:46rem; }
+/* a clear link over each numbered tile */
+.hots { position:absolute; inset:0; width:100%; height:100%; } .hots rect { fill:transparent; stroke:transparent; stroke-width:3; cursor:pointer; }
+.hots a:hover rect, .hots a:focus rect { stroke:#fff; }
+.num { display:inline-grid; place-items:center; flex:none; width:1.6rem; height:1.6rem; border-radius:50%; background:var(--c); color:#fff; font-size:.8rem; font-weight:700; }
+.flow-steps { display:block; min-width:0; } .flow-steps h2 { margin:0 0 2px; font-size:1.1rem; } .flow-steps > p { margin:0 0 10px; font-size:.9rem; }
+.flow-steps ol { list-style:none; margin:0; padding:0; display:grid; gap:6px; } .post .flow-steps li { margin:0; line-height:1.35; }
+.flow-steps li a { display:grid; grid-template-columns:auto 1fr; gap:1px 10px; align-items:center; padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--fg); text-decoration:none; }
+.flow-steps li a:hover, .flow-steps li a:focus-visible { border-color:var(--accent); } .flow-steps .sum { grid-column:2; font-size:.88rem; color:var(--muted); }
+#closed { position:fixed; top:0; left:0; } .flys { position:absolute; }
+@media (min-width:1000px) { .flow { margin-left:calc((var(--w) - 928px) / -2); } }
+@media (min-width:1240px) { .flow { grid-template-columns:minmax(0,1fr) 372px; } .canvas { min-width:0; } }
+/* a step's details: a panel on the right, open while its id is the address's fragment */
+.fly { display:none; position:fixed; inset:0; z-index:20; } .fly:target { display:block; }
+.fly .shade { position:absolute; inset:0; background:rgb(0 0 0 / .35); }
+.fly .sheet { position:absolute; top:0; right:0; bottom:0; width:min(560px, 100vw); box-sizing:border-box; overflow-y:auto; overscroll-behavior:contain; padding:16px 22px 32px; background:var(--bg); border-left:1px solid var(--line); box-shadow:-12px 0 32px rgb(0 0 0 / .18); }
+@media (min-width:1240px) { .fly .shade { background:none; } .fly .sheet { width:max(408px, calc((100vw - var(--w)) / 2 + 392px)); } }
+.fly-top { display:flex; align-items:center; gap:10px; margin:0 0 6px; font-size:.9rem; } .fly-top .close { margin-left:auto; padding:5px 12px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg); text-decoration:none; }
+.post .fly h2 { margin:6px 0 4px; font-size:1.5rem; } .fly .lede { font-size:1.02rem; margin:0 0 6px; }
+.fly h3 { margin:20px 0 4px; font-size:.78rem; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+.fly p { margin:6px 0; } .fly ul { margin:6px 0; padding-left:1.15rem; } .post .fly li { margin:4px 0; line-height:1.5; }
+.fly-nav { display:flex; justify-content:space-between; gap:12px; margin:26px 0 0; padding-top:14px; border-top:1px solid var(--line); }
+/* the open step is marked in the picture and in the list */
+.flow:has(.fly:nth-child(1):target) .hots a:nth-child(1) rect, .flow:has(.fly:nth-child(2):target) .hots a:nth-child(2) rect, .flow:has(.fly:nth-child(3):target) .hots a:nth-child(3) rect, .flow:has(.fly:nth-child(4):target) .hots a:nth-child(4) rect, .flow:has(.fly:nth-child(5):target) .hots a:nth-child(5) rect, .flow:has(.fly:nth-child(6):target) .hots a:nth-child(6) rect, .flow:has(.fly:nth-child(7):target) .hots a:nth-child(7) rect, .flow:has(.fly:nth-child(8):target) .hots a:nth-child(8) rect, .flow:has(.fly:nth-child(9):target) .hots a:nth-child(9) rect, .flow:has(.fly:nth-child(10):target) .hots a:nth-child(10) rect, .flow:has(.fly:nth-child(11):target) .hots a:nth-child(11) rect, .flow:has(.fly:nth-child(12):target) .hots a:nth-child(12) rect { stroke:#fff; }
+.flow:has(.fly:nth-child(1):target) .flow-steps li:nth-child(1) a, .flow:has(.fly:nth-child(2):target) .flow-steps li:nth-child(2) a, .flow:has(.fly:nth-child(3):target) .flow-steps li:nth-child(3) a, .flow:has(.fly:nth-child(4):target) .flow-steps li:nth-child(4) a, .flow:has(.fly:nth-child(5):target) .flow-steps li:nth-child(5) a, .flow:has(.fly:nth-child(6):target) .flow-steps li:nth-child(6) a, .flow:has(.fly:nth-child(7):target) .flow-steps li:nth-child(7) a, .flow:has(.fly:nth-child(8):target) .flow-steps li:nth-child(8) a, .flow:has(.fly:nth-child(9):target) .flow-steps li:nth-child(9) a, .flow:has(.fly:nth-child(10):target) .flow-steps li:nth-child(10) a, .flow:has(.fly:nth-child(11):target) .flow-steps li:nth-child(11) a, .flow:has(.fly:nth-child(12):target) .flow-steps li:nth-child(12) a { border-color:var(--accent); box-shadow:inset 3px 0 0 var(--accent); }
 .post-card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin:20px 0; }
 .post-card h2 { margin:14px 0 2px; font-size:1.25rem; } .post-card h2 a { color:var(--fg); text-decoration:none; } .post-card p { margin:6px 0; }
 .post-card .thumb img { display:block; width:100%; height:auto; border-radius:8px; }
