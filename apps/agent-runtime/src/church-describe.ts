@@ -16,6 +16,10 @@
 // A church with no profile answers with its name alone and `sites: []` — the true answer ("this church lists no
 // sites"), never an error. Nothing about people is read or returned: the profile's sites are sanitised to the §2
 // keys, so a steward who wrote a roster into the record would not publish it here.
+//
+// GROUPS (ap-church spec 204 §1). The same answer may list the church's groups — a home group, a men's group — under
+// `groups`, an optional addition to church.describe/1: what the group is and when and where it meets, never who is
+// in it or who leads it. A person's agent reads them here before it keeps that person's own groups.
 import type { Address } from 'viem';
 
 export const CHURCH_DESCRIBE = 'church.describe' as const;
@@ -28,7 +32,7 @@ export const CHURCH_PROFILE_KEY = 'faith.church-profile:current';
 export const CHURCH_DESCRIBE_SKILL = {
   id: CHURCH_DESCRIBE,
   name: 'Describe this church',
-  description: 'This church’s own public description: its name, what it says of itself, its website, and the sites (campuses) a person may choose among, each with an address, time zone and service times when published. No credential: SendMessage with a data part { "skill": "church.describe" }; the answer is a message whose data part carries `protocol: "church.describe/1"`, `church` and `sites`. Nothing about people.',
+  description: 'This church’s own public description: its name, what it says of itself, its website, the sites (campuses) a person may choose among, each with an address, time zone and service times when published, and the groups it lists (what each is, when and where it meets). No credential: SendMessage with a data part { "skill": "church.describe" }; the answer is a message whose data part carries `protocol: "church.describe/1"`, `church`, `sites` and `groups`. Nothing about people.',
   tags: ['church', 'public', 'a2a'],
 };
 
@@ -41,12 +45,30 @@ export interface ChurchSiteV1 {
   website?: string;
   services?: Array<{ day: string; time: string; durationMinutes?: number }>;
 }
+/** Spec 204 §1 — the kinds a group may say it is; anything else is kept as `other`. */
+export const CHURCH_GROUP_KINDS = ['home', 'men', 'women', 'couples', 'youth', 'young-adults', 'bible-study', 'prayer', 'serving', 'other'] as const;
+export type ChurchGroupKind = (typeof CHURCH_GROUP_KINDS)[number];
+export interface ChurchGroupV1 {
+  id: string;
+  '@type'?: string;
+  name: string;
+  kind: ChurchGroupKind;
+  description?: string;
+  /** When it meets, in the church's own words ("Thursdays 6:30 AM"). */
+  schedule?: string;
+  /** Where it meets, in the church's own words. Never a private home's address unless the church published it. */
+  location?: string;
+  /** The id of the site it belongs to, when it belongs to one. */
+  site?: string;
+}
 export interface ChurchDescriptionV1 {
   skill: typeof CHURCH_DESCRIBE;
   protocol: typeof CHURCH_DESCRIBE_PROTOCOL;
   '@type': string;
   church: { agent: string; name?: string; displayName: string; description?: string; website?: string; timezone?: string };
   sites: ChurchSiteV1[];
+  /** Spec 204 §1 — optional; absent means the same as empty. */
+  groups?: ChurchGroupV1[];
   updatedAt: string;
 }
 
@@ -91,6 +113,36 @@ export function sanitizeSites(raw: unknown): ChurchSiteV1[] {
   return out;
 }
 
+export const groupKindOf = (v: unknown): ChurchGroupKind => {
+  const k = s(v, 40).toLowerCase().replace(/[\s_]+/g, '-');
+  return (CHURCH_GROUP_KINDS as readonly string[]).includes(k) ? (k as ChurchGroupKind) : 'other';
+};
+
+/** Spec 204 §1's group shape and nothing else: unknown keys (a roster, a leader, a phone number) are dropped; a group
+ *  without an id and a name is not a group; a `site` the church does not list is left off. */
+export function sanitizeGroups(raw: unknown, sites: ReadonlyArray<{ id: string }> = []): ChurchGroupV1[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: ChurchGroupV1[] = [];
+  for (const r of raw.slice(0, 500)) {
+    if (!r || typeof r !== 'object') continue;
+    const o = r as Record<string, unknown>;
+    const id = s(o.id, 180);
+    const name = s(o.name, 200);
+    if (!id || !name || seen.has(id)) continue;
+    seen.add(id);
+    const site = s(o.site, 180);
+    out.push({
+      id, '@type': `${CHURCH_NS}ChurchGroup`, name, kind: groupKindOf(o.kind),
+      ...(s(o.description, 1000) ? { description: s(o.description, 1000) } : {}),
+      ...(s(o.schedule, 200) ? { schedule: s(o.schedule, 200) } : {}),
+      ...(s(o.location, 200) ? { location: s(o.location, 200) } : {}),
+      ...(site && sites.some((x) => x.id === site) ? { site } : {}),
+    });
+  }
+  return out;
+}
+
 export interface ChurchDescribeDeps {
   /** The agent's declared type (`atl:agentType`), on chain. */
   agentTypeOf: (agent: string) => Promise<string | null>;
@@ -123,6 +175,7 @@ export async function churchDescription(deps: ChurchDescribeDeps, agent: Address
   const website = [s(p.website), s(records?.siteUrl)].find((u) => URL_RE.test(u));
   const timezone = s(p.timezone, 64);
   const sites = sanitizeSites(p.sites);
+  const groups = sanitizeGroups(p.groups, sites);
   const updatedAt = s(p.updatedAt, 40) || (deps.now ? deps.now() : new Date()).toISOString();
   const out: ChurchDescriptionV1 = {
     skill: CHURCH_DESCRIBE,
@@ -130,11 +183,13 @@ export async function churchDescription(deps: ChurchDescribeDeps, agent: Address
     '@type': `${CHURCH_NS}ChurchDescription`,
     church: { agent: who, ...(name ? { name } : {}), displayName, ...(description ? { description } : {}), ...(website ? { website } : {}), ...(timezone ? { timezone } : {}) },
     sites,
+    groups,
     updatedAt,
   };
-  const said = sites.length
+  const said = (sites.length
     ? `${displayName} meets at ${sites.length} site${sites.length === 1 ? '' : 's'}: ${sites.map((x) => x.name).join(', ')}.`
-    : `${displayName} lists no separate sites.`;
+    : `${displayName} lists no separate sites.`)
+    + (groups.length ? ` It lists ${groups.length} group${groups.length === 1 ? '' : 's'}.` : '');
   return { ...out, answer: said };
 }
 
@@ -182,12 +237,14 @@ export async function askChurchDescribe(fetcher: typeof fetch, records: ChurchNa
   const agent = s(church.agent, 42).toLowerCase();
   const displayName = s(church.displayName, 200);
   if (!/^0x[0-9a-f]{40}$/.test(agent) || !displayName) return { ok: false, reason: 'its description does not say which agent it is, or its name' };
+  const sites = sanitizeSites(data.sites);
   return {
     ok: true, endpoint,
     description: {
       skill: CHURCH_DESCRIBE, protocol: CHURCH_DESCRIBE_PROTOCOL, '@type': s(data['@type']) || `${CHURCH_NS}ChurchDescription`,
       church: { agent, displayName, ...(s(church.name) ? { name: s(church.name) } : {}) },
-      sites: sanitizeSites(data.sites),
+      sites,
+      groups: sanitizeGroups(data.groups, sites),
       updatedAt: s(data.updatedAt, 40),
     },
   };

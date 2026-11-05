@@ -28,6 +28,11 @@ const CALVARY_SITES = [
   { id: 'campus_boulder', name: 'Boulder' },
 ];
 
+const CALVARY_GROUPS = [
+  { id: 'group_mens', name: 'Men’s Group', kind: 'men', schedule: 'Thursdays 6:30 AM', site: 'campus_erie', leader: 'Tom', members: ['Bob'] },
+  { id: 'group_erie_home', name: 'Erie Home Group', kind: 'Home' },
+];
+
 /** The network boundary: the naming service, each church's card, and its A2A endpoint. */
 function network(over: { names?: Record<string, unknown>; describe?: Record<string, unknown>; down?: boolean; noCard?: boolean } = {}) {
   const calls: string[] = [];
@@ -37,7 +42,7 @@ function network(over: { names?: Record<string, unknown>; describe?: Record<stri
     ...over.names,
   };
   const describe: Record<string, unknown> = {
-    'https://edge.example/api/a2a/calvary-bible-co.church': describeAnswer(CALVARY, 'Calvary Bible Church', CALVARY_SITES),
+    'https://edge.example/api/a2a/calvary-bible-co.church': describeAnswer(CALVARY, 'Calvary Bible Church', CALVARY_SITES, CALVARY_GROUPS),
     'https://edge.example/api/a2a/fort-morgan-household.church': describeAnswer(HOUSE, 'Fort Morgan household church', []),
     'https://fort-morgan-household-church.faithnet.ai/api/a2a': describeAnswer(HOUSE, 'Fort Morgan household church', []),
     ...over.describe,
@@ -71,10 +76,10 @@ function nameAnswer(agent: string, a2aEndpoint: string, cardUri?: string, agentT
     records: [{ key: 'addr', value: agent.toUpperCase().replace('0X', '0x') }, { key: 'a2aEndpoint', value: a2aEndpoint }, ...(cardUri ? [{ key: 'cardUri', value: cardUri }] : [])],
   };
 }
-function describeAnswer(agent: string, displayName: string, sites: unknown[]) {
+function describeAnswer(agent: string, displayName: string, sites: unknown[], groups?: unknown[]) {
   return {
     messageId: 'm', role: 'ROLE_AGENT',
-    parts: [{ text: `${displayName}.` }, { data: { skill: 'church.describe', protocol: CHURCH_DESCRIBE_PROTOCOL, church: { agent, displayName }, sites, updatedAt: '2026-11-04T00:00:00.000Z' } }],
+    parts: [{ text: `${displayName}.` }, { data: { skill: 'church.describe', protocol: CHURCH_DESCRIBE_PROTOCOL, church: { agent, displayName }, sites, ...(groups ? { groups } : {}), updatedAt: '2026-11-04T00:00:00.000Z' } }],
   };
 }
 
@@ -190,6 +195,77 @@ describe('person.church.home — her choice of church, checked against the churc
   });
 });
 
+describe('person.church.home — her groups, kept beside her church (spec 204)', () => {
+  const NOW = () => new Date('2026-11-04T12:00:00Z');
+  const erie = { agent: CALVARY, name: 'calvary-bible-co.church', site: 'campus_erie' };
+  const setup = () => {
+    const v = vault();
+    const net = network();
+    return { v, inv: churchHomeInvoker({ ...v, fetch: net.fetcher, namesOrigin: 'https://names.example', now: NOW }, ALICE, ALICE) };
+  };
+  const stored = (v: ReturnType<typeof vault>) => v.rows.get(`${ALICE}|${CHURCH_HOME_KEY}`) as { groups: unknown[] };
+
+  it('keeps a group her church lists under the church’s own name for it, and a group of her own under hers', async () => {
+    const { v, inv } = setup();
+    const out = (await inv(CHURCH_HOME_SAVE, { churches: [erie], groups: JSON.stringify([{ church: CALVARY, id: 'group_mens', name: 'Wrong name', kind: 'women' }, { name: '  Thursday   friends ', kind: 'home' }]) }, turn())) as { answer: string };
+    expect(stored(v).groups).toEqual([
+      { id: 'group_mens', name: 'Men’s Group', kind: 'men', church: CALVARY },
+      { id: 'own-thursday-friends', name: 'Thursday friends', kind: 'home', church: null },
+    ]);
+    expect(out.answer).toMatch(/2 groups: Men’s Group, Thursday friends/);
+    const got = (await inv(CHURCH_HOME_GET, {}, turn())) as { groups: unknown[]; answer: string };
+    expect(got.groups).toEqual(stored(v).groups);
+    expect(got.answer).toMatch(/Your groups: Men’s Group, Thursday friends/);
+  });
+
+  it('a save that does not mention groups keeps them (an app that only knows churches cannot wipe them)', async () => {
+    const { v, inv } = setup();
+    await inv(CHURCH_HOME_SAVE, { churches: [erie], groups: [{ church: CALVARY, id: 'group_erie_home' }, { name: 'Lunch prayer', kind: 'prayer' }] }, turn());
+    await inv(CHURCH_HOME_SAVE, { churches: [{ ...erie, site: 'campus_boulder' }] }, turn());
+    expect(stored(v).groups).toEqual([
+      { id: 'group_erie_home', name: 'Erie Home Group', kind: 'home', church: CALVARY },
+      { id: 'own-lunch-prayer', name: 'Lunch prayer', kind: 'prayer', church: null },
+    ]);
+  });
+
+  it('leaving a church leaves its groups; her own groups stay', async () => {
+    const { v, inv } = setup();
+    await inv(CHURCH_HOME_SAVE, { churches: [erie], groups: [{ church: CALVARY, id: 'group_mens' }, { name: 'Lunch prayer' }] }, turn());
+    await inv(CHURCH_HOME_SAVE, { churches: [{ agent: HOUSE, name: 'fort-morgan-household.church' }] }, turn());
+    expect(stored(v).groups).toEqual([{ id: 'own-lunch-prayer', name: 'Lunch prayer', kind: 'other', church: null }]);
+  });
+
+  it('an empty list clears her groups', async () => {
+    const { v, inv } = setup();
+    await inv(CHURCH_HOME_SAVE, { churches: [erie], groups: [{ church: CALVARY, id: 'group_mens' }] }, turn());
+    await inv(CHURCH_HOME_SAVE, { churches: [erie], groups: '[]' }, turn());
+    expect(stored(v).groups).toEqual([]);
+  });
+
+  it('a group the church does not list is refused, naming the ones it does; nothing is saved', async () => {
+    const { v, inv } = setup();
+    const out = (await inv(CHURCH_HOME_SAVE, { churches: [erie], groups: [{ church: CALVARY, id: 'group_secret' }] }, turn())) as { refused: string };
+    expect(out.refused).toMatch(/does not list a group "group_secret".*Men’s Group \(group_mens\).*Nothing was saved/);
+    expect(v.rows.size).toBe(0);
+  });
+
+  it('a group of a church she has not chosen, a church with no groups, a nameless group and an unreadable list are refused', async () => {
+    const { v, inv } = setup();
+    const save = async (churches: unknown, groups: unknown) => ((await inv(CHURCH_HOME_SAVE, { churches, groups } as never, turn())) as { refused: string }).refused;
+    expect(await save([erie], [{ church: HOUSE, id: 'x' }])).toMatch(/choose that church first/);
+    expect(await save([{ agent: HOUSE, name: 'fort-morgan-household.church' }], [{ church: HOUSE, id: 'x' }])).toMatch(/lists no groups yet.*a group of your own/);
+    expect(await save([erie], [{ kind: 'home' }])).toMatch(/needs a name/);
+    expect(await save([erie], 'not json')).toMatch(/say which groups/);
+    expect(v.rows.size).toBe(0);
+  });
+
+  it('a record written before groups reads back with none', async () => {
+    const { v, inv } = setup();
+    v.rows.set(`${ALICE}|${CHURCH_HOME_KEY}`, { churches: [{ agent: CALVARY, name: 'calvary-bible-co.church', displayName: 'Calvary Bible Church', site: null }], defaultChurch: CALVARY });
+    expect(((await inv(CHURCH_HOME_GET, {}, turn())) as { groups: unknown[] }).groups).toEqual([]);
+  });
+});
+
 describe('church.describe/1 — the answer a church agent gives', () => {
   const deps = (type: string | null, profile: unknown = null) => ({
     agentTypeOf: async () => type,
@@ -217,6 +293,20 @@ describe('church.describe/1 — the answer a church agent gives', () => {
     const out = (await churchDescription(deps('church', { timezone: 'America/Denver', sites: [{ id: 'main', name: 'Main', members: ['Bob'], services: [{ day: 'sunday', time: '10:00', leader: 'Pastor X' }, { day: 'Funday', time: '10:00' }] }, { name: 'no id' }] }), HOUSE)) as { church: Record<string, unknown>; sites: Array<Record<string, unknown>> };
     expect(out.church.timezone).toBe('America/Denver');
     expect(out.sites).toEqual([{ id: 'main', '@type': 'https://churchcore.ai/ontology/church#Campus', name: 'Main', services: [{ day: 'Sunday', time: '10:00' }] }]);
+  });
+
+  it('a church profile lists its groups — what each is and when it meets, never who is in it (spec 204)', async () => {
+    const out = (await churchDescription(deps('church', { sites: [{ id: 'main', name: 'Main' }], groups: [
+      { id: 'mens', name: 'Men’s Group', kind: 'men', schedule: 'Thursdays 6:30 AM', location: 'Room 2', site: 'main', leader: 'Tom', members: ['Bob'], phone: '555' },
+      { id: 'quilters', name: 'Quilters', kind: 'craft', site: 'gone' },
+      { name: 'no id' }, { id: 'mens', name: 'Twice' },
+    ] }), HOUSE)) as { groups: unknown[]; answer: string };
+    expect(out.groups).toEqual([
+      { id: 'mens', '@type': 'https://churchcore.ai/ontology/church#ChurchGroup', name: 'Men’s Group', kind: 'men', schedule: 'Thursdays 6:30 AM', location: 'Room 2', site: 'main' },
+      { id: 'quilters', '@type': 'https://churchcore.ai/ontology/church#ChurchGroup', name: 'Quilters', kind: 'other' },
+    ]);
+    expect(out.answer).toMatch(/It lists 2 groups/);
+    expect(((await churchDescription(deps('church'), HOUSE)) as { groups: unknown[] }).groups).toEqual([]);
   });
 
   it('an agent that is not a church does not describe itself as one', async () => {
