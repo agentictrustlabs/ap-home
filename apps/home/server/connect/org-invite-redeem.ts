@@ -15,7 +15,6 @@ import { mintAgentSession } from '@agenticprimitives/connect';
 import { oidcFacetId } from '@agenticprimitives/connect-auth/google';
 import type { CredentialPrincipal } from '@agenticprimitives/types';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
-import { withRecognition } from '../_lib/recognition';
 import { resolveKmsAgent } from '../_lib/kms-resolve';
 import { recordEmailFacetByHash, readRotation } from '../../src/lib/kv-indexer';
 import { orgVault } from '../lib/org-vault';
@@ -93,5 +92,5 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // spec 321 W2: hand the invitee the steward's pre-signed member-access grant. Counterfactual by
   // construction — its delegate is the address derived from this SAME (iss='email', sub) pair, so it
   // matches the home just resolved; the client still checks delegate == its person before recording.
-  return withRecognition(json({ ok: true, status: 'issued', token: sessionToken, org, memberAccessDelegation, ...(relationshipOffer ? { relationshipOffer } : {}) }), { request, env }, { sub: kms.agentId, principal, assurance: 'onchain-confirmed', ttlSeconds: 3600 });
+  return json({ ok: true, status: 'issued', token: sessionToken, org, memberAccessDelegation, ...(relationshipOffer ? { relationshipOffer } : {}) });
 };

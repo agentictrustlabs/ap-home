@@ -38,6 +38,15 @@ describe('the row', () => {
     expect(r.terms).toBeUndefined();
     expect(r.wires).toEqual([{ ref: '0x1' }]);
   });
+  it('remembers nothing with no proof of the person, and still lists the wires so they can be revoked', () => {
+    const r = allow(undefined, { terms: null });
+    expect(r.terms).toBeUndefined();
+    expect(r.origins).toBeUndefined();
+    expect(r.askDelegation?.delegate).toBe(ASK);
+  });
+  it('a row with no proof clears what an earlier Allow remembered', () => {
+    expect(allow(allow(undefined), { terms: null }).terms).toBeUndefined();
+  });
   it('moves what an Allow replaced to superseded, whole, so it can still be revoked', () => {
     const first = allow(undefined);
     const second = allow(first, { delegation: wire(SITE, '3'), askDelegation: wire(ASK, '4') });

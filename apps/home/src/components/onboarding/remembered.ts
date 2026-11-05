@@ -40,6 +40,7 @@ export async function askRemembered(enroll: EnrollReq, person: Address): Promise
         ...(enroll.prompt ? { prompt: enroll.prompt } : {}),
         ...(enroll.sessionKey ? { session_key: enroll.sessionKey } : {}),
         ...(enroll.viaHost ? { via_host: enroll.viaHost } : {}),
+        ...(enroll.loginHint ? { login_hint: enroll.loginHint } : {}),
         ...(wantsName ? { profile_name: profile?.name ?? '' } : {}),
         ...(wantsEmail ? { profile_email: profile?.email ?? '' } : {}),
       }),

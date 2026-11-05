@@ -259,23 +259,19 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       setView({ k: 'blocked' });
       return;
     }
-    // OIDC prompt=none — SILENT SSO (spec 230): the relying app asked for a no-UI outcome, so never
-    // render the connect experience. No home session → `login_required` (the app clears its silent-SSO
-    // hint and shows its own Connect button). A recognized session asks the server (spec 445 §6): for an
-    // app this person already allowed that asks for nothing more, a code, and nothing is signed. Anything
-    // else is `interaction_required`, because a sheet would have to be shown and none can be here.
+    // OIDC prompt=none — SILENT SSO (spec 230): the relying app asked for a no-UI outcome, so never render the connect
+    // experience. A code comes back only for the person the app named (`login_hint`), who allowed it before, for an app
+    // asking nothing more (spec 445 §6). EVERY other case is the same `login_required`: no session, the wrong person, never
+    // allowed. An answer that differed would tell any registered app whether this visitor has a Home session at all.
     if (api.enroll.prompt === 'none') {
       const silent = api.enroll;
       const sso = readSsoCookie();
       if (!sso?.token) { api.deliverError('login_required'); return; }
       void (async () => {
         const person = (await fetchProfile(sso.token).catch(() => null))?.agent?.split(':').pop();
-        if (!person) { api.deliverError('login_required'); return; }
-        const asked = await askRemembered(silent, person as Address);
-        // A live session with no recognition cookie is still a session: a person the app should invite to connect, not
-        // one whose silent-SSO hint it should clear.
-        if (asked.kind === 'code') api.deliverCode(asked.code);
-        else api.deliverError('interaction_required');
+        const asked = person ? await askRemembered(silent, person as Address) : null;
+        if (asked?.kind === 'code') api.deliverCode(asked.code);
+        else api.deliverError('login_required');
       })();
       return;
     }

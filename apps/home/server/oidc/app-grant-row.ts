@@ -67,7 +67,8 @@ export interface NewAllow {
   askDelegation?: IncomingDelegation | null;
   selfVaultGrant?: IncomingDelegation | null;
   wires?: unknown[];
-  /** The registry's terms for this sign-in, or null for a template whose consent is never remembered (act-as-me). */
+  /** The registry's terms for this sign-in, or null when nothing is to be remembered: a template that never is
+   *  (act-as-me), or a request with no recognition cookie for this person (spec 445 §4). */
   terms: ConsentTermsV1 | null;
   origin: string;
   now: number;
@@ -84,6 +85,8 @@ export function nextAppGrantRow(prev: AppGrantRow | undefined, a: NewAllow): App
     issuedAt: a.now,
     ...(a.wires ? { wires: a.wires } : {}),
   };
+  if (a.askDelegation) row.askDelegation = a.askDelegation;
+  if (a.selfVaultGrant) row.selfVaultGrant = a.selfVaultGrant;
   if (a.terms) {
     const terms: ConsentTermsV1 = {
       ...a.terms,
@@ -94,8 +97,6 @@ export function nextAppGrantRow(prev: AppGrantRow | undefined, a: NewAllow): App
     row.v = 2;
     row.terms = terms;
     row.termsDigest = digest;
-    if (a.askDelegation) row.askDelegation = a.askDelegation;
-    if (a.selfVaultGrant) row.selfVaultGrant = a.selfVaultGrant;
     // The same terms keep the origins they were delivered to. Wider terms start again: that Allow was made here, only.
     row.origins = [...new Set([...(prev?.termsDigest === digest ? (prev.origins ?? []) : []), a.origin])];
     row.lastUsedAt = a.now;

@@ -83,6 +83,30 @@ export async function readRecognition(request: Request, kv: KVNamespace): Promis
   return rec;
 }
 
+// A SOCIAL SIGN-IN IS NOT BOUND TO THE BROWSER THAT STARTED IT: `state` is checked against the server's store, so a
+// callback link an attacker prepared for their own account also works in a victim's browser. That must not leave the
+// victim's browser recognized as the attacker. So /start marks the browser, and the callback sets recognition only when
+// the mark is there. Lax, because the callback arrives as a top-level navigation from the provider.
+const LOGIN_SECURE = '__Secure-ap_login';
+const LOGIN_PLAIN = 'ap_login';
+
+/** /oidc/<provider>/start answers through this. */
+export async function markLoginStart(res: Response, { request, env }: Ctx, state: string): Promise<Response> {
+  const { name, attrs } = attributes(request, env, 600);
+  const mark = name === SECURE_NAME ? LOGIN_SECURE : LOGIN_PLAIN;
+  return withCookie(res, `${mark}=${await hashOf(state)}; ${attrs.replace('SameSite=Strict', 'SameSite=Lax')}`);
+}
+
+/** Did this browser start the sign-in that `state` names? */
+export async function startedInThisBrowser(request: Request, state: string): Promise<boolean> {
+  const want = await hashOf(state);
+  return (request.headers.get('cookie') ?? '').split(';').some((part) => {
+    const eq = part.indexOf('=');
+    const k = part.slice(0, eq).trim();
+    return eq > 0 && (k === LOGIN_SECURE || k === LOGIN_PLAIN) && part.slice(eq + 1).trim() === want;
+  });
+}
+
 /** End recognition: the server's record first, then the browser's cookie. */
 export async function clearRecognition(res: Response, { request, env }: Ctx): Promise<Response> {
   const sid = readSid(request);
@@ -92,8 +116,9 @@ export async function clearRecognition(res: Response, { request, env }: Ctx): Pr
 }
 
 /**
- * Every handler that mints a Home session answers through this: `return withRecognition(json(...), ctx, proved)`.
- * (`recognition.test.ts` fails when a handler mints one and does not.)
+ * Every handler where THE SERVER CHECKED A CREDENTIAL answers through this: `return withRecognition(json(...), ctx, proved)`.
+ * (`recognition.test.ts` fails when a handler mints a session and neither does this nor is named there as not checking one.)
+ * Possessing a link is not a credential: an invitation link can be forwarded, and would plant its person in another browser.
  *
  *   A cross-origin caller (a relying app driving SIWE) gets no cookie: the browser would drop it, and that app's session
  *   is not this Home's. A weaker credential (`asserted`, login-grade) ends whatever recognition was there, because the

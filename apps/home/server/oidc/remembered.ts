@@ -12,6 +12,7 @@ import { mintIdToken, newAuthCode } from '@agenticprimitives/connect';
 import { toCanonicalAgentId } from '@agenticprimitives/identity-directory-adapters';
 import { CHAIN_ID, CONTRACTS } from '../../src/lib/chain';
 import { covers, isRememberedTemplate, mintsPaymentAtSignIn, termsFor, wireValidUntil, type ConsentTermsV1 } from '../../src/lib/consent-terms';
+import { askAsMeCaveats, selfVaultCaveats, siteCaveats } from '../../src/lib/delegation';
 import { nameLabel } from '../../src/lib/domain';
 import { nameClaimForIdToken, sharesProfileName } from '../../src/lib/new-member';
 import { sharesEmailClaim } from '../../src/whitelabel/provisioning';
@@ -28,7 +29,8 @@ const CODE_TTL_SEC = 300;
 export type ConsentReason =
   | 'client_not_enabled' | 'template_ineligible' | 'prompt_consent' | 'session_key_requested' | 'via_host_requested'
   | 'session_mismatch' | 'no_record' | 'ask_every_time' | 'pinned_name_mismatch' | 'directory_unavailable' | 'new_origin'
-  | 'terms_widened' | 'wire_revoked' | 'wire_invalid' | 'wire_expiring' | 'chain_unavailable' | 'claims_need_session'
+  | 'terms_widened' | 'caveats_changed' | 'wire_revoked' | 'wire_invalid' | 'wire_expiring' | 'chain_unavailable' | 'claims_need_session'
+  | 'silent_person_unconfirmed'
   | 'audit_unavailable';
 
 interface RememberedBody extends GrantRequestBody {
@@ -38,6 +40,8 @@ interface RememberedBody extends GrantRequestBody {
   prompt?: string;
   session_key?: string;
   via_host?: string;
+  /** Who the app expects, as an address or CAIP-10. `prompt=none` needs it: see checkRules. */
+  login_hint?: string;
 }
 
 export interface RuleInput {
@@ -49,6 +53,7 @@ export interface RuleInput {
   /** Lowercase address the cookie proved. */
   person: string;
   pagePerson?: string;
+  loginHint?: string;
   row?: AppGrantRow;
   redirectOrigin: string;
   profileName?: string;
@@ -63,6 +68,9 @@ export function checkRules(i: RuleInput): ConsentReason | null {
   // The sheet for a request through a host names that host ("Claude"), so an Allow for one host is not an Allow for another.
   if (i.viaHost) return 'via_host_requested';
   if ((i.pagePerson ?? '').toLowerCase() !== i.person) return 'session_mismatch';
+  // A SILENT SIGN-IN SHOWS NOTHING. A code would tell the app who just walked in, and a leftover session would go through
+  // unseen. So the app must already name the person it expects, and only that person passes.
+  if (i.prompt === 'none' && (i.loginHint ?? '').split(':').pop()?.toLowerCase() !== i.person) return 'silent_person_unconfirmed';
   if (!i.row?.terms) return 'no_record';
   if (i.row.askEveryTime) return 'ask_every_time';
   if (!(i.row.origins ?? []).includes(i.redirectOrigin)) return 'new_origin';
@@ -73,28 +81,39 @@ export function checkRules(i: RuleInput): ConsentReason | null {
   return null;
 }
 
+export interface WireCheck { wire: IncomingDelegation | undefined; delegate?: string; caveats: ReadonlyArray<{ enforcer: string; terms: string }> }
+
 /** The wires this sign-in's token response would carry, by what the CURRENT registry asks for. */
-export function wiresToCheck(row: AppGrantRow, now: ConsentTermsV1): Array<{ wire: IncomingDelegation | undefined; delegate?: string }> {
+export function wiresToCheck(row: AppGrantRow, now: ConsentTermsV1): WireCheck[] {
   return [
-    { wire: row.delegation, delegate: now.delegates.site },
-    ...(now.ask && now.template !== 'ask-as-me' ? [{ wire: row.askDelegation, delegate: now.delegates.ask }] : []),
-    ...(now.selfVault ? [{ wire: row.selfVaultGrant }] : []),
+    { wire: row.delegation, delegate: now.delegates.site, caveats: now.template === 'ask-as-me' ? askAsMeCaveats(1) : siteCaveats(1) },
+    ...(now.ask && now.template !== 'ask-as-me' ? [{ wire: row.askDelegation, delegate: now.delegates.ask, caveats: askAsMeCaveats(1) }] : []),
+    ...(now.selfVault ? [{ wire: row.selfVaultGrant, caveats: selfVaultCaveats(now.selfVault) }] : []),
   ];
+}
+
+/** Does the wire carry what the template builds today? Everything but the time window, which differs by design. A template
+ *  that has since narrowed or changed makes an old wire something the person's next Allow should replace. */
+export function sameCaveats(wire: IncomingDelegation, built: ReadonlyArray<{ enforcer: string; terms: string }>): boolean {
+  const key = (c: { enforcer: string; terms: string }) => `${c.enforcer}:${c.terms}`.toLowerCase();
+  const fixed = (cs: ReadonlyArray<{ enforcer: string; terms: string }>) => cs.filter((c) => c.enforcer.toLowerCase() !== (CONTRACTS.timestampEnforcer as string).toLowerCase()).map(key).sort();
+  return JSON.stringify(fixed(wire.caveats ?? [])) === JSON.stringify(fixed(built));
 }
 
 /** Checks 10 and 11: every wire is this person's, names the registered key, verifies NOW on chain, and outlives the
  *  id_token about to be minted. A wire the person revoked from Connected Apps fails here an instant later. */
 export async function checkWires(
-  wires: ReadonlyArray<{ wire: IncomingDelegation | undefined; delegate?: string }>,
+  wires: readonly WireCheck[],
   person: string,
   idTokenTtlSec: number,
   nowMs: number,
   verify: (d: IncomingDelegation) => Promise<{ ok: true } | { ok: false; reason: string }>,
 ): Promise<ConsentReason | null> {
-  for (const { wire, delegate } of wires) {
+  for (const { wire, delegate, caveats } of wires) {
     if (!wire) return 'wire_revoked'; // the person revoked it and the row forgot it
     if (wire.delegator?.toLowerCase() !== person) return 'wire_invalid';
     if (delegate && wire.delegate?.toLowerCase() !== delegate.toLowerCase()) return 'wire_invalid';
+    if (!sameCaveats(wire, caveats)) return 'caveats_changed';
     const until = wireValidUntil(wire, CONTRACTS.timestampEnforcer);
     if (until !== null && until < nowMs + idTokenTtlSec * 1000) return 'wire_expiring';
   }
@@ -161,7 +180,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const row = (await readRows(env.AUTH_CODES, person)).find((r) => r.clientId === req.client_id);
   const failed = checkRules({
     client, template: req.delegation_template, prompt: req.prompt, sessionKey: req.session_key, viaHost: req.via_host,
-    person, pagePerson: req.person, row, redirectOrigin: new URL(req.redirect_uri).origin,
+    person, pagePerson: req.person, loginHint: req.login_hint, row, redirectOrigin: new URL(req.redirect_uri).origin,
     profileName: req.profile_name, profileEmail: req.profile_email,
   });
   if (failed) return answer(failed, failed === 'terms_widened' ? { stored_terms: row?.terms } : {});

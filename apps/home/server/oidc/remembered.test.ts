@@ -46,12 +46,13 @@ vi.mock('./app-grant-row', async (orig) => ({ ...(await orig<object>()), wireRef
 import { onRequestPost } from './remembered';
 import { onRequestPost as tokenPost } from '../token';
 import { termsDigest, termsFor } from '../../src/lib/consent-terms';
+import { askAsMeCaveats, siteCaveats } from '../../src/lib/delegation';
 import type { RelyingApp } from '../../src/whitelabel/schema';
 
 const inDays = (d: number) => Math.floor(Date.now() / 1000) + d * 86_400;
 const wire = (delegate: string, until = inDays(300)) => ({
   delegator: PERSON, delegate, authority: '0x00', salt: '1', signature: '0x03',
-  caveats: [{ enforcer: '0x00000000000000000000000000000000000000aa', terms: encodeTimestampTerms(1, until) }],
+  caveats: (delegate === ASK ? askAsMeCaveats(until) : siteCaveats(until)).map((c) => ({ enforcer: c.enforcer, terms: c.terms })),
 });
 const reader = (over: Partial<RelyingApp> = {}) => ({
   client_id: 'reader', name: 'Reader', redirect_uris: [REDIRECT], allowed_scopes: ['openid', 'profile'],
@@ -176,6 +177,8 @@ describe('each line of §5.2 says why it failed', () => {
     ['wire_invalid', 'a signature that no longer verifies', async () => { h.verify.mockResolvedValue({ ok: false, reason: 'ERC-1271 verification failed against the delegator' }); return ask(); }],
     ['wire_invalid', 'a wire that is someone else\'s', async () => { put(rowFor({ delegation: { ...wire(SITE), delegator: '0x1111111111111111111111111111111111111111' } })); return ask(); }],
     ['wire_invalid', 'a wire naming an old key', async () => { put(rowFor({ delegation: wire('0x2222222222222222222222222222222222222222') })); return ask(); }],
+    ['caveats_changed', 'a wire that is not what the template builds today', async () => { put(rowFor({ delegation: { ...wire(SITE), caveats: wire(SITE).caveats.slice(0, 1) } })); return ask(); }],
+    ['caveats_changed', 'an ask wire carrying extra authority', async () => { put(rowFor({ askDelegation: { ...wire(ASK, inDays(25)), caveats: [...wire(ASK, inDays(25)).caveats, { enforcer: '0x00000000000000000000000000000000000000cc', terms: '0x01' }] } })); return ask(); }],
     ['wire_expiring', 'a wire that ends before the id_token', async () => { put(rowFor({ askDelegation: wire(ASK, inDays(3)) })); return ask(); }],
     ['chain_unavailable', 'a chain that cannot be read: not called a revocation', async () => { h.verify.mockResolvedValue({ ok: false, reason: 'revocation check unavailable (chain read failed) — please retry' }); return ask(); }],
     ['audit_unavailable', 'a sign-in that cannot be recorded', async () => { h.auditFails.value = true; vi.spyOn(console, 'warn').mockImplementationOnce(() => undefined); return ask(); }],
@@ -198,6 +201,23 @@ describe('each line of §5.2 says why it failed', () => {
     put(row);
     expect(await (await ask()).json()).toEqual({ code: 'code-1' });
     expect(JSON.parse(store.get('oidc:code-1')!).askDelegation).toBeNull();
+  });
+});
+
+describe('a silent sign-in', () => {
+  it('needs the app to name the person it expects', async () => {
+    expect(await reason(await ask({ prompt: 'none' }))).toBe('silent_person_unconfirmed');
+    expect(await reason(await ask({ prompt: 'none', login_hint: '0x1111111111111111111111111111111111111111' }))).toBe('silent_person_unconfirmed');
+    expect(h.verify).not.toHaveBeenCalled();
+  });
+  it('passes for that person, by address or CAIP-10, in any case', async () => {
+    expect(await (await ask({ prompt: 'none', login_hint: PERSON.toUpperCase().replace('0X', '0x') })).json()).toEqual({ code: 'code-1' });
+    store.delete('oidc:code-1');
+    expect(await (await ask({ prompt: 'none', login_hint: SUB })).json()).toEqual({ code: 'code-1' });
+  });
+  it('still gets nothing for an app the person never allowed', async () => {
+    store.delete(`app-grants:${PERSON}`);
+    expect(await reason(await ask({ prompt: 'none', login_hint: PERSON }))).toBe('no_record');
   });
 });
 

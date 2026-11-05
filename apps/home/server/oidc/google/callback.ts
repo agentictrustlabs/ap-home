@@ -15,7 +15,7 @@ import { recordOidcFacet, readOidcFacet, readRotation, recordEmailOwner } from '
 import { resolveKmsAgent } from '../../_lib/kms-resolve';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
 import { isSocialCustodyAud, isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
-import { withRecognition } from '../../_lib/recognition';
+import { startedInThisBrowser, withRecognition } from '../../_lib/recognition';
 import { getServer, json, resolveOrigin, type FnContext } from '../../_lib/server-broker';
 import { connectorBridge } from '../../connect/connector-calendar';
 
@@ -254,7 +254,11 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     signer,
   );
 
-  const proved = (res: Response): Promise<Response> => withRecognition(res, { request, env }, { sub: agent, principal: sessionPrincipal, assurance: custodyGrade ? 'onchain-confirmed' : 'asserted', ttlSeconds: 3600 });
+  // Spec 445 §8 — only the browser that started this sign-in is recognized by it. Another browser (a link) still gets what
+  // it always did, and no cookie.
+  const bound = await startedInThisBrowser(request, state);
+  if (!bound) console.warn('[recognition] a sign-in callback in a browser that did not start it: not recognized');
+  const proved = async (res: Response): Promise<Response> => (bound ? withRecognition(res, { request, env }, { sub: agent, principal: sessionPrincipal, assurance: custodyGrade ? 'onchain-confirmed' : 'asserted', ttlSeconds: 3600 }) : res);
 
   // §4a / CN-9: stash under a single-use code; deliver the CODE, not the token. The code-exchange aud is
   // the REQUESTING client (stash.aud) — distinct from the session's internal (home) aud for custody clients.

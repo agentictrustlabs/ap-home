@@ -8,7 +8,7 @@ vi.mock('./server-broker', () => ({ resolveOrigin: () => ORIGIN.value }));
 vi.mock('../../src/lib/domain', () => ({ CONNECT_DOMAIN: 'faithnet.me' }));
 vi.mock('../../src/lib/chain', () => ({ DEPLOYMENT_EPOCH: 'epoch-1' }));
 
-import { clearRecognition, readRecognition, withRecognition } from './recognition';
+import { clearRecognition, markLoginStart, readRecognition, startedInThisBrowser, withRecognition } from './recognition';
 
 let store: Map<string, string>;
 let ttls: Map<string, number | undefined>;
@@ -125,16 +125,44 @@ describe('reading and ending it', () => {
   });
 });
 
+describe('a social sign-in, bound to the browser that started it', () => {
+  const started = () => markLoginStart(new Response(null, { status: 302, headers: { location: 'https://accounts.test/' } }), { request: req(), env }, 'state-1');
+  it('marks the browser at start, Lax so it survives the trip back from the provider, and keeps the redirect', async () => {
+    const r = await started();
+    expect(r.status).toBe(302);
+    expect(r.headers.get('location')).toBe('https://accounts.test/');
+    const c = cookieOf(r);
+    expect(c).toMatch(/^__Secure-ap_login=/);
+    for (const part of ['HttpOnly', 'SameSite=Lax', 'Secure', 'Domain=.faithnet.me', 'Max-Age=600']) expect(c).toContain(part);
+    expect(c).not.toContain('state-1');
+  });
+  it('knows the browser that started it', async () => {
+    expect(await startedInThisBrowser(req(asCookieHeader(await started())), 'state-1')).toBe(true);
+  });
+  it('does not take a link opened in another browser, or a mark for another sign-in', async () => {
+    expect(await startedInThisBrowser(req(), 'state-1')).toBe(false);
+    expect(await startedInThisBrowser(req(asCookieHeader(await started())), 'state-2')).toBe(false);
+  });
+});
+
 describe('every place a Home session is minted', () => {
   const files = (dir: string): string[] => readdirSync(dir).flatMap((f) => { const p = join(dir, f); return statSync(p).isDirectory() ? files(p) : p.endsWith('.ts') && !p.endsWith('.test.ts') ? [p] : []; });
   const root = join(__dirname, '..');
-  it('answers through withRecognition, and nothing else does', () => {
+  // Sessions minted where the server checked no credential: possessing a forwarded link, or naming a seeded demo account.
+  const NOT_A_CREDENTIAL = ['org-invite-redeem.ts', 'demo-accounts.ts'];
+  it('answers through withRecognition where the server checked a credential, and nowhere else', () => {
     const all = files(root);
     const minters = all.filter((f) => /\bmintAgentSession\s*\(/.test(readFileSync(f, 'utf8')));
     expect(minters.length).toBeGreaterThanOrEqual(10);
-    for (const f of minters) expect(readFileSync(f, 'utf8'), f).toMatch(/withRecognition\(/);
+    const checked = minters.filter((f) => !NOT_A_CREDENTIAL.some((n) => f.endsWith(n)));
     const callers = all.filter((f) => !f.endsWith('recognition.ts') && /\bwithRecognition\(/.test(readFileSync(f, 'utf8')));
-    expect(callers.sort()).toEqual(minters.sort()); // never minted from a token: only where a credential was just proved
+    expect(callers.sort()).toEqual(checked.sort()); // never minted from a token, a link, or a name
+  });
+  it('a social callback recognizes only the browser that started it', () => {
+    for (const p of ['google', 'youversion']) {
+      expect(readFileSync(join(root, 'oidc', p, 'start.ts'), 'utf8')).toContain('markLoginStart(');
+      expect(readFileSync(join(root, 'oidc', p, 'callback.ts'), 'utf8')).toMatch(/startedInThisBrowser\(request, state\)[\s\S]*bound \? withRecognition/);
+    }
   });
   it('the decision endpoint reads the cookie and never a bearer', () => {
     const src = readFileSync(join(root, 'oidc', 'remembered.ts'), 'utf8');

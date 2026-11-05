@@ -33,6 +33,7 @@ import { isPaymentTemplate } from '../../src/whitelabel/config';
 import { isRememberedTemplate, termsFor } from '../../src/lib/consent-terms';
 import { resolveClient } from '../_lib/oidc-registry';
 import { nextAppGrantRow, readRows } from './app-grant-row';
+import { readRecognition } from '../_lib/recognition';
 
 const CODE_TTL_MS = 300_000; // 5 min PKCE exchange window
 
@@ -300,7 +301,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     const key = `app-grants:${person}`;
     const rows = await readRows(env.AUTH_CODES, person);
     // Spec 445 §4 — what this Allow agreed to: computed here from the registry, never taken from the request.
-    const client = isRememberedTemplate(grant.delegation_template) ? await resolveClient(env, grant.client_id) : null;
+    // AND ONLY WHEN THE PERSON IS PROVED. This endpoint checks `Origin`, which only a browser cannot fake, and a wire, which
+    // an app already holds. Replayed from a server, that would write today's terms over a signature made under narrower
+    // ones, and the next sign-in would skip the sheet on a consent nobody gave. So terms are stored only beside the
+    // recognition cookie of the person whose wire this is. Without it the row lists the wires and remembers nothing.
+    const proved = (await readRecognition(request, env.AUTH_CODES))?.sub.toLowerCase().endsWith(person);
+    const client = proved && isRememberedTemplate(grant.delegation_template) ? await resolveClient(env, grant.client_id) : null;
     const row = nextAppGrantRow(rows.find((r) => r.clientId === grant.client_id), {
       clientId: grant.client_id,
       template: grant.delegation_template,
