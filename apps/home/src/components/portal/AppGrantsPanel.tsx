@@ -162,7 +162,12 @@ export function AppGrantsPanel({ showEmpty = false }: { showEmpty?: boolean } = 
             )}
             {g.terms && (
               <div style={{ display: 'flex', gap: '.6rem', alignItems: 'center', flexWrap: 'wrap', margin: '.4rem 0', fontSize: '.85rem' }}>
-                <label><input type="checkbox" checked={!!g.askEveryTime} data-testid={`app-grant-ask-every-time-${g.clientId}`} onChange={(e) => { const on = e.target.checked; void setAskEveryTime(session.token, g.clientId, on).then(() => change(g.clientId, ({ askEveryTime: _a, ...x }) => (on ? { ...x, askEveryTime: true as const } : x))); }} /> Ask me every time</label>
+                <label><input type="checkbox" checked={!!g.askEveryTime} data-testid={`app-grant-ask-every-time-${g.clientId}`} onChange={(e) => {
+                  const on = e.target.checked;
+                  const apply = (v: boolean) => change(g.clientId, ({ askEveryTime: _a, ...x }) => (v ? { ...x, askEveryTime: true as const } : x));
+                  apply(on); // at once: a checkbox that waits for the server looks as if the click did nothing
+                  void setAskEveryTime(session.token, g.clientId, on).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); }).catch((err: unknown) => { apply(!on); setErr(`Could not save that: ${err instanceof Error ? err.message : 'the request failed'}`); });
+                }} /> Ask me every time</label>
                 <button type="button" className="btn ghost" data-testid={`app-grant-forget-${g.clientId}`} onClick={() => void forgetAppConsent(session.token, g.clientId).then(() => change(g.clientId, ({ terms: _t, ...x }) => x))}>Forget this app</button>
               </div>
             )}

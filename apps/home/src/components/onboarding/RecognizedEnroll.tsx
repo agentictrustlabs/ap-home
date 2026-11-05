@@ -228,6 +228,18 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           }
           setSsoCookie(sso.token, v);
           setFedcmLoginStatus('logged-in');
+          // This device's list of apps it has signed into: a sign-in with no sheet is still a sign-in.
+          const remembered = whitelabel.delegationTemplates[enroll.template];
+          recordConnectedApp(addr, {
+            clientId: enroll.aud,
+            appName,
+            appDomain: appHost,
+            logo: relyingApp?.logo,
+            canDo: remembered?.canDo ?? [],
+            cannotDo: remembered?.cannotDo ?? [],
+            grantedAt: Date.now(),
+            expiresAt: remembered?.expiryDays ? Date.now() + remembered.expiryDays * 86_400_000 : undefined,
+          });
           deliverEnrollCode(enroll, api.popupMode, asked.code);
           return;
         }

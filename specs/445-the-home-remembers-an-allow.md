@@ -237,6 +237,7 @@ Every line must hold. The first that fails names the reason.
 | 2 | The request is valid as `/oidc/authorize-grant` judges it: known client, exact redirect, allowed template, S256 | a `400`, as today |
 | 3 | The template is `site-login` or `ask-as-me`, and the client does not mint a payment leg in its sign-in (`paymentConfig`, or a coin granted at connect). Never a payment, a deploy, a ceremony or act-as-me | `template_ineligible` |
 | 4 | `prompt` is not `consent` | `prompt_consent` |
+| 4a | `prompt` is not `login` or `select_account`. The page's chooser does not catch every such request, so the server refuses them itself | `prompt_login` |
 | 5 | No `session_key` in the request (v1; see §10) | `session_key_requested` |
 | 5a | No `via_host`. The sheet for such a request names the host ("Claude"), so an Allow for one host is not an Allow for another | `via_host_requested` |
 | 5b | The person the page believes is signed in is the cookie's person | `session_mismatch` |
@@ -298,7 +299,9 @@ lines marked.
   `login_hint` yet, so nothing is silent until one does.
 - **After a credential.** A person with no session proves one and re-enters the recognized path, as today. The
   cookie is now set, so the same call is made and the sheet is skipped for an allowed app.
-- `prompt=login` and `prompt=select_account` still force the chooser first. They ask who, not whether.
+- `prompt=login` and `prompt=select_account` never skip the sheet (check 4a). A request naming a Home gets the chooser. A
+  request naming no Home does not: `EntryExperience.tsx` marks the chooser done before the recognized path runs, so it
+  gets the sheet, with "Not you?" on it. That predates this spec, and whether it should force the chooser is open (§10.6).
 
 ## 7. What the person controls
 
@@ -388,6 +391,8 @@ reason; a revoked wire and an expiring wire each force the sheet; the code from 
    doing if W0 shows redirect is the common mode.
 4. **Member-registered clients: decided, they always ask.** Their owner can change the delegate at any time, and nobody
    at the estate reviewed them. `toOidcClient` drops the flag, so there is nothing to turn on.
+6. **`prompt=login` on a request naming no Home** shows the sheet, not a credential prompt, which is not what OIDC means by
+   it. Fixing it changes what those apps see on merge, so it is a decision of its own.
 5. **Re-signing only the part that lapsed.** When only the 30-day ask wire is near its end, v1 shows the whole sheet.
    A smaller "Renew <App>'s access" step is possible later.
 
@@ -437,3 +442,17 @@ A second agent, working the same problem independently, raised these. Each was r
 | `prompt=none` tells an app who the visitor is, and shows no "signed in as" | **Correct.** | The app must name the person, and every other case gets one answer. §6. |
 | `session_key` cannot skip; Gather27 sends one every time | **Correct, and already refused** (`session_key_requested`). Gather27 is not helped by this spec. | Recorded. §10.2. |
 | FedCM already gives a delegation with no sheet, on the script-readable cookie | **Correct.** This spec is stricter than that lane. | First item of W7. |
+
+## 14. Tested in a real browser
+
+`tests/e2e-local` runs the real production build in Chromium with an in-memory KV and a scriptable chain, with the reader
+`on`, another app in `shadow` and a third off: real cookies, pages and token exchange, no gas, no model. It found what the
+unit tests could not:
+
+- **`prompt=login` passed straight through** on a request naming no Home, returning a code. Check 4a.
+- **A remembered sign-in left the app off this device's "Apps you signed into".** Now recorded.
+- **The "Ask me every time" checkbox** did not respond until the server answered. Now immediate, and a failure is said.
+
+It cannot reach a real wallet, the real chain, the `Allow` click itself (signing needs a bundler; the wires are built by the
+Home's own builders and accepted by the fake chain), `__Secure-` and `Domain` attributes (https only; unit-tested), or a
+social provider's return. W4's live gate is still what proves those.

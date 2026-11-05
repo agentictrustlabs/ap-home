@@ -31,3 +31,5 @@ tests/e2e-sso/test-results/
 playwright-report/
 .vercel
 .env*
+tests/e2e-local/artifacts/
+tests/e2e-estate/artifacts/

@@ -161,6 +161,8 @@ describe('each line of §5.2 says why it failed', () => {
     ['template_ineligible', 'a template that is never remembered', async () => ask({ delegation_template: 'x402-pay' })],
     ['template_ineligible', 'an app that mints money authority at sign-in', async () => { h.client.value = reader({ paymentConfig: {} as never }); return ask(); }],
     ['prompt_consent', 'prompt=consent', async () => ask({ prompt: 'consent' })],
+    ['prompt_login', 'prompt=login', async () => ask({ prompt: 'login' })],
+    ['prompt_login', 'prompt=select_account', async () => ask({ prompt: 'select_account' })],
     ['session_key_requested', 'a session key', async () => ask({ session_key: '0xabc' })],
     ['via_host_requested', 'a request through a host', async () => ask({ via_host: 'Claude' })],
     ['session_mismatch', 'a page showing someone else', async () => ask({ person: '0x1111111111111111111111111111111111111111' })],

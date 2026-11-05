@@ -30,7 +30,7 @@ export type ConsentReason =
   | 'client_not_enabled' | 'template_ineligible' | 'prompt_consent' | 'session_key_requested' | 'via_host_requested'
   | 'session_mismatch' | 'no_record' | 'ask_every_time' | 'pinned_name_mismatch' | 'directory_unavailable' | 'new_origin'
   | 'terms_widened' | 'caveats_changed' | 'wire_revoked' | 'wire_invalid' | 'wire_expiring' | 'chain_unavailable' | 'claims_need_session'
-  | 'silent_person_unconfirmed'
+  | 'silent_person_unconfirmed' | 'prompt_login'
   | 'audit_unavailable';
 
 interface RememberedBody extends GrantRequestBody {
@@ -64,6 +64,9 @@ export interface RuleInput {
 export function checkRules(i: RuleInput): ConsentReason | null {
   if (!isRememberedTemplate(i.template) || mintsPaymentAtSignIn(i.client)) return 'template_ineligible';
   if (i.prompt === 'consent') return 'prompt_consent';
+  // The app asked for the person to be asked. The page's chooser does not always catch this (a request that names no Home
+  // marks the chooser done before it gets here), so it is refused here whatever the page did.
+  if (i.prompt === 'login' || i.prompt === 'select_account') return 'prompt_login';
   if (i.sessionKey) return 'session_key_requested';
   // The sheet for a request through a host names that host ("Claude"), so an Allow for one host is not an Allow for another.
   if (i.viaHost) return 'via_host_requested';
