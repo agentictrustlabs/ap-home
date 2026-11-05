@@ -53,6 +53,10 @@ said((X.rec + X.verify) / 2, 258, 'THE NEXT DESIGN, LIVE IN SHADOW', ['this app 
 arc(X.rec + 14, X.allow, 356, { color: SSO });
 said(X.rec + 32, 378, 'A NEW APP, ALREADY SIGNED IN', ['the Home session is found:', 'no credential, no new account'], SSO, 'start');
 
+// the browser's own chooser: signs nothing now, and either hands back the last Allow or joins the row in a popup
+out.push(`<text x="1046" y="282" text-anchor="start" class="b">IN CHROME (FEDCM)</text>`);
+note(1046, 302, ['Nothing new is signed. You get', 'the wire from your last Allow,', 'or this same flow in a popup,', 'with the sheet.'], { anchor: 'start' });
+
 // what happens today, said where the eye lands first
 out.push(`<text x="104" y="262" text-anchor="start" class="b">TODAY</text>`);
 note(104, 282, ['Every trip to the Home still ends', 'at the Allow sheet. The Home now', 'looks up whether you allowed this', 'app before, and only records the answer.'], { anchor: 'start' });
@@ -93,4 +97,4 @@ out.push(`<text x="${W - 40}" y="${H - 26}" class="s" text-anchor="end">faithnet
 
 finish(process.argv[2],
   'How sign-in works at a faithnet Home: the first time, a new app while signed in, and coming back',
-  'An app asks the Home to sign a person in. The Home checks the app against its registry and looks for a Home session. Without one the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation signed by the person, its check on chain, a record and a single-use code, and the code exchanged for an id_token. A new app for a person already signed in skips the credential and the new account. An app that still holds its delegation goes straight to the token step. A designed path, live in shadow, records its decision and will skip the sheet and the signature for an app allowed before.');
+  'An app asks the Home to sign a person in. The Home checks the app against its registry and looks for a Home session. Without one the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation signed by the person, its check on chain, a record and a single-use code, and the code exchanged for an id_token. A new app for a person already signed in skips the credential and the new account. An app that still holds its delegation goes straight to the token step. In Chrome, FedCM signs nothing new: it hands back the wire from the last Allow, or goes to a popup with the sheet. A designed path, live in shadow, records its decision and will skip the sheet and the signature for an app allowed before.');

@@ -556,7 +556,8 @@ const SIGNIN_ALT =
   'Without a session the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation the ' +
   'person signs, its check on chain, a record with a single-use code, and the code exchanged for an id_token. Three arcs run above the row. ' +
   'A new app for a person already signed in goes from Recognize to Allow. An app that still holds its delegation goes straight to Token. ' +
-  'A designed path, live in shadow, records its decision and will go from Recognize to Verify, with no sheet and no new signature.';
+  'A designed path, live in shadow, records its decision and will go from Recognize to Verify, with no sheet and no new signature. ' +
+  'A note says that in Chrome, FedCM signs nothing new: it hands back the wire from the last Allow, or goes to a popup with the sheet.';
 
 const HOME_PAGES = "The Home's pages, in the person's browser. The Home is a Next.js app (<code>apps/home</code>) at <code>www.faithnet.me</code>.";
 const HOME_SERVER = "The Home's server (<code>apps/home/server</code>). Tickets, codes and rows are kept in its key-value store, <code>AUTH_CODES</code>.";
@@ -785,7 +786,7 @@ const SIGNIN_BODY = `
 <p>That last visit is the one that feels wrong. It is what Paul raised in review, and his points are <a href="#pauls-points">answered at the bottom of this page</a>.</p>
 
 <h2>In Chrome: the browser's own chooser</h2>
-<p>Where the browser supports FedCM, an app can ask the browser itself. The browser shows its own account chooser, reads the same Home session, and collects a thin id_token from <code>/fedcm/assertion</code>. The app then asks <code>/fedcm/grant</code> for the delegation. For a person whose key the Home holds, the server has a site delegation signed with no further prompt: choosing the account in the browser's chooser was the gesture. For a passkey or wallet person the server cannot sign, so the app falls back to the popup and the flow in the picture. FedCM is another way to reach the same two things. It adds no authority of its own.</p>
+<p>Where the browser supports FedCM, an app can ask the browser itself. The browser shows its own account chooser, reads the same Home session, and collects a thin id_token from <code>/fedcm/assertion</code>. The app then asks <code>/fedcm/grant</code> for the delegation. For a person whose key the Home holds who allowed this app before, the server hands back the delegation stored at that Allow, and nothing new is signed. Anyone else, including a passkey or wallet person and anyone who has not allowed this app, falls back to the popup and the flow in the picture. FedCM is another way to reach the same two things. It adds no authority of its own.</p>
 
 <h2>What is remembered, and where</h2>
 <ul>
@@ -816,7 +817,7 @@ const SIGNIN_BODY = `
 <p>The server sets a recognition cookie, <code>__Secure-ap_sid</code>: HttpOnly, Secure, SameSite=Strict. It holds a random id that names a record on the server, so it is not a token and nothing can mistake it for one. It says one thing: this browser proved a credential as this person, and when. It cannot sign and cannot read a vault.</p>
 <ul>
 <li><b>Only where the server checked a credential.</b> A passkey, a wallet, an email or phone code, or a social sign-in. Never from a session token, and never from a link. An invitation link can be forwarded, and would plant its person in someone else's browser.</li>
-<li><b>Social sign-in only in the browser that started it.</b> The return link from Google or YouVersion works in any browser, so the start marks the browser, and only that browser is recognized.</li>
+<li><b>Social sign-in only in the browser that started it.</b> The start marks the browser, and a return link from Google or YouVersion opened anywhere else is refused. This is live.</li>
 <li><b>Sign-out ends it on the server.</b> The record is deleted, so a copy of the cookie is worth nothing.</li>
 <li><b>It lasts as long as the session, one hour.</b> After the hour a person proves a credential and then passes with no sheet: one prompt where there are two today. Whether it should last longer is still to be decided.</li>
 </ul>
@@ -843,7 +844,7 @@ const SIGNIN_BODY = `
 <p>With <code>prompt=none</code> nothing is on screen, so a code would tell the app who just walked in and a leftover session would go through unseen. So the app must name the person it expects, in <code>login_hint</code>, and only that person passes. Every other outcome is the same <code>login_required</code>, so a probe learns nothing, including whether this visitor has a Home session at all.</p>
 
 <h3>What the person controls</h3>
-<p>Connected Apps lists what each app may do, when it last signed in, and every live wire, each with Revoke. <b>Revoke</b> is on chain, and the next sign-in shows the sheet. <b>Forget this app</b> drops what was agreed and keeps the wires listed. <b>Ask me every time</b> keeps the sheet for that app. Activity lists each sign-in that passed: "Signed in to <i>App</i>. No new permission."</p>
+<p>Connected Apps, under Apps you signed into, lists what each app may do, when it last signed in, and every live wire, each with Revoke. <b>Revoke</b> is on chain, and the next sign-in shows the sheet. <b>Forget this app</b> drops what was agreed and keeps the wires listed. <b>Ask me every time</b> keeps the sheet for that app. Activity lists each sign-in that passed: "Signed in to <i>App</i>. No new permission."</p>
 
 <h3>How it goes live</h3>
 <ol>
@@ -862,10 +863,13 @@ const SIGNIN_BODY = `
 <li><b>Silent sign-in told an app who the visitor is.</b> Correct. Hence <code>login_hint</code> and the single answer.</li>
 </ul>
 
+<h3>FedCM comes under the same rule</h3>
+<p>This is live. The FedCM lane used to sign a new delegation for any registered app a person picked in the browser's chooser, whether or not they had ever allowed it, and recorded it nowhere. Now it signs nothing. A person whose key the Home holds gets the wire stored at their last Allow, under the same rules as above. Everyone else goes to the popup, where the sheet is. So a first FedCM connect to an app now shows the sheet, and later ones need no prompt.</p>
+<p>The proof here is still the script-readable session, because the recognition cookie is SameSite=Strict and is never sent on FedCM's cross-site requests. That is why a passkey or wallet person stays out of this lane: a stolen token must not be able to collect their wires. A token for a Home-held key could already have the Home sign, so this gives it nothing new. Demo accounts keep their fast path.</p>
+
 <h3>Still open</h3>
 <ul>
-<li><b>The FedCM lane is looser.</b> It gives a person whose key the Home holds a delegation with no sheet, for an app they never allowed, on the script-readable cookie. It comes under this rule first, next.</li>
-<li><b>A planted session.</b> A social return link can still sign a browser in as someone else, as it can today. It gets no cookie, so no sheet is skipped, and the sheet names whose session it is. Refusing it outright comes next.</li>
+<li><b>A forwarded link.</b> An invitation link or a <code>#session=</code> link can still open a session in someone else's browser. It sets no cookie, so no sheet is skipped, and the sheet names whose session it is.</li>
 <li><b>How long recognition lasts.</b> One hour for now. Thirty days would mean no prompt at all on return, and a browser left signed in could enter allowed apps for a month.</li>
 <li><b>Apps with a session key,</b> Gather27 among them, need a design of their own.</li>
 </ul>
@@ -880,7 +884,7 @@ const SIGNIN_BODY = `
 <h3>2. Is the sheet shown every time?</h3>
 <blockquote><p>"RecognizedEnroll sends every recognized sign-in straight to the 'Allow &lt;app&gt;?' sheet."</p></blockquote>
 <p><b>Correct.</b> Once the session resolves, <code>RecognizedEnroll.tsx</code> goes to the sheet. The only turns before it are a session that fails, a pinned name that does not match, a passkey that needs its own host, and the organization chooser. None of them looks at past Allows.</p>
-<p>There is one path with no sheet, and it is not this component. In Chrome's FedCM lane, a person whose key the Home holds gets a site delegation from <code>/fedcm/grant</code> after choosing their account in the browser's own chooser.</p>
+<p>There was one path with no sheet, and it was not this component. In Chrome's FedCM lane, a person whose key the Home holds got a new site delegation from <code>/fedcm/grant</code> after choosing their account in the browser's own chooser. That has since changed: see the next design, above.</p>
 
 <h3>3. Is a new delegation signed every time?</h3>
 <blockquote><p>"…and signs a fresh delegation (meaning, every sign-in gets a new delegation)."</p></blockquote>
