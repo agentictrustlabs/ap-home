@@ -82,8 +82,7 @@ async function overview() {
 
 async function waiting() {
   const c = read();
-  if (!c) return show(h('h1', {}, 'Waiting on me'), h('p', {}, 'Sign in at your Home to see the runs that are waiting on your signature.'), h('button', { class: 'primary', onclick: () => void signIn() }, 'Sign in at your Home'));
-  if (!c.agent) return show(h('h1', {}, 'Waiting on me'), h('p', { class: 'err' }, 'Your session names no agent, so there is nothing to read.'));
+    if (!c.agent) return show(h('h1', {}, 'Waiting on me'), h('p', { class: 'err' }, 'Your session names no agent, so there is nothing to read.'));
   show(h('h1', {}, 'Waiting on me'), h('p', { class: 'quiet' }, 'Reading your agent…'));
   const out = await manage('runs', { session: c.token, addressee: c.agent });
   if (!out.ok) return show(h('h1', {}, 'Waiting on me'), h('p', { class: 'err' }, out.error ?? 'The runtime did not answer.'));
@@ -103,5 +102,11 @@ async function waiting() {
 }
 
 renderWho();
-(location.pathname === '/connected' ? finishSignIn() : view === 'waiting' ? waiting() : overview())
-  .catch((e) => show(h('p', { class: 'err' }, `Something failed: ${e.message}`)));
+for (const b of document.querySelectorAll('[data-signin]')) b.addEventListener('click', () => void signIn());
+// NOT SIGNED IN: the page is the cover the server rendered, and nothing of the estate is read. The Home's redirect back
+// (`connecting`) is the one page that works without a session, because it is where the session is made.
+if (view === 'connecting' || read()) {
+  main.hidden = false;
+  (view === 'connecting' ? finishSignIn() : view === 'waiting' ? waiting() : overview())
+    .catch((e) => show(h('p', { class: 'err' }, `Something failed: ${e.message}`)));
+}

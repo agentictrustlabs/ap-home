@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080" role="img" aria-labelledby="t d">
+<title id="t">Great Agent Harness requires Agentic Primitives Substrate</title>
+<desc id="d">Two layers. On top, the ten steps of the agent harness: Admit, Playbook, Ground, Judge, Plan, Check, Authority, Execute, Receipt, Answer. Beneath, the seven capabilities of the Agentic Primitives substrate: Identity, Admission, Knowledge, Orchestration, Authority, Vault and Evidence. A line joins each step to what it takes from the substrate.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#8b95b5"/></marker><marker id="b" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#8b95b5"/></marker><marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#f472b6"/></marker><marker id="bs" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#f472b6"/></marker>
+<style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#eef1fb}.h{font-size:30px;font-weight:700}.n{font-size:16px;font-weight:650}.t{font-size:13px;font-weight:600}.k{font-size:12px;font-weight:700}.s{font-size:13px;fill:#9aa5c7}.b{font-size:12px;font-weight:700;letter-spacing:.09em;fill:#9aa5c7}</style></defs>
+<rect width="1920" height="1080" fill="#0b1020"/>
+<text x="72" y="96" text-anchor="start" style="font-size:50px;font-weight:700;fill:#eef1fb">Great Agent Harness requires</text>
+<text x="72" y="156" text-anchor="start" style="font-size:50px;font-weight:700;fill:#f472b6">Agentic Primitives Substrate</text>
+<text x="72" y="204" text-anchor="start" style="font-size:22px;font-weight:400;fill:#9aa5c7">The loop is the easy part. What makes it trustworthy is what it stands on.</text>
+<text x="72" y="316" text-anchor="start" style="font-size:16px;font-weight:700;fill:#9aa5c7;letter-spacing:.14em">THE HARNESS</text>
+<rect x="40" y="700" width="1840" height="300" rx="26" fill="#111933" stroke="#3a4670" stroke-width="2"/>
+<text x="72" y="978" text-anchor="start" style="font-size:16px;font-weight:700;fill:#f472b6;letter-spacing:.14em">THE SUBSTRATE: AGENTIC PRIMITIVES</text>
+<path d="M158 488C158 618 175 602 175 732" fill="none" stroke="#8b5cf6" stroke-width="2.5" stroke-opacity=".8"/><circle cx="175" cy="732" r="5" fill="#8b5cf6"/>
+<path d="M178 488C178 618 446.6666666666667 602 446.6666666666667 732" fill="none" stroke="#8b5cf6" stroke-width="2.5" stroke-opacity=".8"/><circle cx="446.6666666666667" cy="732" r="5" fill="#8b5cf6"/>
+<path d="M334 488C334 618 673.3333333333334 602 673.3333333333334 732" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-opacity=".8"/><circle cx="673.3333333333334" cy="732" r="5" fill="#3b82f6"/>
+<path d="M354 488C354 618 1458.3333333333335 602 1458.3333333333335 732" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-opacity=".8"/><circle cx="1458.3333333333335" cy="732" r="5" fill="#3b82f6"/>
+<path d="M520 488C520 618 703.3333333333334 602 703.3333333333334 732" fill="none" stroke="#14b8a6" stroke-width="2.5" stroke-opacity=".8"/><circle cx="703.3333333333334" cy="732" r="5" fill="#14b8a6"/>
+<path d="M696 488C696 618 900 602 900 732" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-opacity=".8"/><circle cx="900" cy="732" r="5" fill="#ef4444"/>
+<path d="M872 488C872 618 930 602 930 732" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-opacity=".8"/><circle cx="930" cy="732" r="5" fill="#f59e0b"/>
+<path d="M1048 488C1048 618 960 602 960 732" fill="none" stroke="#eab308" stroke-width="2.5" stroke-opacity=".8"/><circle cx="960" cy="732" r="5" fill="#eab308"/>
+<path d="M1214 488C1214 618 1216.6666666666667 602 1216.6666666666667 732" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-opacity=".8"/><circle cx="1216.6666666666667" cy="732" r="5" fill="#22c55e"/>
+<path d="M1234 488C1234 618 205 602 205 732" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-opacity=".8"/><circle cx="205" cy="732" r="5" fill="#22c55e"/>
+<path d="M1390 488C1390 618 733.3333333333334 602 733.3333333333334 732" fill="none" stroke="#0ea5e9" stroke-width="2.5" stroke-opacity=".8"/><circle cx="733.3333333333334" cy="732" r="5" fill="#0ea5e9"/>
+<path d="M1410 488C1410 618 990 602 990 732" fill="none" stroke="#0ea5e9" stroke-width="2.5" stroke-opacity=".8"/><circle cx="990" cy="732" r="5" fill="#0ea5e9"/>
+<path d="M1566 488C1566 618 1730 602 1730 732" fill="none" stroke="#6366f1" stroke-width="2.5" stroke-opacity=".8"/><circle cx="1730" cy="732" r="5" fill="#6366f1"/>
+<path d="M1586 488C1586 618 1488.3333333333335 602 1488.3333333333335 732" fill="none" stroke="#6366f1" stroke-width="2.5" stroke-opacity=".8"/><circle cx="1488.3333333333335" cy="732" r="5" fill="#6366f1"/>
+<path d="M1752 488C1752 618 1020 602 1020 732" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-opacity=".8"/><circle cx="1020" cy="732" r="5" fill="#3b82f6"/>
+<g>
+<rect x="124" y="356" width="88" height="88" rx="18" fill="#8b5cf6"/>
+<g transform="translate(145.12,377.12) scale(1.906666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4h8v16h-8"/><path d="M3 12h10"/><path d="M9.5 8.5 13 12l-3.5 3.5"/></g>
+<circle cx="127" cy="359" r="11" fill="#0b1020" stroke="#8b5cf6" stroke-width="2"/><text x="127" y="363" text-anchor="middle" class="k">1</text>
+<text x="168" y="468" text-anchor="middle" class="n"></text>
+</g>
+<text x="168" y="476" text-anchor="middle" style="font-size:21px;font-weight:650;fill:#eef1fb">Admit</text>
+<path d="M220 400H288" fill="none" stroke="#8b95b5" stroke-width="2" marker-end="url(#a)"/>
+<g>
+<rect x="300" y="356" width="88" height="88" rx="18" fill="#3b82f6"/>
+<g transform="translate(321.12,377.12) scale(1.906666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h10.5a2.5 2.5 0 0 1 2.5 2.5v12.5H7.5A2.5 2.5 0 0 1 5 17z"/><path d="M5 17a2.5 2.5 0 0 1 2.5-2.5H18"/><path d="M9 8.5h5.5"/></g>
+<circle cx="303" cy="359" r="11" fill="#0b1020" stroke="#3b82f6" stroke-width="2"/><text x="303" y="363" text-anchor="middle" class="k">2</text>
+<text x="344" y="468" text-anchor="middle" class="n"></text>
+</g>
+<text x="344" y="476" text-anchor="middle" style="font-size:21px;font-weight:650;fill:#eef1fb">Playbook</text>
+<path d="M396 400H464" fill="none" stroke="#8b95b5" stroke-width="2" marker-end="url(#a)"/>
+<g>
+<rect x="476" y="356" width="88" height="88" rx="18" fill="#14b8a6"/>
+<g transform="translate(497.12,377.12) scale(1.906666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.6"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></g>
+<circle cx="479" cy="359" r="11" fill="#0b1020" stroke="#14b8a6" stroke-width="2"/><text x="479" y="363" text-anchor="middle" class="k">3</text>
+<text x="520" y="468" text-anchor="middle" class="n"></text>
+</g>
+<text x="520" y="476" text-anchor="middle" style="font-size:21px;font-weight:650;fill:#eef1fb">Ground</text>
+<path d="M572 400H640" fill="none" stroke="#8b95b5" stroke-width="2" marker-end="url(#a)"/>
+<g>
+<rect x="652" y="356" width="88" height="88" rx="18" fill="#ef4444"/>
+<g transform="translate(673.12,377.12) scale(1.906666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M7 20h10M5 7h14"/><path d="M5 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/><path d="M19 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/></g>
+<circle cx="655" cy="359" r="11" fill="#0b1020" stroke="#ef4444" stroke-width="2"/><text x="655" y="363" text-anchor="middle" class="k">4</text>
+<text x="696" y="468" text-anchor="middle" class="n"></text>
+</g>
+<text x="696" y="476" text-anchor="middle" style="font-size:21px;font-weight:650;fill:#eef1fb">Judge</text>
+<path d="M748 400H816" fill="none" stroke="#8b95b5" stroke-width="2" marker-end="url(#a)"/>
+<g>
+<rect x="828" y="356" width="88" height="88" rx="18" fill="#f59e0b"/>
+<g transform="translate(849.12,377.12) scale(1.906666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="6" r="2"/><circle cx="5.5" cy="18" r="2"/><circle cx="18.5" cy="12" r="2"/><path d="M7.5 6h4a3 3 0 0 1 3 3v.500M7.5 18h4a3 3 0 0 0 3-3v-.500"/></g>
+<circle cx="831" cy="359" r="11" fill="#0b1020" stroke="#f59e0b" stroke-width="2"/><text x="831" y="363" text-anchor="middle" class="k">5</text>
+<text x="872" y="468" text-anchor="middle" class="n"></text>
+</g>
+<text x="872" y="476" text-anchor="middle" style="font-size:21px;font-weight:650;fill:#eef1fb">Plan</text>
+<path d="M924 400H992" fill="none" stroke="#8b95b5" stroke-width="2" marker-end="url(#a)"/>
+<g>
+<rect x="1004" y="356" width="88" height="88" rx="18" fill="#eab308"/>
+<g transform="translate(1025.12,377.12) scale(1.906666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 7.8-7.5 9.5-4.3-1.7-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></g>
+<circle cx="1007" cy="359" r="11" fill="#0b1020" stroke="#eab308" stroke-width="2"/><text x="1007" y="363" text-anchor="middle" class="k">6</text>
+<text x="1048" y="468" text-anchor="middle" class="n"></text>
+</g>
+<text x="1048" y="476" text-anchor="middle" style="font-size:21px;font-weight:650;fill:#eef1fb">Check</text>
+<path d="M1100 400H1168" fill="none" stroke="#8b95b5" stroke-width="2" marker-end="url(#a)"/>
+<g>
+<rect x="1180" y="356" width="88" height="88" rx="18" fill="#22c55e"/>
+<g transform="translate(1201.12,377.12) scale(1.906666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M17.5 12v3.5M20.5 12v2.5"/></g>
+<circle cx="1183" cy="359" r="11" fill="#0b1020" stroke="#22c55e" stroke-width="2"/><text x="1183" y="363" text-anchor="middle" class="k">7</text>
+<text x="1224" y="468" text-anchor="middle" class="n"></text>
+</g>
+<text x="1224" y="476" text-anchor="middle" style="font-size:21px;font-weight:650;fill:#eef1fb">Authority</text>
+<path d="M1276 400H1344" fill="none" stroke="#8b95b5" stroke-width="2" marker-end="url(#a)"/>
+<g>
+<rect x="1356" y="356" width="88" height="88" rx="18" fill="#0ea5e9"/>
+<g transform="translate(1377.12,377.12) scale(1.906666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M10 8.5v7l6-3.5z"/></g>
+<circle cx="1359" cy="359" r="11" fill="#0b1020" stroke="#0ea5e9" stroke-width="2"/><text x="1359" y="363" text-anchor="middle" class="k">8</text>
+<text x="1400" y="468" text-anchor="middle" class="n"></text>
+</g>
+<text x="1400" y="476" text-anchor="middle" style="font-size:21px;font-weight:650;fill:#eef1fb">Execute</text>
+<path d="M1452 400H1520" fill="none" stroke="#8b95b5" stroke-width="2" marker-end="url(#a)"/>
+<g>
+<rect x="1532" y="356" width="88" height="88" rx="18" fill="#6366f1"/>
+<g transform="translate(1553.12,377.12) scale(1.906666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h12v17l-2.4-1.6-2.4 1.6-2.4-1.6-2.4 1.6L6 20.5z"/><path d="M9 8.5h6M9 12h6M9 15.5h3.5"/></g>
+<circle cx="1535" cy="359" r="11" fill="#0b1020" stroke="#6366f1" stroke-width="2"/><text x="1535" y="363" text-anchor="middle" class="k">9</text>
+<text x="1576" y="468" text-anchor="middle" class="n"></text>
+</g>
+<text x="1576" y="476" text-anchor="middle" style="font-size:21px;font-weight:650;fill:#eef1fb">Receipt</text>
+<path d="M1628 400H1696" fill="none" stroke="#8b95b5" stroke-width="2" marker-end="url(#a)"/>
+<g>
+<rect x="1708" y="356" width="88" height="88" rx="18" fill="#3b82f6"/>
+<g transform="translate(1729.12,377.12) scale(1.906666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16v11H11l-4.5 3.5v-3.5H4z"/><path d="M8 9.5h8M8 12.8h5"/></g>
+<circle cx="1711" cy="359" r="11" fill="#0b1020" stroke="#3b82f6" stroke-width="2"/><text x="1711" y="363" text-anchor="middle" class="k">10</text>
+<text x="1752" y="468" text-anchor="middle" class="n"></text>
+</g>
+<text x="1752" y="476" text-anchor="middle" style="font-size:21px;font-weight:650;fill:#eef1fb">Answer</text>
+<rect x="72" y="740" width="236" height="196" rx="18" fill="#0b1020" stroke="#3a4670" stroke-width="2"/>
+<text x="190" y="786" text-anchor="middle" style="font-size:25px;font-weight:700;fill:#eef1fb">Identity</text>
+<text x="190" y="828" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">Smart Agent accounts</text>
+<text x="190" y="858" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">names: .me .org .svc</text>
+<text x="190" y="888" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">keys that can be replaced</text>
+<rect x="328.6666666666667" y="740" width="236" height="196" rx="18" fill="#0b1020" stroke="#3a4670" stroke-width="2"/>
+<text x="446.6666666666667" y="786" text-anchor="middle" style="font-size:25px;font-weight:700;fill:#eef1fb">Admission</text>
+<text x="446.6666666666667" y="828" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">who is at the door</text>
+<text x="446.6666666666667" y="858" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">agent-to-agent transport</text>
+<text x="446.6666666666667" y="888" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">budgets</text>
+<rect x="585.3333333333334" y="740" width="236" height="196" rx="18" fill="#0b1020" stroke="#3a4670" stroke-width="2"/>
+<text x="703.3333333333334" y="786" text-anchor="middle" style="font-size:25px;font-weight:700;fill:#eef1fb">Knowledge</text>
+<text x="703.3333333333334" y="828" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">the domain ontology</text>
+<text x="703.3333333333334" y="858" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">skills, by commitment</text>
+<text x="703.3333333333334" y="888" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">public and private context</text>
+<rect x="842" y="740" width="236" height="196" rx="18" fill="#0b1020" stroke="#3a4670" stroke-width="2"/>
+<text x="960" y="786" text-anchor="middle" style="font-size:25px;font-weight:700;fill:#eef1fb">Orchestration</text>
+<text x="960" y="828" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">intent, plan, act, observe</text>
+<text x="960" y="858" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">judge and plan rules</text>
+<text x="960" y="888" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">the model gateway</text>
+<rect x="1098.6666666666667" y="740" width="236" height="196" rx="18" fill="#0b1020" stroke="#3a4670" stroke-width="2"/>
+<text x="1216.6666666666667" y="786" text-anchor="middle" style="font-size:25px;font-weight:700;fill:#eef1fb">Authority</text>
+<text x="1216.6666666666667" y="828" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">signed delegations</text>
+<text x="1216.6666666666667" y="858" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">limits kept by contracts</text>
+<text x="1216.6666666666667" y="888" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">revocable at any time</text>
+<rect x="1355.3333333333335" y="740" width="236" height="196" rx="18" fill="#0b1020" stroke="#3a4670" stroke-width="2"/>
+<text x="1473.3333333333335" y="786" text-anchor="middle" style="font-size:25px;font-weight:700;fill:#eef1fb">Vault</text>
+<text x="1473.3333333333335" y="828" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">the agent's own records</text>
+<text x="1473.3333333333335" y="858" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">read only under a grant</text>
+<text x="1473.3333333333335" y="888" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">kept by its owner</text>
+<rect x="1612" y="740" width="236" height="196" rx="18" fill="#0b1020" stroke="#3a4670" stroke-width="2"/>
+<text x="1730" y="786" text-anchor="middle" style="font-size:25px;font-weight:700;fill:#eef1fb">Evidence</text>
+<text x="1730" y="828" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">a receipt for each step</text>
+<text x="1730" y="858" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">provenance of each run</text>
+<text x="1730" y="888" text-anchor="middle" style="font-size:17px;font-weight:400;fill:#9aa5c7">audit events</text>
+<text x="72" y="1054" text-anchor="start" style="font-size:20px;font-weight:400;fill:#9aa5c7">Intelligence may be probabilistic. Authority must not be.</text>
+<text x="1848" y="1054" text-anchor="end" style="font-size:20px;font-weight:400;fill:#9aa5c7">faithnet.estate/architecture</text>
+</svg>

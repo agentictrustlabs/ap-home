@@ -49,7 +49,7 @@ describe('the architecture posts', () => {
     const html = await res.text();
     for (const post of POSTS) expect(html).toContain(`href="/architecture/${post.slug}"`);
     expect(html).toContain('aria-current="page">Architecture</a>');
-    expect(html).not.toContain('<script');
+    expect(html.match(/<script[^>]*>/g)).toEqual(['<script src="/nav.js">']);
   });
   it('serves a post with its picture, described for a reader who cannot see it, and a link preview', async () => {
     const html = await (await get('/architecture/agent-harness')).text();
@@ -58,10 +58,11 @@ describe('the architecture posts', () => {
     expect(html).toContain('<meta property="og:image" content="https://faithnet.estate/architecture/agent-harness-flow.png">');
     expect(html).toContain('<link rel="canonical" href="https://faithnet.estate/architecture/agent-harness">');
   });
-  it('lists every post\'s steps beside its picture, each one opening its details with no script', async () => {
+  it('lists a flow post\'s steps beside its picture, each one opening its details with no script of its own', async () => {
     for (const post of POSTS) {
+      if (!post.steps) continue;
       const html = await (await get(`/architecture/${post.slug}`)).text();
-      expect(html).not.toContain('<script');
+      expect(html.match(/<script[^>]*>/g)).toEqual(['<script src="/nav.js">']);
       expect(html).toContain('<i id="closed"></i>');
       expect(post.steps.length).toBeGreaterThan(0);
       expect(post.steps.length).toBeLessThanOrEqual(12); // style.css marks the open step for up to twelve
@@ -78,8 +79,42 @@ describe('the architecture posts', () => {
       }
     }
   });
+  it('serves an article: prose under its picture, with no steps', async () => {
+    const html = await (await get('/architecture/harness-needs-substrate')).text();
+    expect(html).toContain('<h1>Great Agent Harness requires Agentic Primitives Substrate</h1>');
+    expect(html).toContain('<meta property="og:image" content="https://faithnet.estate/architecture/harness-on-substrate.png">');
+    expect(html).toContain('href="/architecture/agent-harness"');
+    expect(html).not.toContain('class="flow"');
+  });
   it('leaves a picture and an unknown post to the assets (a 404 there, never an empty page here)', async () => {
     expect(await (await get('/architecture/agent-harness-flow.svg')).text()).toBe('asset');
     expect(await (await get('/architecture/no-such-post')).text()).toBe('asset');
+  });
+});
+
+describe('who sees what', () => {
+  const get = async (path: string) => (await worker.fetch(new Request(`https://faithnet.estate${path}`), env)).text();
+  const links = (html: string) => [...html.slice(html.indexOf('<nav>'), html.indexOf('</nav>')).matchAll(/<a href="([^"]+)"( data-auth)?/g)].map((m) => `${m[1]}${m[2] ? ' (signed in)' : ''}`);
+  it('marks the steward\'s menu for a signed-in tab only, and leaves Architecture to everyone, on every page', async () => {
+    for (const path of ['/', '/waiting', '/connected', '/architecture', '/architecture/agent-harness']) {
+      const html = await get(path);
+      expect(links(html)).toEqual(['/ (signed in)', '/waiting (signed in)', '/architecture']);
+      // the mark is made before anything paints
+      expect(html.indexOf('<script src="/nav.js"></script>')).toBeLessThan(html.indexOf('<link rel="stylesheet"'));
+    }
+  });
+  it('gives a visitor the cover, with a way in and the posts to read, and holds the estate\'s own page back', async () => {
+    for (const path of ['/', '/waiting']) {
+      const html = await get(path);
+      expect(html).toContain('<div class="cover">');
+      expect(html).toContain('<button class="primary" data-signin>Sign in at your Home</button>');
+      for (const post of POSTS.slice(0, 3)) expect(html).toContain(`href="/architecture/${post.slug}"`);
+      expect(html).toContain('<main id="main" hidden>');
+    }
+  });
+  it('shows no cover while a sign-in is finishing', async () => {
+    const html = await get('/connected');
+    expect(html).not.toContain('class="cover"');
+    expect(html).toContain('<main id="main">');
   });
 });

@@ -4,7 +4,7 @@
 // session they hold, exactly as at the Home — this Worker adds no authority and takes none.
 import { fmtAgo, isStale, parseHeartbeat, tilesOf, type Heartbeat } from './model.js';
 import { page } from './html.js';
-import { architectureIndex, architecturePost } from './architecture.js';
+import { architectureIndex, architecturePost, postCards } from './architecture.js';
 
 export interface Env {
   ASSETS: Fetcher;
@@ -76,7 +76,7 @@ export default {
       return relay(env, m[1]!, body);
     }
     if (path === '/' || path === '/connected' || path === '/waiting') {
-      return new Response(page({ id: env.ESTATE_ID, name: env.ESTATE_NAME, home: env.HOME_ORIGIN, view: path === '/waiting' ? 'waiting' : 'overview' }), {
+      return new Response(page({ id: env.ESTATE_ID, name: env.ESTATE_NAME, home: env.HOME_ORIGIN, view: path === '/waiting' ? 'waiting' : path === '/connected' ? 'connecting' : 'overview', cards: postCards(3) }), {
         headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
       });
     }

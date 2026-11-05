@@ -1,7 +1,9 @@
 // THE ESTATE'S ARCHITECTURE POSTS. Public, static, written here: `/architecture` lists them, `/architecture/<slug>` is one.
-// A post is a picture of a flow, the flow's steps listed to the right of it, and prose under both. Choosing a step (in the list or
+// A FLOW post is a picture of a flow, the flow's steps listed to the right of it, and prose under both. An ARTICLE is prose under
+// its picture, with no steps. Choosing a step (in the list or
 // on its tile in the picture) opens that step's details in a panel on the right: why the step exists, what happens, where it runs,
-// what it reads and leaves, and how it stops. The panel is plain CSS (`:target`), so these pages load no script. Everything is
+// what it reads and leaves, and how it stops. The panel is plain CSS (`:target`), so a post needs no script of its own (the header's `/nav.js` only shows a
+// signed-in steward their menu). Everything is
 // authored in this file (no value from a request reaches markup); pictures are static assets under `assets/architecture/`.
 //
 // To add a post: draw its picture (scripts/*-flow.mjs, numbered tiles), add it to `assets/architecture/`, and add an entry to POSTS
@@ -35,7 +37,8 @@ export interface Post {
   /** One or two sentences: the listing, the page's standfirst and its link preview. */
   description: string;
   picture: { svg: string; png: string; alt: string; width: number; height: number; caption: string };
-  steps: Step[];
+  /** A flow post lists its steps beside the picture. An article has none: it is prose under its picture. */
+  steps?: Step[];
   body: string;
 }
 
@@ -415,7 +418,111 @@ const SCRIPTURE_BODY = `
 <li><b>It reads the newest published skill.</b> The agent harness pins a skill by digest through a playbook its custodian assigned. Here the owner and the commitment are checked, and the newest published version is used.</li>
 </ul>`;
 
+// ───────────────────────────────────────────────────────────────── the article: a harness needs a substrate
+
+const SUBSTRATE_ALT =
+  'A diagram in two layers. On top, the ten steps of the agent harness in a row: Admit, Playbook, Ground, Judge, Plan, Check, Authority, ' +
+  'Execute, Receipt, Answer. Beneath, the seven capabilities of the Agentic Primitives substrate: Identity, Admission, Knowledge, ' +
+  'Orchestration, Authority, Vault and Evidence. A line joins each step to what it takes from the substrate. Admit takes Identity and ' +
+  'Admission. Playbook takes Knowledge and the Vault. Ground takes Knowledge. Judge, Plan, Check and Answer take Orchestration. ' +
+  'Authority takes Authority and Identity. Execute takes Knowledge and Orchestration. Receipt takes Evidence and the Vault.';
+
+const SUBSTRATE_BODY = `
+<p>Every team that builds agents ends up writing the same loop. Take a request, let a model plan, call some tools, write an answer. It demos well. Then the agent starts acting for real people, and someone asks the questions that matter:</p>
+<ul>
+<li>Who actually asked?</li>
+<li>What is this agent allowed to do for them, and who said so?</li>
+<li>Which instructions did it follow, and could anyone have changed them?</li>
+<li>Did the thing really happen, only once, and who can check?</li>
+</ul>
+<p>A loop cannot answer these. They are not planning problems. They are questions about identity, authority and evidence, and they need a layer underneath the loop that already holds the answers. We call that layer the substrate.</p>
+<p>Ours is <a href="https://agenticprimitives.dev">Agentic Primitives</a>, an open set of TypeScript packages and contracts in which identity, custody, admission, delegation, naming and evidence are designed as one system. This article walks through the harness that runs every agent in the faithnet estate and shows what each step takes from that substrate. The flow itself, with the details of every step, is at <a href="/architecture/agent-harness">How an ask runs at an agent</a>.</p>
+
+<h2>The harness, in ten steps</h2>
+<p>An ask is one sentence from a person to an agent. It passes through ten steps.</p>
+<ol>
+<li><b>Admit.</b> Who is asking is settled before anything else.</li>
+<li><b>Playbook.</b> The skills this agent was assigned are loaded and checked against their digest.</li>
+<li><b>Ground.</b> Code reads the request against the domain's own terms.</li>
+<li><b>Judge.</b> A small model answers one question: which one skill should handle this, or none?</li>
+<li><b>Plan.</b> The plan is built around the chosen skill.</li>
+<li><b>Check.</b> Fixed rules examine the plan before anything runs.</li>
+<li><b>Authority.</b> Every step that acts needs a mandate the person signed.</li>
+<li><b>Execute.</b> The step is checked for having already happened, then run once.</li>
+<li><b>Receipt.</b> Every step leaves a record of what ran and under what.</li>
+<li><b>Answer.</b> The answer is given as the skill wrote it, or composed and checked.</li>
+</ol>
+<p>Only four of the ten can call a model: the judge, the planner when no skill fits, a skill as it writes, and the composer of an answer. The other six are code, and they are the six that decide whether the agent can be trusted.</p>
+
+<h2>What each step takes from the substrate</h2>
+<p>The substrate gives the harness seven capabilities. Each is used by name in the steps above.</p>
+
+<h3>Identity that can sign</h3>
+<p>Every person, organization and agent is a Smart Agent: one permanent account with a name, such as <code>.me</code>, <code>.org</code> or <code>.svc</code>, whose signature anyone can check. A lost key is replaced. The identity stays, and so does everything set up under it.</p>
+<p><b>Admit</b> uses it to know who is asking. <b>Authority</b> uses it to know who signed the mandate.</p>
+
+<h3>Admission</h3>
+<p>A front door that settles how a caller arrived: a person signed in at their Home, an app holding a wire that person signed, or another agent sending a message over A2A. It also checks the agent's budget. Admission says who is at the door. It never decides what they may do inside.</p>
+<p><b>Admit</b> is this capability, used as it is.</p>
+
+<h3>Knowledge with an address</h3>
+<p>The domain's ontology says what things are called, and what each skill covers, produces and consumes. A skill is a document published with a commitment to its exact content, so it can be named by digest and never silently changed.</p>
+<p><b>Playbook</b> pins the agent's skills by digest. <b>Ground</b> reads the request against the ontology before any model sees it. <b>Execute</b> reads a skill's body by the pinned digest, and refuses it if the registry's copy has moved.</p>
+
+<h3>Orchestration</h3>
+<p>The loop itself: intent, plan, act, observe. In the substrate it is a core with declared parts. The judge accepts a skill by a stated floor and margin. The plan rules are fixed code with named outcomes. Every model call goes through a gateway, under a named profile with a budget.</p>
+<p><b>Judge</b>, <b>Plan</b>, <b>Check</b> and <b>Answer</b> are built from it.</p>
+
+<h3>Authority</h3>
+<p>A delegation is a signed, narrow permission that can be taken back: this act, up to this value, until this date. Its limits are kept by contracts, not by the agent behaving well.</p>
+<p><b>Authority</b> checks a mandate for every step that acts, not once for the run. With no mandate the run stops, says exactly what it needs, and resumes when the person has signed at their Home.</p>
+
+<h3>A vault the owner holds</h3>
+<p>Each agent has a vault of its own records, and reading from it takes a grant. The service that runs the agent is not the owner of what is in it.</p>
+<p><b>Playbook</b> reads the agent's skill assignment from the vault. <b>Receipt</b> writes the run's provenance into it.</p>
+
+<h3>Evidence</h3>
+<p>Every step leaves an audit event and a receipt: the skill and its version, the mandate it ran under, and what was observed. The run as a whole is projected into a provenance record in a standard vocabulary.</p>
+<p><b>Receipt</b> is where a claim that "the agent did it" becomes something another party can check.</p>
+
+<h2>Take the substrate away</h2>
+<p>The clearest way to see what the substrate does is to remove it and look at what each step turns into.</p>
+<ul>
+<li><b>Admit becomes an API key.</b> You know which app called. You do not know which person.</li>
+<li><b>Playbook becomes a prompt in a config file.</b> Whoever can deploy can change what the agent does, and nothing records that they did.</li>
+<li><b>Authority becomes the service's own credentials.</b> The agent can do whatever the service can do, for everyone, and permission is an <code>if</code> statement.</li>
+<li><b>Execute becomes a retry.</b> Nothing says whether the payment already went out.</li>
+<li><b>Receipt becomes a log line in someone else's system.</b> The person the agent acted for cannot read it, and nobody outside can verify it.</li>
+</ul>
+<p>The judge and the planner would work exactly as before. That is the point. The intelligent parts of a harness are the parts you can get anywhere. The trustworthy parts are the ones that cannot be added afterwards, because they depend on every party having an identity, every permission being signed, and every record having an owner.</p>
+
+<h2>Three rules that hold it together</h2>
+<ul>
+<li><b>Intelligence may be probabilistic. Authority must not be.</b> The planner proposes, the mandate authorizes, the executor acts, the receipt proves.</li>
+<li><b>The ontology proposes, a judge decides, a declared rule accepts.</b> Choosing a skill never permits anything. The chosen step still meets every gate after it.</li>
+<li><b>An archetype changes what an agent knows how to do, never what it may do.</b></li>
+</ul>
+
+<h2>Where to look next</h2>
+<ul>
+<li><a href="/architecture/agent-harness">How an ask runs at an agent</a>: the flow, with each step's details, where it runs and what it leaves behind.</li>
+<li><a href="/architecture/scripture-ask">How the Scripture Agent answers a question</a>: the same judge and the same kind of skill in a harness shaped for an agent that only reads.</li>
+<li><a href="https://agenticprimitives.dev">Agentic Primitives</a>: the substrate.</li>
+</ul>`;
+
 export const POSTS: Post[] = [
+  {
+    slug: 'harness-needs-substrate',
+    title: 'Great Agent Harness requires Agentic Primitives Substrate',
+    date: '2026-11-05',
+    description:
+      'An agent harness is the loop that turns one sentence into something done. The loop is the easy part. What decides whether it can be trusted is what it stands on.',
+    picture: {
+      svg: '/architecture/harness-on-substrate.svg', png: '/architecture/harness-on-substrate.png', alt: SUBSTRATE_ALT, width: 1920, height: 1080,
+      caption: 'The ten steps of the harness, and what each one takes from the substrate beneath it.',
+    },
+    body: SUBSTRATE_BODY,
+  },
   {
     slug: 'scripture-ask',
     title: 'How the Scripture Agent answers a question',
@@ -450,19 +557,23 @@ const attr = (s: string): string => s.replace(/&/g, '&amp;').replace(/"/g, '&quo
 
 export interface ArchitectureInput { name: string; origin: string }
 
-export function architectureIndex(p: ArchitectureInput): string {
-  const cards = POSTS.map((post) => `<article class="post-card">
+/** The posts as cards, newest first: the architecture index, and the front page of a visitor who is not signed in. */
+export function postCards(limit = POSTS.length): string {
+  return POSTS.slice(0, limit).map((post) => `<article class="post-card">
 <a class="thumb" href="/architecture/${post.slug}"><img src="${post.picture.svg}" alt="" width="${post.picture.width}" height="${post.picture.height}" loading="lazy"></a>
 <h2><a href="/architecture/${post.slug}">${post.title}</a></h2>
 <p class="quiet"><time datetime="${post.date}">${longDate(post.date)}</time></p>
 <p>${post.description}</p>
 <p><a href="/architecture/${post.slug}">Read the post →</a></p>
 </article>`).join('\n');
+}
+
+export function architectureIndex(p: ArchitectureInput): string {
   return shell({
     name: p.name, current: 'architecture', title: `Architecture · ${p.name}`,
     description: `How ${p.name} works: the agent harness, skills, authority and records, in pictures.`,
     canonical: `${p.origin}/architecture`,
-    main: `<h1>Architecture</h1>\n<p class="quiet">How this estate works, in pictures.</p>\n${cards}`,
+    main: `<h1>Architecture</h1>\n<p class="quiet">How this estate works, in pictures.</p>\n${postCards()}`,
   });
 }
 
@@ -500,16 +611,25 @@ export function architecturePost(p: ArchitectureInput, slug: string): string | n
   const post = POSTS.find((x) => x.slug === slug);
   if (!post) return null;
   const pic = post.picture, steps = post.steps;
+  const head = `<p class="quiet"><a href="/architecture">Architecture</a> · <time datetime="${post.date}">${longDate(post.date)}</time></p>
+<h1>${post.title}</h1>
+<p class="lede">${post.description}</p>`;
+  const meta = { name: p.name, current: 'architecture' as const, title: `${post.title} · ${p.name}`, description: post.description,
+    canonical: `${p.origin}/architecture/${post.slug}`, image: `${p.origin}${pic.png}`, article: true };
+  if (!steps) return shell({ ...meta, main: `<article class="post">
+${head}
+<figure class="picture wide">
+<div class="scroll"><div class="canvas"><img src="${pic.svg}" alt="${attr(pic.alt)}" width="${pic.width}" height="${pic.height}"></div></div>
+<figcaption>${pic.caption} <a href="${pic.svg}">Open the picture</a> · <a href="${pic.png}">PNG</a></figcaption>
+</figure>
+${post.body}
+</article>` });
   // the tiles in the picture are links too: one clear rectangle over each numbered tile, in the picture's own units
   const hots = steps.map((s) => `<a href="#step-${s.id}" tabindex="-1"><title>${s.name}</title><rect x="${s.at[0] - 40}" y="${s.at[1] - 40}" width="80" height="80" rx="20"/></a>`).join('');
   const items = steps.map((s) => `<li><a href="#step-${s.id}"><span class="num" style="--c:${s.color}">${steps.indexOf(s) + 1}</span><b>${s.name}</b><span class="sum">${s.summary}</span></a></li>`).join('\n');
-  return shell({
-    name: p.name, current: 'architecture', title: `${post.title} · ${p.name}`, description: post.description,
-    canonical: `${p.origin}/architecture/${post.slug}`, image: `${p.origin}${pic.png}`, article: true,
+  return shell({ ...meta,
     main: `<article class="post">
-<p class="quiet"><a href="/architecture">Architecture</a> · <time datetime="${post.date}">${longDate(post.date)}</time></p>
-<h1>${post.title}</h1>
-<p class="lede">${post.description}</p>
+${head}
 <div class="flow">
 <figure class="picture">
 <div class="scroll"><div class="canvas"><img src="${pic.svg}" alt="${attr(pic.alt)}" width="${pic.width}" height="${pic.height}"><svg class="hots" viewBox="0 0 ${pic.width} ${pic.height}">${hots}</svg></div></div>
