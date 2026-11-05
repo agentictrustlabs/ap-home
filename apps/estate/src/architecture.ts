@@ -554,11 +554,10 @@ const SUBSTRATE_BODY = `
 const SIGNIN_ALT =
   'A flow diagram. An app asks the Home to sign a person in. The Home checks the app against its registry and looks for a Home session. ' +
   'Without a session the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation the ' +
-  'person signs, its check on chain, a record with a single-use code, and the code exchanged for an id_token. Three arcs run above the row. ' +
+  'person signs, its check on chain, a record with a single-use code, and the code exchanged for an id_token. Arcs run above the row. ' +
   'A new app for a person already signed in goes from Recognize to Allow. An app that still holds its delegation goes straight to Token. ' +
-  'A designed path, live in shadow, records its decision and will go from Recognize to Verify, with no sheet and no new signature. ' +
-  'A note says that in Chrome, FedCM signs nothing new: it hands back the wire from the last Allow, or goes to a popup with the sheet. ' +
-  'Another says that signing out ends the Home session and every app\'s silent renewal, and walks the apps with a sign-out page of their own.';
+  'A fourth arc is for Chrome: an app the person already allowed gets the delegation from that Allow, checked on chain, with no sheet and nothing signed, and anything else opens the same flow in a popup. ' +
+  'A note says that signing out ends the Home session and every app\'s silent renewal, and walks the apps with a sign-out page of their own.';
 
 const HOME_PAGES = "The Home's pages, in the person's browser. The Home is a Next.js app (<code>apps/home</code>) at <code>www.faithnet.me</code>.";
 const HOME_SERVER = "The Home's server (<code>apps/home/server</code>). Tickets, codes and rows are kept in its key-value store, <code>AUTH_CODES</code>.";
@@ -821,7 +820,7 @@ const SIGNIN_BODY = `
 <p>"Not you?" is different. It ends the Home session so the person can choose who to be, and leaves their apps alone.</p>
 
 <h2 id="next-design">The next design: the Home remembers an Allow</h2>
-<p>Spec 445 is the design for the dashed amber arc. The code went live on 5 November 2026 in shadow: Seed Bible Reader decides and records, and still shows the sheet, so no app skips it yet. Everything above this section describes what a person meets today.</p>
+<p>Spec 445 is the design for skipping the sheet at the Home. The code went live on 5 November 2026 in shadow: Seed Bible Reader decides and records, and still shows the sheet, so no app skips it there yet. The picture shows what is live, so this is not in it. Everything above this section describes what a person meets today.</p>
 <p>A person who allowed an app is not asked again, as long as the app asks for nothing more and what they signed still holds. Nothing is signed on that visit. The app is handed the wires it already had, each checked on chain first.</p>
 
 <h3>Who is asking: a cookie script cannot read</h3>
@@ -938,7 +937,7 @@ const SIGNIN_BODY = `
 
 <h3>8. Is any of it built?</h3>
 <blockquote><p>"You already have a note about this but it has not been done yet."</p></blockquote>
-<p><b>Correct.</b> There are two notes and no code. <code>src/lib/sso-cookie.ts</code> carries a hardening note that a server-set HttpOnly cookie should replace the script-managed one. <code>EntryExperience.tsx</code> notes at <code>prompt=none</code> that there is no remembered-consent store yet. Nothing for either is live. In the picture this is the dashed amber arc.</p>
+<p><b>Correct.</b> There are two notes and no code. <code>src/lib/sso-cookie.ts</code> carries a hardening note that a server-set HttpOnly cookie should replace the script-managed one. <code>EntryExperience.tsx</code> notes at <code>prompt=none</code> that there is no remembered-consent store yet. Neither was live at the time.</p>
 <p>That is now moving: the design is <a href="#next-design">written up above</a> as spec 445, and the code is live in shadow.</p>
 
 <h3>In short</h3>
@@ -1376,7 +1375,7 @@ export const POSTS: Post[] = [
       'The path from pressing Sign in at an app to the app holding a delegation: what the Home checks, what the person signs, what is remembered, and what a second app or a return visit skips.',
     picture: {
       svg: '/architecture/sign-in-flow.svg', png: '/architecture/sign-in-flow.png', alt: SIGNIN_ALT, width: 1460, height: 1020,
-      caption: 'Grey arrows are a first sign-in. Green is a new app for a person already signed in. Blue is an app coming back. Dashed amber is the next design, live in shadow: it decides and records, and the sheet is still shown.',
+      caption: 'Grey arrows are a first sign-in. Green is a new app for a person already signed in. Blue is an app coming back. Amber is the browser chooser in Chrome, for an app the person already allowed.',
     },
     steps: SIGNIN_STEPS,
     byHeading: 'Who acts',
