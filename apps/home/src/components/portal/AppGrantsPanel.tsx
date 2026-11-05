@@ -170,7 +170,7 @@ export function AppGrantsPanel({ showEmpty = false, kind = 'assistants' }: { sho
                   const on = e.target.checked;
                   const apply = (v: boolean) => change(g.clientId, ({ askEveryTime: _a, ...x }) => (v ? { ...x, askEveryTime: true as const } : x));
                   apply(on); // at once: a checkbox that waits for the server looks as if the click did nothing
-                  void setAskEveryTime(session.token, g.clientId, on).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); }).catch((err: unknown) => { apply(!on); setErr(`Could not save that: ${err instanceof Error ? err.message : 'the request failed'}`); });
+                  void setAskEveryTime(session.token, g.clientId, on).then((r) => { if (r.status === 403) throw new Error('sign in again to turn this off'); if (!r.ok) throw new Error(`HTTP ${r.status}`); }).catch((err: unknown) => { apply(!on); setErr(`Could not save that: ${err instanceof Error ? err.message : 'the request failed'}`); });
                 }} /> Ask me every time</label>
                 <button type="button" className="btn ghost" data-testid={`app-grant-forget-${g.clientId}`} onClick={() => void forgetAppConsent(session.token, g.clientId).then(() => change(g.clientId, ({ terms: _t, ...x }) => x))}>Forget this app</button>
               </div>

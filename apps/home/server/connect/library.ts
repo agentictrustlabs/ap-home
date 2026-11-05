@@ -6,7 +6,8 @@
 // uniform across sources (content-storage §5.1/§7.1). The library index is authoritative in the
 // principal's vault (person: the `content.catalog` record via A2A→MCP; org: org-vault); KV is a cache.
 // Person scope = the session subject; org scope = steward-gated, DO-mediated (spec 315).
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 // Mirrors @agenticprimitives/content-storage {ArtifactSource, ArtifactAction, AgentKind} (spec 335
 // §5.1/§7.1) — inlined here until the content-storage workspace dep is installed/built for this
 // Vercel app; the model (multi-source artifacts + per-artifact access grants) is identical.
@@ -57,7 +58,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   const keys = await importJwks(jwks);
   const iss = ownIssuer(request, env);
   // 1) the Home's own portal session (aud = demo-sso).
-  let v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: iss });
+  let v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: iss });
   // 2) fall back to a REGISTERED relying-app id_token (e.g. skills-app), so an app can drive the
   //    person's LIBRARY on their behalf — same person, same vault, same per-artifact grants
   //    downstream. This mirrors /connect/channels exactly; the library route was written without it,
@@ -67,7 +68,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   if (!v.ok) {
     const aud = unverifiedAud(token);
     if (aud && (await resolveClient(env, aud))) {
-      v = await verifyAgentSession(token, { keys, expectedAud: aud, expectedIss: iss });
+      v = await verifySession(token, { keys, expectedAud: aud, expectedIss: iss });
     }
   }
   if (!v.ok) return null;

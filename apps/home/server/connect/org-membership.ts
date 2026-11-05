@@ -8,7 +8,8 @@
 //
 // Gates, fail-closed: the session must BE the delegator (the member consents for themselves only),
 // and the delegation's delegate must BE the org — a grant for anyone else is rejected, never fixed up.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Address } from '@agenticprimitives/types';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
@@ -48,7 +49,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (!v.ok) return json({ error: 'invalid session' }, 401);
   const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
   if (!person) return json({ error: 'no person address in token sub' }, 401);

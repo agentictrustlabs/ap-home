@@ -7,12 +7,14 @@
 //   POST { clientId, delegation } → REPLACE the row's wire after a credential rotation re-issued it (spec 410 §1.2:
 //   same terms, same salt, the account's approved-digest sentinel). The row stays a pointer; the lineage record in
 //   the person's vault is what the delegate's refresh reads.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { getClient } from '../../src/lib/oidc-clients';
 import { CONTRACTS } from '../../src/lib/chain';
 import { wireValidUntil } from '../../src/lib/consent-terms';
 import { wireRef, type AppGrantRow } from '../oidc/app-grant-row';
+import { readRecognition } from '../_lib/recognition';
 
 const json = (b: unknown, s = 200): Response => new Response(JSON.stringify(b), { status: s, headers: { 'content-type': 'application/json' } });
 
@@ -21,7 +23,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) return null;
   const { jwks } = await getServer(env);
-  const v = await verifyAgentSession(token, { keys: await importJwks(jwks), expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys: await importJwks(jwks), expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (!v.ok) return null;
   return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
 }
@@ -69,6 +71,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // FORGET drops what the Allow agreed to, so the next sign-in shows the sheet. The row stays: its wires are still live on
   // chain, and a forgotten row that vanished would take the only place to revoke them with it.
   if (body.forget === true) return save(({ terms: _t, termsDigest: _d, origins: _o, ...r }) => r);
+  // TURNING "ASK ME EVERY TIME" OFF LOOSENS A CONTROL, so it needs the proof the skip itself needs: the recognition cookie
+  // of this person, which script cannot read. The bearer alone is the script-readable session; a copy of it must not be
+  // able to switch the sheet back off. Turning it ON, and forget, only tighten, and stay on the bearer.
+  if (body.askEveryTime === false && !(await readRecognition(request, env.AUTH_CODES))?.sub.toLowerCase().endsWith(person)) return json({ error: 'recognition_required' }, 403);
   if (typeof body.askEveryTime === 'boolean') return save(({ askEveryTime: _a, ...r }) => (body.askEveryTime ? { ...r, askEveryTime: true as const } : r));
   // A wire she revoked on chain, forgotten here. The chain already refuses it; this keeps the list honest.
   if (body.revoked === true && (body.part === 'ask' || body.part === 'vault')) return save(({ askDelegation, selfVaultGrant, ...r }) => ({ ...r, ...(body.part === 'ask' ? {} : { askDelegation }), ...(body.part === 'vault' ? {} : { selfVaultGrant }) }) as Row);

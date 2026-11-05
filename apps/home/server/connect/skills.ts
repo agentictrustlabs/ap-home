@@ -5,7 +5,8 @@
 // `atl:skills` profile property (owner-signed, separate). This route is the PRIVATE tier: session-
 // authorized read/write of the claim set, keyed by the person SA. Never public; never travels as graph
 // state (ADR-0025/0040). The public assertion is a separate on-chain write the SA signs.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 
@@ -28,7 +29,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (!v.ok) return null;
   return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
 }

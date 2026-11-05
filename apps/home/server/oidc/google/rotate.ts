@@ -4,7 +4,8 @@
 // this bumps the per-(iss,sub) rotation counter. The member then signs out + signs back in with
 // Google → the next session derives `C_sub(iss,sub,rotation+1)` → a FRESH agent (named via
 // GoogleSecureHome). The old home is left behind (still server-custodied at the old rotation).
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../../_lib/home-session';
 import { bumpRotation } from '../../../src/lib/kv-indexer';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
 import { getServer, json, resolveOrigin, type FnContext } from '../../_lib/server-broker';
@@ -47,7 +48,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const keys = await importJwks(jwks);
   // Verify signature/alg/aud/exp (alg-pin rejects HS256), then accept the issuer if it's one of
   // our own Connect origins (the session was minted on www, used here on any of our origins).
-  const v = await verifyAgentSession(token, { keys, expectedAud: aud, expectedIss: (i) => i === reqOrigin || isOwnConnectOrigin(i) });
+  const v = await verifySession(token, { keys, expectedAud: aud, expectedIss: (i) => i === reqOrigin || isOwnConnectOrigin(i) });
   if (!v.ok) return json({ error: `invalid session: ${v.reason}` }, 401);
   const s = v.session;
   if (s.iss !== reqOrigin && !isOwnConnectOrigin(s.iss)) {

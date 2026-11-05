@@ -12,7 +12,8 @@
 // So: the Home is a courier for the operator token. Every authority decision happens elsewhere —
 // signature at the Worker, on-chain; delegation at the origin (ADR-0056).
 
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 
 interface ResolutionEnv {
@@ -102,7 +103,7 @@ export async function handleResolution(
   try {
     const { jwks } = await getServer(env);
     const keys = await importJwks(jwks);
-    const v = await verifyAgentSession(token, {
+    const v = await verifySession(token, {
       keys,
       expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso',
       expectedIss: ownIssuer(ctx.request, env),

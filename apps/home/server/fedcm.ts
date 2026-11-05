@@ -22,7 +22,8 @@ import {
   parseAssertionRequest,
   type FedcmAccount,
 } from '@agenticprimitives/fedcm-idp';
-import { importJwks, verifyAgentSession, mintIdToken } from '@agenticprimitives/connect';
+import { importJwks, mintIdToken } from '@agenticprimitives/connect';
+import { verifySession } from './_lib/home-session';
 import { nameClaimForIdToken, sharesProfileName } from '../src/lib/new-member';
 import { sharesEmailClaim } from '../src/whitelabel/provisioning';
 import { readCapabilityRecord } from './lib/capability-record';
@@ -182,10 +183,10 @@ async function verifyHomeSession(env: FnContext['env'], request: Request): Promi
   const expectedIss = (iss: string) => iss === reqOrigin || isOwnConnectOrigin(iss);
   // The home session token's aud is the home's own; if a session was minted with a different aud, retry
   // with the token's own aud (the signature is still verified, so this can't be forged).
-  let v = await verifyAgentSession(token, { keys, expectedAud: HOME_AUD, expectedIss });
+  let v = await verifySession(token, { keys, expectedAud: HOME_AUD, expectedIss });
   if (!v.ok) {
     const selfAud = decodeAud(token);
-    if (selfAud && selfAud !== HOME_AUD) v = await verifyAgentSession(token, { keys, expectedAud: selfAud, expectedIss });
+    if (selfAud && selfAud !== HOME_AUD) v = await verifySession(token, { keys, expectedAud: selfAud, expectedIss });
   }
   if (!v.ok) return { ok: false, reason: `session_verify_failed:${v.reason ?? 'unknown'}` };
   const session = v.session;
@@ -406,7 +407,7 @@ export const onFedcmGrant = async ({ request, env }: FnContext): Promise<Respons
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
   const iss = resolveOrigin(request, env);
-  const v = await verifyAgentSession(body.id_token, { keys, expectedAud: body.client_id, expectedIss: iss });
+  const v = await verifySession(body.id_token, { keys, expectedAud: body.client_id, expectedIss: iss });
   if (!v.ok) {
     audit('reject', { reason: `id_token_invalid:${v.reason ?? 'unknown'}` });
     return json({ error: `id_token_invalid:${v.reason ?? 'unknown'}` }, 401, cors);

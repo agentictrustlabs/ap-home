@@ -18,7 +18,8 @@
 //   POST { action:'revoke', org }            → { ok, consultDelegation } (returned so the CLIENT
 //                                              revokes it ON-CHAIN — the org-member-remove pattern)
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import type { DelegationWire } from '../../src/lib/delegation';
 import { callInteractions } from './channels';
@@ -41,7 +42,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<{ pe
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (!v.ok) return null;
   const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
   return person ? { person, token } : null;

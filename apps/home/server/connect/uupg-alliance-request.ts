@@ -3,7 +3,8 @@
 // UUPG should not write another principal's workflow document directly. Home verifies the caller's
 // stewardship, then appends/updates a typed pending situation inside the TARGET alliance's
 // `org.applications` document through the InteractionsDO bridge.
-import { importJwks, verifyAgentSession, verifyIdToken } from '@agenticprimitives/connect';
+import { importJwks, verifyIdToken } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import type { FnContext } from '../_lib/server-broker';
 import { getServer, ownIssuer } from '../_lib/server-broker';
 // Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
@@ -58,7 +59,7 @@ async function callerSa({ request, env }: FnContext): Promise<string | null> {
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (v.ok) return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
   let iss: string | undefined;
   let aud: string | undefined;

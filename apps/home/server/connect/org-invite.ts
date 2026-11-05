@@ -7,7 +7,8 @@
 // The invitation is a bearer claim: whoever redeems the link + confirms that email joins the org as a
 // MEMBER (authority-only, ADR-0025). Redemption lives in org-invite-redeem.ts. Email is delivered via the
 // gated SendGrid sender (log-only until configured).
-import { importJwks, verifyAgentSession, verifyIdToken } from '@agenticprimitives/connect';
+import { importJwks, verifyIdToken } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { verifyStewardship } from '../_lib/verify-stewardship';
 import type { IncomingDelegation } from '../_lib/verify-delegation';
@@ -46,7 +47,7 @@ export async function callerFromInviteAuth(env: FnContext['env'], request: Reque
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
   const issOk = ownIssuer(request, env);
-  const home = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: issOk });
+  const home = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: issOk });
   if (home.ok) {
     const person = (home.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
     return person ? { person, clientId: null } : null;

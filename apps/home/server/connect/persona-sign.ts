@@ -13,7 +13,8 @@
 // that session's own `sub` — the request never names a subject, so no one can ask to be signed for
 // as someone else. A session whose SA isn't in the registry gets `persona: false` and the client
 // falls back to the real wallet path (never a silent substitution).
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import type { Hex } from '@agenticprimitives/types';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { demoPersonaFor, signDigestAsDemoPersona, signTypedDataAsDemoPersona } from '../_lib/demo-custody';
@@ -31,7 +32,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, {
+  const v = await verifySession(token, {
     keys,
     expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso',
     expectedIss: ownIssuer(request, env),

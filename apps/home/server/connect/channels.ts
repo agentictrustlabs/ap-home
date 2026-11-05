@@ -11,7 +11,8 @@
 //   GET  ?communityId=…[&channelId=…] → { channels, bodies?, you, orgVaultEnabled, membership, steward }
 //   POST { action:'create'|'post', … } → { ok, channelId?|messageId? } | { error }
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 // Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
 import { resolveClient } from '../_lib/oidc-registry';
@@ -49,7 +50,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<{ pe
   const keys = await importJwks(jwks);
   const iss = ownIssuer(request, env);
   // 1) the Home's own portal session (aud = demo-sso).
-  let v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: iss });
+  let v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: iss });
   // 2) fall back to a REGISTERED relying-app id_token (e.g. skills-app), so an app
   //    can drive the Home's channel ops on the signed-in person's behalf — same
   //    person, same steward-wire lookup, same on-chain gate downstream. Only auds
@@ -57,7 +58,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<{ pe
   if (!v.ok) {
     const aud = unverifiedAud(token);
     if (aud && (await resolveClient(env, aud))) {
-      v = await verifyAgentSession(token, { keys, expectedAud: aud, expectedIss: iss });
+      v = await verifySession(token, { keys, expectedAud: aud, expectedIss: iss });
     }
   }
   if (!v.ok) return null;

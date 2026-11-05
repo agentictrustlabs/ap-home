@@ -6,7 +6,8 @@
 // return that person's related-agent links scoped to this client_id — from the private
 // Connect-home vault (KV). person↔org never travels as public graph state.
 import { createPublicClient, http, keccak256, toBytes, type Hex, type Address } from 'viem';
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { buildCustodyDescriptor, relatedAgentWriteContentHash, hashRelatedAgentWriteChallenge, type CustodyDescriptor } from '@agenticprimitives/related-agents';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
@@ -59,13 +60,13 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const homeAud = env.DEMO_SSO_AUD ?? 'demo-sso';
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  let v = await verifyAgentSession(token, { keys, expectedAud: clientId ?? homeAud, expectedIss: ownIssuer(request, env) });
+  let v = await verifySession(token, { keys, expectedAud: clientId ?? homeAud, expectedIss: ownIssuer(request, env) });
   // Person's-own-view (no client_id): also accept a REGISTERED relying-app token (e.g.
   // skills-app), so an app can list the connected person's own orgs — same person, their
   // own links. Mirrors the /connect/channels relying-token fallback.
   if (!v.ok && !clientId) {
     const aud = unverifiedAud(token);
-    if (aud && (await resolveClient(env, aud))) v = await verifyAgentSession(token, { keys, expectedAud: aud, expectedIss: ownIssuer(request, env) });
+    if (aud && (await resolveClient(env, aud))) v = await verifySession(token, { keys, expectedAud: aud, expectedIss: ownIssuer(request, env) });
   }
   if (!v.ok) return jsonCors({ error: `invalid session token: ${v.reason}` }, request, 401);
 
@@ -483,7 +484,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     const homeAud = env.DEMO_SSO_AUD ?? 'demo-sso';
     const { jwks } = await getServer(env);
     const keys = await importJwks(jwks);
-    const v = await verifyAgentSession(bearer, { keys, expectedAud: homeAud, expectedIss: ownIssuer(request, env) });
+    const v = await verifySession(bearer, { keys, expectedAud: homeAud, expectedIss: ownIssuer(request, env) });
     if (!v.ok) return jsonCors({ error: `invalid session token: ${v.reason}` }, request, 401);
     const sessionPerson = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
     if (!sessionPerson || sessionPerson !== person) {
