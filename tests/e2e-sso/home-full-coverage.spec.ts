@@ -44,6 +44,7 @@ const PERSON_ROUTES: Route[] = [
   { path: '/attestations', label: 'Attestations' },
   { path: '/activities', label: 'Activities' },
   { path: '/data-sources', label: 'Data sources' },
+  { path: '/profile', label: 'Profile page' },
   { path: '/friends', label: 'Friends' },
   { path: '/grants', label: 'Grants' },
   { path: '/search', label: 'Search' },
