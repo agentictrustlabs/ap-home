@@ -20,3 +20,15 @@ button, .btn { font:inherit; padding:6px 12px; border-radius:8px; border:1px sol
 button.primary { background:var(--accent); border-color:var(--accent); color:#fff; } button:disabled { opacity:.5; cursor:default; }
 input { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg); width:7rem; }
 .err { color:var(--bad); } .note { padding:10px 12px; border-left:3px solid var(--warn); background:var(--card); }
+
+/* the architecture posts: prose at a reading width, the picture wider than the text and scrollable on a small screen */
+.post, .post-card { max-width:46rem; } .post h1 { font-size:2rem; line-height:1.2; margin:6px 0 10px; text-wrap:balance; }
+.post h2 { font-size:1.25rem; margin:36px 0 8px; } .post p, .post li { line-height:1.6; } .post li { margin:8px 0; }
+.lede { font-size:1.15rem; color:var(--muted); margin:0 0 20px; }
+.post code { font:0.92em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:var(--card); border:1px solid var(--line); border-radius:5px; padding:1px 5px; }
+.picture { margin:24px 0 8px; width:min(1500px, calc(100vw - 32px)); } .picture .scroll { overflow-x:auto; border-radius:14px; background:#0b1020; }
+.picture img { display:block; width:100%; min-width:1180px; height:auto; } .picture figcaption { font-size:.85rem; color:var(--muted); margin-top:8px; max-width:46rem; }
+@media (min-width:1000px) { .picture { margin-left:calc((min(1500px, 100vw - 32px) - 928px) / -2); } }
+.post-card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin:20px 0; }
+.post-card h2 { margin:14px 0 2px; font-size:1.25rem; } .post-card h2 a { color:var(--fg); text-decoration:none; } .post-card p { margin:6px 0; }
+.post-card .thumb img { display:block; width:100%; height:auto; border-radius:8px; }

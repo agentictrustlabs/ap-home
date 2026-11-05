@@ -13,9 +13,33 @@ export function page(p: PageInput): string {
 <link rel="stylesheet" href="/style.css">
 </head><body data-estate="${esc(p.id)}" data-home="${esc(p.home)}" data-view="${p.view}">
 <header class="top"><a class="brand" href="/">${esc(p.name)}</a>
-<nav>${nav('/', 'Overview', p.view === 'overview')}${nav('/waiting', 'Waiting on me', p.view === 'waiting')}</nav>
+<nav>${nav('/', 'Overview', p.view === 'overview')}${nav('/waiting', 'Waiting on me', p.view === 'waiting')}${nav('/architecture', 'Architecture', false)}</nav>
 <span id="who" class="who"></span></header>
 <main id="main"><p class="quiet">Reading the estate…</p></main>
 <script type="module" src="/app.js"></script>
+</body></html>`;
+}
+
+/** A STATIC page under the estate's header: prose and pictures authored in this repository (the architecture posts). It loads
+ *  no script and reads nothing live. `main` is trusted markup written here; every other value is escaped. */
+export interface ShellInput { name: string; current: 'architecture'; title: string; description: string; canonical: string; image?: string; article?: boolean; main: string }
+
+export function shell(p: ShellInput): string {
+  const nav = (href: string, label: string, on: boolean): string => `<a href="${href}"${on ? ' aria-current="page"' : ''}>${label}</a>`;
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(p.title)}</title>
+<meta name="description" content="${esc(p.description)}">
+<link rel="canonical" href="${esc(p.canonical)}">
+<meta property="og:type" content="${p.article ? 'article' : 'website'}">
+<meta property="og:title" content="${esc(p.title)}">
+<meta property="og:description" content="${esc(p.description)}">
+<meta property="og:url" content="${esc(p.canonical)}">
+${p.image ? `<meta property="og:image" content="${esc(p.image)}">\n<meta name="twitter:card" content="summary_large_image">` : '<meta name="twitter:card" content="summary">'}
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/">${esc(p.name)}</a>
+<nav>${nav('/', 'Overview', false)}${nav('/waiting', 'Waiting on me', false)}${nav('/architecture', 'Architecture', p.current === 'architecture')}</nav></header>
+<main>${p.main}</main>
 </body></html>`;
 }

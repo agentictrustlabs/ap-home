@@ -39,3 +39,26 @@ describe('the manage door', () => {
     expect((await worker.fetch(post('/api/manage/runs', null), env)).status).toBe(403);
   });
 });
+
+describe('the architecture posts', () => {
+  const get = (path: string) => worker.fetch(new Request(`https://faithnet.estate${path}`), env);
+  it('lists the posts and links each one', async () => {
+    const res = await get('/architecture');
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('href="/architecture/agent-harness"');
+    expect(html).toContain('aria-current="page">Architecture</a>');
+    expect(html).not.toContain('<script');
+  });
+  it('serves a post with its picture, described for a reader who cannot see it, and a link preview', async () => {
+    const html = await (await get('/architecture/agent-harness')).text();
+    expect(html).toContain('<h1>How an ask runs at an agent</h1>');
+    expect(html).toMatch(/<img src="\/architecture\/agent-harness-flow\.svg" alt="A flow diagram\.[^"]{200,}"/);
+    expect(html).toContain('<meta property="og:image" content="https://faithnet.estate/architecture/agent-harness-flow.png">');
+    expect(html).toContain('<link rel="canonical" href="https://faithnet.estate/architecture/agent-harness">');
+  });
+  it('leaves a picture and an unknown post to the assets (a 404 there, never an empty page here)', async () => {
+    expect(await (await get('/architecture/agent-harness-flow.svg')).text()).toBe('asset');
+    expect(await (await get('/architecture/no-such-post')).text()).toBe('asset');
+  });
+});
