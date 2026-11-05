@@ -432,6 +432,7 @@ const SCRIPTURE_BODY = `
 
 <h2>What testing has shown so far</h2>
 <p>These results come from blind comparisons of today's answers with the new ones on about 360 questions the skills were not written from, in both orders, by judges from two model families. A pair counts only when both orders agree.</p>
+<p><b>These are leads, not findings.</b> Reading the answers afterwards showed that the judges often called things wrong that were not, and that many wins were marginal. They are being repeated under <a href="/architecture/testing-answers">a stricter test</a>, and this section will change with what it finds.</p>
 <ul>
 <li><b>Chance sets the bar.</b> The same path judged against itself still gets a clear winner in about one pair in ten, so a small gain means little, and a win has to repeat. One did not: answers about people and places in the Bible looked strongly better in the first round and were level in the second.</li>
 <li><b>The judge chooses well.</b> It placed all 60 of its test phrasings correctly, and it holds back on about one question in six. Those questions run today's path.</li>
@@ -555,7 +556,7 @@ const SIGNIN_ALT =
   'Without a session the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation the ' +
   'person signs, its check on chain, a record with a single-use code, and the code exchanged for an id_token. Three arcs run above the row. ' +
   'A new app for a person already signed in goes from Recognize to Allow. An app that still holds its delegation goes straight to Token. ' +
-  'A designed path, not yet live, would go from Recognize to Verify, with no sheet and no new signature.';
+  'A designed path, live in shadow, records its decision and will go from Recognize to Verify, with no sheet and no new signature.';
 
 const HOME_PAGES = "The Home's pages, in the person's browser. The Home is a Next.js app (<code>apps/home</code>) at <code>www.faithnet.me</code>.";
 const HOME_SERVER = "The Home's server (<code>apps/home/server</code>). Tickets, codes and rows are kept in its key-value store, <code>AUTH_CODES</code>.";
@@ -604,7 +605,7 @@ const SIGNIN_STEPS: Step[] = [
       "The token is tried by reading the person's profile with it. It must name an account that is deployed. If the request pinned a name, the session must be that name.",
       'With a session, the person goes straight to Allow. A passkey only works on the host it was made for, so a passkey person is first moved to their own subdomain of the Home, with the request carried along.',
       'Without a session, the person goes to Prove.',
-      'This step does not ask whether the person has allowed this app before. Nothing in sign-in asks that today. The next design, below, adds it.',
+      'The page now asks the server whether the person allowed this app before, and the server records its answer. No app acts on that answer yet, so the sheet still shows. See the next design, below.',
     ],
     where: [HOME_PAGES, 'Source: <code>EntryExperience.tsx</code> (the routing), <code>RecognizedEnroll.tsx</code> (the recognized path), <code>src/lib/sso-cookie.ts</code>, <code>src/context/session.tsx</code>.'],
     by: 'Code only.',
@@ -808,7 +809,7 @@ const SIGNIN_BODY = `
 <p>What an app does with the delegation once it is signed in is the next picture: <a href="/architecture/agent-harness">How an ask runs at an agent</a>.</p>
 
 <h2 id="next-design">The next design: the Home remembers an Allow</h2>
-<p>Spec 445 is the design for the dashed amber arc. The code is in review and is not live. Everything above this section describes the Home as it runs today.</p>
+<p>Spec 445 is the design for the dashed amber arc. The code went live on 5 November 2026 in shadow: Seed Bible Reader decides and records, and still shows the sheet, so no app skips it yet. Everything above this section describes what a person meets today.</p>
 <p>A person who allowed an app is not asked again, as long as the app asks for nothing more and what they signed still holds. Nothing is signed on that visit. The app is handed the wires it already had, each checked on chain first.</p>
 
 <h3>Who is asking: a cookie script cannot read</h3>
@@ -855,7 +856,7 @@ const SIGNIN_BODY = `
 <p>Another agent, working on the same problem, reviewed this page. Each point was read against the code.</p>
 <ul>
 <li><b>The cookie could be planted</b> through a social return link. Correct. That is why it is now bound to the browser, and why links set none.</li>
-<li><b>An app's id_token could pass as a Home session.</b> Correct, and worse than it said: reading the code, an app holding a person's id_token could present it to the FedCM lane and receive a token for a different app. A session must now name the credential behind it, and the Home's own audience cannot be an app. Not tried against a live Home. The fix is in the same review.</li>
+<li><b>An app's id_token could pass as a Home session.</b> Correct, and worse than it said: reading the code, an app holding a person's id_token could present it to the FedCM lane and receive a token for a different app. A session must now name the credential behind it, and the Home's own audience cannot be an app. Not tried against a live Home. That fix is live.</li>
 <li><b>Terms in the vault</b> raised who can read and who writes. The server cannot read them, so it does not decide from them, and the question exposed the replay above.</li>
 <li><b>"Asks for nothing more" needed more than claims.</b> The wire's caveats are now compared too.</li>
 <li><b>Silent sign-in told an app who the visitor is.</b> Correct. Hence <code>login_hint</code> and the single answer.</li>
@@ -870,7 +871,7 @@ const SIGNIN_BODY = `
 </ul>
 
 <h2 id="pauls-points">Paul's points, answered</h2>
-<p>Paul reviewed the sign-in and wrote up what he found and what he would do about it. His words are quoted below, a point at a time, each with a direct answer from the code as it stands. File names are under <code>apps/home</code>.</p>
+<p>Paul reviewed the sign-in and wrote up what he found and what he would do about it. His words are quoted below, a point at a time, each with a direct answer from the code as it stood at his review. Spec 445, <a href="#next-design">above</a>, has since changed that code, and it is live in shadow. File names are under <code>apps/home</code>.</p>
 
 <h3>1. Is consent remembered?</h3>
 <blockquote><p>"The Home never checks whether a person has already allowed an app."</p></blockquote>
@@ -922,7 +923,7 @@ const SIGNIN_BODY = `
 <h3>8. Is any of it built?</h3>
 <blockquote><p>"You already have a note about this but it has not been done yet."</p></blockquote>
 <p><b>Correct.</b> There are two notes and no code. <code>src/lib/sso-cookie.ts</code> carries a hardening note that a server-set HttpOnly cookie should replace the script-managed one. <code>EntryExperience.tsx</code> notes at <code>prompt=none</code> that there is no remembered-consent store yet. Nothing for either is live. In the picture this is the dashed amber arc.</p>
-<p>That is now moving: the design is <a href="#next-design">written up above</a> as spec 445, and the code is in review.</p>
+<p>That is now moving: the design is <a href="#next-design">written up above</a> as spec 445, and the code is live in shadow.</p>
 
 <h3>In short</h3>
 <ul>
@@ -1161,7 +1162,182 @@ const TRANSLATION_BODY = `
 <p>The edition is RBS, a draft model-made translation from the Hebrew, Aramaic and Greek under CC BY 4.0. The current release, <code>2026-11-05-v4.0.2</code>, has 31,085 verses, of which 26,445 are ready and 4,640 are published as open, each saying what is open. <b>No person has reviewed it.</b> The status on a verse says what the machine checked and nothing more.</p>
 `;
 
+const TEST_ALT =
+  "A flow diagram. Questions are drawn from a library of articles across every category, and clearly denominational ones are set aside for a later test. A key is built from each article. Today's path and the path with skills answer. A judge compares answers blind, in both orders, with the article and two other products as contestants; planted errors and a noise control test the judge. A second model family confirms any claimed error. Answers are scored against the key, real errors are remembered, and a scorecard per skill says what to change next.";
+const TEST_RUN = 'An evaluation script on the operator\'s machine (<code>apps/demo-bible-a2a/scripts/benchmark.mts</code>). It is not a Worker, and it runs nowhere near a reader.';
+const TEST_STORE = 'A private evaluation store. Questions, articles, keys and answers stay there and are not committed or published.';
+
+const TEST_STEPS: Step[] = [
+  {
+    id: 'draw', name: 'Draw', color: '#8b5cf6', at: [188, 400],
+    summary: 'Questions from every category of a large library.',
+    why: 'A test on the questions you tuned on flatters you, and a test on one kind of question says nothing about the rest. Every category takes a turn, so rare subjects are present and large ones do not dominate.',
+    what: [
+      'The library is a large published collection of Bible questions, each answered by a clear, opinionated article. Each category is taken in turn from a seeded shuffle, so the same draw can be repeated.',
+      'Questions used in earlier tests are left out, along with very long questions and very short articles.',
+      'The draw does not look at which skill a question would reach, so the test shows how often each skill really comes up.',
+    ],
+    where: [TEST_RUN, TEST_STORE],
+    by: 'Code only.',
+    reads: ['The articles and the site\'s public category pages.', 'The questions already used.'],
+    leaves: ['The list of candidate questions.'],
+    stops: ['A category with no question left simply takes no more turns.'],
+  },
+  {
+    id: 'aside', name: 'Set aside', color: '#3b82f6', at: [304, 400],
+    summary: 'Clearly denominational questions wait for their own test.',
+    why: 'A question that turns on what divides traditions has no single correct answer to score against. Keeping it in the general score would reward or punish a tradition instead of an answer.',
+    what: [
+      'Two model families read each question and the opening of its article, and say whether it clearly turns on a distinctive that divides Christian traditions.',
+      'If either says yes, the question is reserved and the next one from the list takes its place.',
+      'The reserved questions are kept for denominational testing, which is not being run yet.',
+    ],
+    where: [TEST_RUN],
+    by: 'Two small models, one from each family. The rule that either one can set a question aside is code.',
+    reads: ['The question.', 'The opening of its article.'],
+    leaves: ['The questions kept, and the reserved list with the reason for each.'],
+    stops: ['The rule errs toward setting aside. In the first run it reserved 12 of 52, a few of them more than it needed to.'],
+  },
+  {
+    id: 'key', name: 'Key', color: '#14b8a6', at: [420, 400],
+    summary: 'What a correct answer must say, from the article.',
+    why: 'Knowing what a correct answer says turns "which do you prefer?" into "did it get this right?". The articles take clear positions, which makes them good to build from.',
+    what: [
+      'A strong model reads the article and writes three to six essential points in its own words, the passages that carry the answer, and the position the article takes.',
+      'A model from the other family checks that each point really is the article\'s own, and code resolves each passage against the signed corpus.',
+      'The article is presumed correct. A point leaves the key only when it is confirmed wrong.',
+    ],
+    where: [TEST_RUN, TEST_STORE],
+    by: 'A model writes it, a second family audits it, and code checks the passages.',
+    reads: ['The article.', 'The signed corpus.', 'The errors already confirmed.'],
+    leaves: ['A private key for each question.'],
+    stops: ['A point the audit cannot find in the article is dropped and listed.', 'A passage that does not resolve is listed.'],
+  },
+  {
+    id: 'answer', name: 'Answer', color: '#f59e0b', at: [536, 400],
+    summary: "Today's path and the path with skills both answer.",
+    why: 'To learn what the skills do, the only difference between two answers should be the skills. So both run through the same pipeline, with the same library and the same writer.',
+    what: [
+      'Each question is answered by the path that serves readers today, and again with the intent stage and every scope and form acting, whether or not they have passed before.',
+      'The two other products\' answers are captured through their public interfaces, with the date. The article itself is the fifth contestant.',
+    ],
+    where: [TEST_RUN, 'The library and corpus are the live ones, read over HTTPS.'],
+    by: 'The same writer model on both paths, with the proof in code under both.',
+    reads: ['The question.', 'The library and the signed corpus.', 'The skill files.'],
+    leaves: ['Every answer, with its receipt and the skills it ran under.'],
+    stops: ['A hard spending cap on the whole run. Past it, nothing more is spent without the owner.'],
+  },
+  {
+    id: 'judge', name: 'Judge', color: '#ef4444', at: [672, 400],
+    summary: 'Blind comparison, in both orders, under one neutral standard.',
+    why: 'A judge favours what it reads second, and it favours styles it likes. Showing each pair both ways, and counting a win only when both agree, removes the first. Stating a margin keeps a small preference from being reported as a win.',
+    what: [
+      'A strong model from a different family compares two answers with their names removed. It is given every verse either one cites.',
+      'Against the two products, it also has the key\'s points. Against the article, it does not, because the key came from that article.',
+      'It says how large the difference is: clear, marginal or none. Clear and marginal wins are counted apart.',
+      'Two checks test the judge itself. Planted errors are known mistakes added to an answer, to see whether it notices. The noise control answers the same way twice, to see how often it finds a winner where nothing changed. An earlier run found one in about ten pairs.',
+    ],
+    where: [TEST_RUN],
+    by: 'A model, twice per pair.',
+    reads: ['The two answers, without names.', 'The verses they cite.', 'The key, against the products.'],
+    leaves: ['A verdict and a margin for each order, with any errors it claims.'],
+    stops: ['If planted errors are mostly missed, or the noise control finds too many winners, the run does not go on to the full set.'],
+  },
+  {
+    id: 'confirm', name: 'Confirm', color: '#22c55e', at: [788, 400],
+    summary: 'A claimed error counts only when a second family agrees.',
+    why: 'Judges call things wrong that are not. The owner read answers a judge had called wrong and found that most of them were fine. So a claim alone counts for nothing.',
+    what: [
+      'Each error the judge claims goes to a model from the other family, with the verses it concerns. It answers: confirmed, not an error, or cannot be checked.',
+      'Unconfirmed claims are kept and counted as claims, apart from errors.',
+    ],
+    where: [TEST_RUN],
+    by: 'A small model from the other family.',
+    reads: ['The claim and the reason given.', 'The verses, and the answer it was made about.'],
+    leaves: ['A verdict on each claim.'],
+    stops: ['A claim nothing can settle stays unconfirmed.'],
+  },
+  {
+    id: 'score', name: 'Score', color: '#0ea5e9', at: [904, 400],
+    summary: 'Each answer against the key, on its own.',
+    why: 'Head-to-head comparisons mostly tie, and they say only which of two was preferred. A score says what each answer got right, which can be compared across every contestant.',
+    what: [
+      'For each essential point: covered, missing or contradicted.',
+      'Whether the answer commits to a clear answer to the question.',
+      'The article is not scored against its own key. It competes head to head.',
+    ],
+    where: [TEST_RUN],
+    by: 'A model.',
+    reads: ['The key.', 'One answer at a time.'],
+    leaves: ['A score for each answer.'],
+    stops: ['A key from one publisher carries that publisher\'s view on questions not set aside. Setting them aside reduces this and does not remove it.'],
+  },
+  {
+    id: 'remember', name: 'Remember', color: '#a855f7', at: [1030, 400],
+    summary: 'Real errors are kept, from one run to the next.',
+    why: 'A real error found once should never need finding again. An error of ours should stay fixed, and an error in an article should not mark an answer down for being right.',
+    what: [
+      'A confirmed error in an article takes that point out of the key.',
+      'A confirmed error of ours becomes a regression test.',
+      'A confirmed error in a product\'s answer is recorded with its capture date.',
+      'The owner\'s own marks override the register. It does not wait for them.',
+    ],
+    where: [TEST_STORE],
+    by: 'Code, from the confirmations.',
+    reads: ['The confirmed errors.'],
+    leaves: ['A permanent private register.'],
+    stops: ['Text from an article is not copied into the register.'],
+  },
+  {
+    id: 'card', name: 'Scorecard', color: '#6366f1', at: [1146, 400],
+    summary: 'What each skill did, one by one.',
+    why: 'A single total hides everything worth knowing. The purpose is to learn how the skills approach works: which skills earn their place, which do nothing, and which do harm.',
+    what: [
+      'For each intent, scope and form: how often it was chosen, clear and marginal wins and losses against today, points covered, confirmed errors, length and time.',
+      'For the judge that picks skills: how often it holds back in each category of question.',
+      'A skill that looks good gets its own larger test before it can change what a reader sees.',
+    ],
+    where: [TEST_RUN, TEST_STORE],
+    by: 'Code.',
+    reads: ['Every verdict, confirmation and score.'],
+    leaves: ['The report, and what to change next.'],
+    stops: ['About 300 questions give each scope 20 to 100. That shows a pattern, and does not prove a small gain.'],
+  },
+];
+
+const TEST_BODY = `
+<h2>Where this stands</h2>
+<p>As of 5 November 2026, this is being built. A 40-question pilot is running, and it has to pass its checks on the judge before the 300-question run. Results from earlier tests, on <a href="/architecture/scripture-ask">the Scripture post</a>, came from judging without the confirm step, so they are leads until they are repeated this way.</p>
+
+<h2>Why it is built this way</h2>
+<ul>
+<li><b>Earlier judging overstated things.</b> The owner read answers a judge had called wrong and most were not, and answers called best were only marginally best. That is why errors must be confirmed and margins are counted.</li>
+<li><b>Chance sets the bar.</b> The same path judged against itself finds a winner in about one pair in ten, so every gain is read against that.</li>
+<li><b>Compete on the hard thing.</b> The contestants include clear, opinionated articles and two other products, under one neutral standard.</li>
+<li><b>The test does not change what readers see.</b> It reads the live library and writes only to a private store.</li>
+</ul>
+
+<h2>What it cannot tell us</h2>
+<ul>
+<li>These are one publisher's questions. It shows how answers do on what that library covers, not on what readers here ask.</li>
+<li>Denominational questions are not scored yet.</li>
+<li>A key is one publisher's view of a correct answer. The verses can overrule it, but only where they settle the point.</li>
+</ul>`;
+
 export const POSTS: Post[] = [
+  {
+    slug: 'testing-answers',
+    title: "How we test the Scripture Agent's answers",
+    date: '2026-11-05',
+    description:
+      'How answers are compared blind against clear, opinionated articles and two other products, why a claimed error counts only once confirmed, and how a scorecard shows what each skill does. Being built: the pilot is running.',
+    picture: {
+      svg: '/architecture/ask-testing-flow.svg', png: '/architecture/ask-testing-flow.png', alt: TEST_ALT, width: 1460, height: 930,
+      caption: 'Grey arrows are the questions and answers. Pink arrows are checks on the judge. Dashed arrows happen only when needed.',
+    },
+    steps: TEST_STEPS,
+    body: TEST_BODY,
+  },
   {
     slug: 'translation-harness',
     title: 'How the translation agent translates the Bible',
@@ -1183,7 +1359,7 @@ export const POSTS: Post[] = [
       'The path from pressing Sign in at an app to the app holding a delegation: what the Home checks, what the person signs, what is remembered, and what a second app or a return visit skips.',
     picture: {
       svg: '/architecture/sign-in-flow.svg', png: '/architecture/sign-in-flow.png', alt: SIGNIN_ALT, width: 1460, height: 1020,
-      caption: 'Grey arrows are a first sign-in. Green is a new app for a person already signed in. Blue is an app coming back. Dashed amber is the next design, not yet live.',
+      caption: 'Grey arrows are a first sign-in. Green is a new app for a person already signed in. Blue is an app coming back. Dashed amber is the next design, live in shadow: it decides and records, and the sheet is still shown.',
     },
     steps: SIGNIN_STEPS,
     byHeading: 'Who acts',
