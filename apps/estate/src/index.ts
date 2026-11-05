@@ -75,6 +75,12 @@ export default {
       if (body.length > 8000) return json({ ok: false, error: 'too large' }, 413);
       return relay(env, m[1]!, body);
     }
+    // A Home's sign-out walks through here (spec 445 §16): sso-logout.js ends this site's session and sends the person back.
+    if (path === '/sso-logout') {
+      return new Response(`<!doctype html><meta charset="utf-8"><title>Signing out</title><script src="/sso-logout.js" data-home="${env.HOME_ORIGIN}"></script><p>Signing out…</p>`, {
+        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+      });
+    }
     if (path === '/' || path === '/connected' || path === '/waiting') {
       return new Response(page({ id: env.ESTATE_ID, name: env.ESTATE_NAME, home: env.HOME_ORIGIN, view: path === '/waiting' ? 'waiting' : path === '/connected' ? 'connecting' : 'overview', cards: postCards(3) }), {
         headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },

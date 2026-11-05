@@ -117,6 +117,12 @@
 <text x="1046" y="318" text-anchor="start" class="s">the wire from your last Allow,</text>
 <text x="1046" y="334" text-anchor="start" class="s">or this same flow in a popup,</text>
 <text x="1046" y="350" text-anchor="start" class="s">with the sheet.</text>
+<text x="40" y="852" text-anchor="start" class="b">SIGNING OUT</text>
+<text x="40" y="872" text-anchor="start" class="s">Ends the Home session and every</text>
+<text x="40" y="888" text-anchor="start" class="s">app's silent renewal, then walks</text>
+<text x="40" y="904" text-anchor="start" class="s">the apps with a sign-out page.</text>
+<text x="40" y="920" text-anchor="start" class="s">A token an app already holds</text>
+<text x="40" y="936" text-anchor="start" class="s">lasts until it expires.</text>
 <text x="104" y="262" text-anchor="start" class="b">TODAY</text>
 <text x="104" y="282" text-anchor="start" class="s">Every trip to the Home still ends</text>
 <text x="104" y="298" text-anchor="start" class="s">at the Allow sheet. The Home now</text>

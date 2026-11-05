@@ -113,6 +113,26 @@ test.describe('the recognition cookie', () => {
     expect(r.status()).toBe(401);
   });
 
+  test('sign-out ends every app\'s silent renewal; "Not you?" does not', async ({ page, request }) => {
+    const s = await signIn(page);
+    await allow(page, s);
+    const row = await rowOf(request, s.agent);
+    const renew = () => request.post('/token', { data: { grant_type: 'delegation', delegation: row!.delegation, client_id: READER } });
+    expect((await renew()).status()).toBe(200);
+    await page.evaluate(() => fetch('/connect/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }));
+    expect((await renew()).status(), 'a cookie ended without "everywhere" leaves apps alone').toBe(200);
+  });
+
+  test('a real sign-out page ends the renewal of the apps this person allowed', async ({ page, request }) => {
+    const s = await signIn(page);
+    await allow(page, s);
+    const row = await rowOf(request, s.agent);
+    const renew = () => request.post('/token', { data: { grant_type: 'delegation', delegation: row!.delegation, client_id: READER } });
+    expect((await renew()).status()).toBe(200);
+    await page.goto(`/logout?return=${encodeURIComponent(`${HOME}/jwks`)}`);
+    await expect.poll(async () => (await renew()).status()).not.toBe(200);
+  });
+
   test('a session token alone proves nothing: replayed from elsewhere, 401', async ({ page, playwright }) => {
     const s = await signIn(page);
     await allow(page, s);

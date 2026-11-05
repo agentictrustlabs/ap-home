@@ -15,12 +15,14 @@ import { endRecognition } from '../../src/lib/home-recognition';
 import { setFedcmLoginStatus, SESSION_KEY, forgetActingAsReturn } from '../../src/context/session';
 import { getClient, isAllowedRelyingOrigin } from '../../src/lib/oidc-clients';
 import { HOME_ORIGIN } from '../../src/lib/domain';
+import { whitelabel } from '../../src/whitelabel/config';
 import { disconnectWallet } from '../../src/lib/wallet';
 
-/** Relying apps that receive a front-channel sign-out at their `/sso-logout` — each clears its
- *  own origin (and, via a storage marker, its other open tabs) and bounces back here. https from
- *  prod, loopback from local — same filtering the Commons-only version applied. */
+/** The apps that receive a front-channel sign-out at their `/sso-logout`: each clears its own origin and bounces back here. A Home with
+ *  a verified list walks exactly that (spec 445 §16). Any other Home keeps the older env-driven walk, https from prod, loopback from local. */
 function rpFrontChannelLogouts(): string[] {
+  const verified = whitelabel.frontChannelLogout?.[window.location.origin];
+  if (verified) return [...verified];
   const hereHttps = window.location.protocol === 'https:';
   const outs: string[] = [];
   const rpApps = (process.env.NEXT_PUBLIC_LOGOUT_RP_APPS ?? 'commons-app,field-app,bible-explorer')
@@ -52,6 +54,13 @@ function rpFrontChannelLogouts(): string[] {
 
 export default function LogoutPage() {
   useEffect(() => {
+    // Read before it is removed: with no recognition cookie, this session is how the server knows whose apps to sign out.
+    let leaving: string | undefined;
+    try {
+      leaving = (JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null') as { token?: string } | null)?.token;
+    } catch {
+      /* unreadable — the cookie may still say */
+    }
     try {
       localStorage.removeItem(SESSION_KEY); // this origin's persisted session
     } catch {
@@ -59,7 +68,8 @@ export default function LogoutPage() {
     }
     forgetActingAsReturn(); // the acting-as stash is the ended connection's, not the next person's
     clearSsoCookie(); // end the cross-subdomain `.impact-agent.me` SSO session
-    void endRecognition(); // and the HttpOnly recognition cookie, which only the server can end (spec 445)
+    // The HttpOnly recognition cookie, which only the server can end, and every app's silent renewal (spec 445 §16).
+    void endRecognition({ everywhere: true, token: leaving });
     setFedcmLoginStatus('logged-out'); // FedCM: don't auto-recognize / show the chooser next time
     // This page tears the session down directly (not via session.signOut), so also drop the dApp
     // from MetaMask's "Connected sites" here (EIP-2255). Best-effort + silent; no-op for non-wallet.

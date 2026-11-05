@@ -376,6 +376,10 @@ export interface WhiteLabelConfig {
   /** The "agents you manage" grid in the Portal. */
   manageableAgents: ManageableAgent[];
   /** Relying apps (the configured OIDC client registry). */
+  /** Spec 445 §16 — the apps a sign-out walks through, by Home origin, as full `/sso-logout` URLs. Each is a top-level navigation, so
+   *  an app that does not send the person back strands them there, signed out, on a page they were not using. So this is a list of
+   *  apps VERIFIED to return to that Home, not every registered app. `tests/e2e-sso/logout-chain.spec.ts` checks it against the live apps. */
+  frontChannelLogout?: Record<string, readonly string[]>;
   relyingApps: RelyingApp[];
   /** Consent disclosure per delegation template (the human-readable can/cannot at consent). */
   delegationTemplates: Record<string, DelegationTemplate>;

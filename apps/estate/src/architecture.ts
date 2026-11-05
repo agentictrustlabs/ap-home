@@ -557,7 +557,8 @@ const SIGNIN_ALT =
   'person signs, its check on chain, a record with a single-use code, and the code exchanged for an id_token. Three arcs run above the row. ' +
   'A new app for a person already signed in goes from Recognize to Allow. An app that still holds its delegation goes straight to Token. ' +
   'A designed path, live in shadow, records its decision and will go from Recognize to Verify, with no sheet and no new signature. ' +
-  'A note says that in Chrome, FedCM signs nothing new: it hands back the wire from the last Allow, or goes to a popup with the sheet.';
+  'A note says that in Chrome, FedCM signs nothing new: it hands back the wire from the last Allow, or goes to a popup with the sheet. ' +
+  'Another says that signing out ends the Home session and every app\'s silent renewal, and walks the apps with a sign-out page of their own.';
 
 const HOME_PAGES = "The Home's pages, in the person's browser. The Home is a Next.js app (<code>apps/home</code>) at <code>www.faithnet.me</code>.";
 const HOME_SERVER = "The Home's server (<code>apps/home/server</code>). Tickets, codes and rows are kept in its key-value store, <code>AUTH_CODES</code>.";
@@ -809,6 +810,16 @@ const SIGNIN_BODY = `
 </ul>
 <p>What an app does with the delegation once it is signed in is the next picture: <a href="/architecture/agent-harness">How an ask runs at an agent</a>.</p>
 
+<h2 id="signing-out">Signing out</h2>
+<p>Each app keeps its own sign-in, so leaving the Home does not by itself end them. A sign-out at <code>/logout</code> does three things.</p>
+<ol>
+<li><b>It ends the Home session.</b> The session token, the <code>ap_sso</code> cookie, and the recognition cookie, whose record is deleted on the server. The next app to ask meets a credential.</li>
+<li><b>It ends every app's silent renewal.</b> The server deletes the binding of every delegation on the person's records, current and older. This reaches every app with no change to it: its next renewal fails, and it has to send the person to the Home. Delegations stay on chain, because signing out is not revoking. Revoke is in Connected.</li>
+<li><b>It walks the apps that can take part.</b> The Home sends the browser to each app's <code>/sso-logout</code>, and each clears its own session and sends the person back. Today that is faithnet.estate, Heart Coach, Game Night and the Bible reader. An app is added only once it has been seen to return, because one that does not would strand the person on a page they were not using.</li>
+</ol>
+<p><b>What this does not do yet.</b> A token an app already holds stays valid until it expires, up to seven days, and the Home cannot recall it. So an app with no sign-out page of its own can still show the person as signed in until that token lapses or it next tries to renew. Most apps have no such page yet, and Commons and Field run theirs but do not send the person back. Each is a small change in that app.</p>
+<p>"Not you?" is different. It ends the Home session so the person can choose who to be, and leaves their apps alone.</p>
+
 <h2 id="next-design">The next design: the Home remembers an Allow</h2>
 <p>Spec 445 is the design for the dashed amber arc. The code went live on 5 November 2026 in shadow: Seed Bible Reader decides and records, and still shows the sheet, so no app skips it yet. Everything above this section describes what a person meets today.</p>
 <p>A person who allowed an app is not asked again, as long as the app asks for nothing more and what they signed still holds. Nothing is signed on that visit. The app is handed the wires it already had, each checked on chain first.</p>
@@ -871,6 +882,7 @@ const SIGNIN_BODY = `
 <ul>
 <li><b>A forwarded link.</b> An invitation link or a <code>#session=</code> link can still open a session in someone else's browser. It sets no cookie, so no sheet is skipped, and the sheet names whose session it is.</li>
 <li><b>How long recognition lasts.</b> One hour, decided for now, and looked at again once the shadow numbers are in. Thirty days would mean no prompt at all on return, and a browser left signed in could enter allowed apps for a month.</li>
+<li><b>Apps with no sign-out page.</b> See <a href="#signing-out">Signing out</a>.</li>
 <li><b>Apps with a session key,</b> Gather27 among them. There is a draft design in spec 445: the right to ask for a leaf becomes part of the Allow. Not built.</li>
 </ul>
 
