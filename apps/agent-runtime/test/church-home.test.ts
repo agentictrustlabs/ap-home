@@ -249,6 +249,24 @@ describe('person.church.home — her groups, kept beside her church (spec 204)',
     expect(v.rows.size).toBe(0);
   });
 
+  it('what she told a group\'s leaders is kept with the group, survives other changes, and goes when she takes it back (spec 205)', async () => {
+    const v = vault();
+    const NOW = () => new Date('2026-11-05T12:00:00Z');
+    const inv = churchHomeInvoker({ ...v, fetch: network().fetcher, namesOrigin: 'https://names.example', now: NOW }, ALICE, ALICE);
+    await inv(CHURCH_HOME_SAVE, { churches: [erie], groups: [{ church: CALVARY, id: 'group_mens', shared: { name: '  Alice   P ' } }] }, turn());
+    const told = { id: 'group_mens', name: 'Men’s Group', kind: 'men', church: CALVARY, shared: { name: 'Alice P', at: '2026-11-05T12:00:00.000Z' } };
+    expect(stored(v).groups).toEqual([told]);
+    // An app that does not know rosters sends the group back with nothing about sharing; so does a save with no groups at all.
+    await inv(CHURCH_HOME_SAVE, { churches: [erie], groups: [{ church: CALVARY, id: 'group_mens' }, { name: 'Thursday friends', kind: 'home' }] }, turn());
+    expect(stored(v).groups[0]).toEqual(told);
+    await inv(CHURCH_HOME_SAVE, { churches: [erie] }, turn());
+    expect(stored(v).groups[0]).toEqual(told);
+    expect(((await inv(CHURCH_HOME_SAVE, { churches: [erie], groups: [{ church: CALVARY, id: 'group_mens', shared: { name: '  ' } }] }, turn())) as { refused: string }).refused).toMatch(/name the leader should see/);
+    expect(stored(v).groups[0]).toEqual(told);
+    await inv(CHURCH_HOME_SAVE, { churches: [erie], groups: [{ church: CALVARY, id: 'group_mens', shared: false }] }, turn());
+    expect(stored(v).groups).toEqual([{ id: 'group_mens', name: 'Men’s Group', kind: 'men', church: CALVARY }]);
+  });
+
   it('a group she already keeps stays, as it was kept, when its church stops listing it — her next save still works', async () => {
     const v = vault();
     const NOW = () => new Date('2026-11-04T12:00:00Z');
