@@ -5,9 +5,9 @@ import { whitelabel } from './config';
 import { mintsPaymentAtSignIn } from '../lib/consent-terms';
 
 describe('remembered consent, by app', () => {
-  it('is on for the reader, and nobody else yet', () => {
+  it('is on for the reader and Global.Church\'s two apps, and nobody else yet', () => {
     const set = whitelabel.relyingApps.filter((a) => a.remembered_consent).map((a) => [a.client_id, a.remembered_consent]);
-    expect(set).toEqual([['seed-bible-reader', 'on']]);
+    expect(set).toEqual([['seed-bible-reader', 'on'], ['gc-engage', 'on'], ['gc-platform', 'on']]);
   });
   it('is never set on an app that mints money authority at sign-in', () => {
     for (const a of whitelabel.relyingApps.filter((x) => x.remembered_consent)) expect(mintsPaymentAtSignIn(a), a.client_id).toBe(false);
