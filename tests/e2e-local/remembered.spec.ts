@@ -1,11 +1,17 @@
 // Spec 445, in a real browser against the real build: every way through the sheet, and every way back to it.
 import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { createSiweMessage } from 'viem/siwe';
 
 process.env.NEXT_PUBLIC_CHAIN_ID ??= '34348';
 const { askAsMeCaveats, siteCaveats } = await import('../../apps/home/src/lib/delegation');
+const { termsDigest, termsFor } = await import('../../apps/home/src/lib/consent-terms');
+const { getClient } = await import('../../apps/home/src/lib/oidc-clients');
+const { signerFromPrivateJwk } = await import('../../apps/home/src/lib/broker-core');
+const { mintAgentSession } = await import('../../apps/home/node_modules/@agenticprimitives/connect/dist/index.js');
 const { DEPLOYMENT_EPOCH } = await import('../../apps/home/src/lib/chain');
 const { ROOT_AUTHORITY } = await import('../../apps/home/node_modules/@agenticprimitives/delegation/dist/index.js');
 
@@ -120,6 +126,25 @@ test.describe('the recognition cookie', () => {
   test('no other origin may ask', async ({ request }) => {
     const r = await request.post('/oidc/remembered', { headers: { origin: 'https://evil.example' }, data: {} });
     expect(r.status()).toBe(403);
+  });
+
+  test('a social return link opened in another browser is refused, before anything is asked of the provider', async ({ page, context, playwright, request }) => {
+    // A real start in this browser, and the state it stashed.
+    const stashes = async () => (await (await request.post(`${BACK}/__kv/keys`, { data: { prefix: 'oidc:' } })).json()).keys as string[];
+    const before = await stashes();
+    await page.goto(`/oidc/google/start?aud=demo-sso&redirect_uri=${encodeURIComponent(`${HOME}/`)}`);
+    const state = (await stashes()).find((k) => !before.includes(k))!.slice('oidc:'.length);
+    const stash = (await kvGet(request, `oidc:${state}`))!;
+    const other = await playwright.request.newContext({ baseURL: HOME });
+    const elsewhere = await other.get(`/oidc/google/callback?code=x&state=${state}`);
+    expect(elsewhere.status()).toBe(403);
+    expect((await elsewhere.json()).error).toBe('sign_in_started_elsewhere');
+    await other.dispose();
+    // In the browser that started it, it gets past that refusal, to the provider (unreachable here).
+    await kvPut(request, `oidc:${state}`, stash);
+    const mark = (await cookieNamed(context, 'ap_login'))!;
+    const here = await request.get(`/oidc/google/callback?code=x&state=${state}`, { headers: { cookie: `ap_login=${mark.value}` } }).catch(() => null);
+    if (here) expect((await here.json().catch(() => ({}))).error).not.toBe('sign_in_started_elsewhere');
   });
 
   test('a social sign-in marks the browser that started it, Lax, before leaving for the provider', async ({ page, context }) => {
@@ -463,12 +488,77 @@ test.describe('rollout', () => {
   });
 });
 
+test.describe('FedCM, with real tokens', () => {
+  const APP = 'skills-app';
+  const APP_ORIGIN = 'https://skills.faithnet.io';
+  const sub = (token: string) => (JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString()) as { sub: string }).sub;
+
+  /** What the browser's FedCM asks for, as a relying app's page would, with a Home session in the cookie. */
+  async function fedcmGrant(request: APIRequestContext, token: string, client = APP, origin = APP_ORIGIN) {
+    const cookie = `ap_sso=${encodeURIComponent(JSON.stringify({ t: token, v: 'x' }))}`;
+    const a = await request.post('/fedcm/assertion', { headers: { origin, 'sec-fetch-dest': 'webidentity', cookie }, form: { client_id: client, nonce: randomBytes(8).toString('hex'), account_id: sub(token), disclosure_text_shown: 'true' } });
+    expect(a.status(), await a.text()).toBe(200);
+    const { token: id_token } = await a.json();
+    return request.post('/fedcm/grant', { headers: { origin, cookie }, data: { id_token, client_id: client } });
+  }
+  /** A session as a Google sign-in mints one for a person whose key the Home holds, signed by this build's real key. */
+  async function custodial() {
+    const person = privateKeyToAccount(generatePrivateKey()).address.toLowerCase();
+    const signer = await signerFromPrivateJwk(JSON.parse(readFileSync(join(import.meta.dirname, 'artifacts/broker.jwk'), 'utf8')), 'broker-1');
+    const token = await mintAgentSession({ sub: `eip155:34348:${person}` as never, principal: { kind: 'oidc', id: 'oidc:x', assurance: 'onchain-confirmed', role: 'custody-grade' } as never, assurance: 'onchain-confirmed', aud: 'demo-sso', iss: HOME, ttlSeconds: 3600 }, signer);
+    return { person, token };
+  }
+  const storeAllow = async (request: APIRequestContext, person: string, over: object = {}) => {
+    const terms = termsFor(getClient(APP)!, 'site-login');
+    const delegation = wireOf(person, SITE, siteCaveats(inDays(365)));
+    await kvPut(request, `app-grants:${person}`, JSON.stringify([{ v: 2, clientId: APP, template: 'site-login', delegate: SITE, delegation, issuedAt: 1, terms, termsDigest: termsDigest(terms), origins: [APP_ORIGIN], ...over }]));
+    return delegation;
+  };
+
+  test('a Home-held key, never allowed: no delegation, and the popup', async ({ request }) => {
+    const { token } = await custodial();
+    const b = await (await fedcmGrant(request, token)).json();
+    expect(b).toMatchObject({ needs_device_credential: true, consent_required: 'no_record' });
+    expect(b.delegation).toBeUndefined();
+  });
+
+  test('a Home-held key, allowed: the stored wire, and nothing new is signed', async ({ request }) => {
+    const { person, token } = await custodial();
+    const stored = await storeAllow(request, person);
+    const b = await (await fedcmGrant(request, token)).json();
+    expect(b.delegation).toEqual(stored);
+  });
+
+  test('a Home-held key, the wire revoked: the popup', async ({ request }) => {
+    const { person, token } = await custodial();
+    await storeAllow(request, person);
+    const list = await (await request.get('/connect/app-grants', { headers: { authorization: `Bearer ${token}` } })).json();
+    await chain(request, { revoke: list.grants[0].ref });
+    expect((await (await fedcmGrant(request, token)).json()).consent_required).toBe('wire_revoked');
+  });
+
+  test('a Home-held key, ask me every time: the popup', async ({ request }) => {
+    const { person, token } = await custodial();
+    await storeAllow(request, person, { askEveryTime: true });
+    expect((await (await fedcmGrant(request, token)).json()).consent_required).toBe('ask_every_time');
+  });
+
+  test('a wallet person is sent to the popup, whatever they allowed: a token alone never collects their wires', async ({ page, request }) => {
+    const s = await signIn(page);
+    await storeAllow(request, s.agent.toLowerCase());
+    const b = await (await fedcmGrant(request, s.token)).json();
+    expect(b.needs_device_credential).toBe(true);
+    expect(b.consent_required).toBeUndefined();
+    expect(b.delegation).toBeUndefined();
+  });
+});
+
 test.describe('the person\'s own pages', () => {
   test('Connected Apps lists what was agreed and the older wires, and its controls work', async ({ page, request }) => {
     const s = await signIn(page);
     await allow(page, s);
     await allow(page, s);
-    await page.goto('/apps/assistants');
+    await page.goto('/apps/signed-in');
     const card = page.getByTestId(`app-grant-${READER}`);
     await expect(card).toBeVisible({ timeout: 40_000 });
     await expect(card.getByText(/Ask your agent questions as you/)).toBeVisible();

@@ -1,8 +1,8 @@
 # Spec 445 — The Home remembers an Allow, and proves who is asking with a cookie no script can read
 
-**Status:** written 2026-11-05. **W0–W5 implemented on branch `home-remembered-consent`, not yet deployed**, with one
-item held back (`grant-cache.ts`, see W5). Seed Bible Reader ships in `shadow`; **no app skips the sheet until W4's flag
-moves to `on`.** W6 waits on the owner's decision (§3.3). W7 is later. §12 lists where the build departs from the first
+**Status:** written 2026-11-05. **W0–W5 live since 2026-11-05 (PR #99)**, with one item held back (`grant-cache.ts`, see W5).
+Seed Bible Reader is in `shadow`; **no app skips the sheet until W4's flag moves to `on`**, after a clean week (from
+2026-11-12). W6 waits on the owner's decision (§3.3). W7 is partly done: see W7. §12 lists where the build departs from the first
 draft of this spec, and why. §13 answers a second agent's review, which changed the design in five places.
 **Asked by:** Paul's review of sign-in (2026-11), answered point by point at
 `https://faithnet.estate/architecture/sign-in#pauls-points`. This spec is the design that page says is missing.
@@ -323,7 +323,7 @@ lines marked.
 | A stolen session token, replayed from elsewhere | An hour as that person. For a Home-held key, the Home will sign a new delegation. For a passkey or wallet person, nothing can be signed. | The same, and no more. `/oidc/remembered` does not accept the token, so a passkey or wallet person's existing wires cannot be collected with it. This is what R5 buys. |
 | Script running on the Home page (XSS) | Reads the token; sees every code the page delivers. | Cannot read the cookie. Can call the endpoint while it runs, for apps the person already allowed. Bounded to that browser and that moment. §10.3 closes it further. |
 | Another site posting to the endpoint | — | `SameSite=Strict`, the `Origin` check, and a JSON body a form cannot send. |
-| A sign-in link planted in a victim's browser (a callback the attacker prepared, a forwarded invitation, `#session=`) | Signs that browser in as the attacker; the sheet then says whose session it is. | No recognition cookie from any of them, so no sheet is ever skipped on one. The session itself is still planted, as today: binding the callback outright (refuse, not just withhold the cookie) is W7, because it can break a sign-in that starts on one host and returns on another. |
+| A sign-in link planted in a victim's browser (a callback the attacker prepared, a forwarded invitation, `#session=`) | Signs that browser in as the attacker; the sheet then says whose session it is. | A social callback is refused in any browser but the one that started it (W7). A forwarded invitation or `#session=` still opens a session, and sets no recognition cookie, so no sheet is ever skipped on one. |
 | An app's id_token presented as a Home session | `verifyHomeSession` retried under whatever audience the token named, and nothing checked for a credential, so FedCM took it. | **Fixed here:** a session must name its `principal` (`fedcm.ts`, `me/handler.ts`). The recognition cookie was never exposed to this: it is not a token. The Home's own audience cannot be an app id. |
 | A held wire replayed at `/oidc/grant` to forge consent | — | Terms are stored only beside this person's cookie (§4). |
 | An app's registration changes to ask for more | The sheet is shown anyway. | Check 9. The sheet is shown and says what is new. |
@@ -368,12 +368,21 @@ Each item is a pull request that leaves sign-in working. The Home deploys only b
   curated clients are turned on one at a time; `remembered-consent.test.ts` makes each one a reviewed change.
 - **W6 — How long recognition lasts** (§3.3, B). Only on the owner's decision. "Sign out everywhere" goes with it. (The
   comment in `sso-cookie.ts` is corrected already.)
-- **W7 — After.** **FedCM comes under the same rule, first.** Today `/fedcm/grant` gives a custodial person a delegation
-  with no sheet, for an app they never allowed, on the script-readable cookie. That is looser than everything above, and
-  once this ships it is the weak door. It should read the recognition cookie in place of `ap_sso`, hand out the stored
-  wire in place of signing a new one, and answer "needs the sheet" for an app with no record. Social callbacks refuse a
-  browser that did not start them. The portal's bearer endpoints move to a server-set session, and `ap_sso` goes.
-  The person's list of allowed apps moves from `localStorage` into their vault.
+- **W7 — After.** *Done:*
+  - **FedCM no longer signs a delegation for an app the person never allowed.** `/fedcm/grant` hands a Home-held-key person the
+    wire stored at their last Allow, under the same rules (§5.2, for the one wire this lane returns), and sends everyone else
+    to the popup with the `needs_device_credential` answer every relying client already falls back on. The first draft said
+    this lane should read the recognition cookie. It cannot: that cookie is `SameSite=Strict` and never rides FedCM's
+    cross-site requests. So the proof here stays `ap_sso`, which is why a device credential stays out: a stolen token must not
+    collect those wires. A Home-held key is different, because that token could already have the Home sign. Demo accounts keep
+    their fast path. Consequence on merge: a Google or YouVersion person's first FedCM connect to each app is now a popup.
+  - **A social sign-in finishes only in the browser that started it.** Refused (`sign_in_started_elsewhere`) before anything is
+    asked of the provider. A connector authorization is exempt, being bound to the Home session that started it. Consequence: a
+    deployment whose host is not under `NEXT_PUBLIC_CONNECT_DOMAIN`, and which starts and returns on different hosts, cannot
+    complete a social sign-in. That includes Vercel previews.
+
+  *Later:* the portal's bearer endpoints move to a server-set session, and `ap_sso` goes. The person's list of allowed apps moves
+  from `localStorage` into their vault.
 
 Tests that must exist before W4: `covers` (same, narrower, each way of being wider); each row of §5.2 returns its
 reason; a revoked wire and an expiring wire each force the sheet; the code from a remembered sign-in exchanges at
@@ -441,7 +450,7 @@ A second agent, working the same problem independently, raised these. Each was r
 | "Asks for nothing more" needs more than claims | Delegate, life left and `prompt=consent` were built. Caveats were not. | `caveats_changed`, from the same builders that make the wires. Member-registered apps always ask. The return address stays the origin, because that is what the sheet shows. §5.2, §10.4. |
 | `prompt=none` tells an app who the visitor is, and shows no "signed in as" | **Correct.** | The app must name the person, and every other case gets one answer. §6. |
 | `session_key` cannot skip; Gather27 sends one every time | **Correct, and already refused** (`session_key_requested`). Gather27 is not helped by this spec. | Recorded. §10.2. |
-| FedCM already gives a delegation with no sheet, on the script-readable cookie | **Correct.** This spec is stricter than that lane. | First item of W7. |
+| FedCM already gives a delegation with no sheet, on the script-readable cookie | **Correct.** | Fixed in W7: the stored wire or the popup. |
 
 ## 14. Tested in a real browser
 

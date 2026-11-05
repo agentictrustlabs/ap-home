@@ -104,6 +104,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   }
   if (!code) return json({ error: 'code + state required' }, 400);
 
+  // Spec 445 W7 — a sign-in finishes only in the browser that started it (see the Google callback). Checked before the single-use
+  // stash is spent, so a link opened in the wrong browser does not also ruin the sign-in in the right one.
+  if (!(await startedInThisBrowser(request, state))) return json({ error: 'sign_in_started_elsewhere', message: 'This sign-in was started in another browser. Please start again here.' }, 403);
+
   // Auth Call 3 (/token): we now have the code — consume the single-use stash and exchange it.
   const stashKey = `oidc:${state}`;
   const stashRaw = await env.AUTH_CODES.get(stashKey);
@@ -234,11 +238,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     signer,
   );
 
-  // Spec 445 §8 — only the browser that started this sign-in is recognized by it. Another browser (a link) still gets what
-  // it always did, and no cookie.
-  const bound = await startedInThisBrowser(request, state);
-  if (!bound) console.warn('[recognition] a sign-in callback in a browser that did not start it: not recognized');
-  const proved = async (res: Response): Promise<Response> => (bound ? withRecognition(res, { request, env }, { sub: agent, principal: sessionPrincipal, assurance: custodyGrade ? 'onchain-confirmed' : 'asserted', ttlSeconds: 3600 }) : res);
+  const proved = (res: Response): Promise<Response> => withRecognition(res, { request, env }, { sub: agent, principal: sessionPrincipal, assurance: custodyGrade ? 'onchain-confirmed' : 'asserted', ttlSeconds: 3600 });
 
   // §4a / CN-9: stash under a single-use code; deliver the CODE, not the token. `via=youversion` tells
   // the client which credential opened the session (KMS-custodied, like Google).

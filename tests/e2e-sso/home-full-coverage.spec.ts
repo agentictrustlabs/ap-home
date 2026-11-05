@@ -1,7 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { CAST, onboardPersona } from './demo-user';
-import { onboard } from './onboard';
+import { onboard, signInAsSeededPerson } from './onboard';
 import { estateDomain } from './estate';
 
 // FULL SURFACE COVERAGE of the Home (`apps/home`) — every route in its own navigation.
@@ -38,13 +37,12 @@ const PERSON_ROUTES: Route[] = [
   { path: '/network', label: 'Network' },
   { path: '/you', label: 'Profile' },
   { path: '/agent', label: 'Agent' },
-  { path: '/metadata', label: 'Metadata' },
   { path: '/records', label: 'Records' },
   { path: '/visibility', label: 'Visibility' },
   { path: '/security', label: 'Security' },
   { path: '/apps', label: 'Connected' },
   { path: '/attestations', label: 'Attestations' },
-  { path: '/activity', label: 'Activity' },
+  { path: '/activities', label: 'Activities' },
   { path: '/data-sources', label: 'Data sources' },
 ];
 
@@ -86,6 +84,9 @@ async function walk(page: Page, origin: string, r: Route): Promise<Result> {
     // The blank shell: 200, valid HTML, nothing rendered. Invisible to a status check, and the most
     // common way a route "exists" while being useless.
     if (body.length < 60) return { ...r, ok: false, detail: `${body.length} chars — blank shell?` };
+    // The sign-in screen is a 200 with text on it. A route that shows it to a signed-in member has lost the session, and for a
+    // run that never signed in, every route looks like this: 465 chars and a green tick, each one meaningless.
+    if (/Continue with (Google|email|a wallet)/i.test(body)) return { ...r, ok: false, detail: 'shows the sign-in screen: no session' };
     if (/application error|something went wrong|unhandled/i.test(body)) return { ...r, ok: false, detail: body.slice(0, 100) };
     if (errs.length) return { ...r, ok: false, detail: `pageerror: ${errs[0]}` };
     if (fatal.length) return { ...r, ok: false, detail: `5xx: ${fatal.slice(0, 2).join(', ')}` };
@@ -111,11 +112,11 @@ test('every route in the Home’s navigation renders for a signed-in member', as
   const fresh = process.env.COVERAGE_FRESH === '1';
   const home = fresh
     ? { ...(await onboard(page, `cov${Date.now().toString(36).slice(-7)}`)), existing: false }
-    : await onboardPersona(page, CAST.ada);
-  console.log(`[coverage] persona=${fresh ? 'FRESH' : CAST.ada.name} home=${home.origin} existing=${home.existing}`);
+    : await signInAsSeededPerson(page);
+  console.log(`[coverage] persona=${fresh ? 'FRESH' : home.name} home=${home.origin} existing=${home.existing}`);
   // The one hard gate. Every route below reads a signed-in session, so without a home they would all
   // fail for that single reason and the report would be noise wearing the shape of findings.
-  expect(home.origin, 'ada never reached a home').toContain(estateDomain());
+  expect(home.origin, 'never reached a home').toContain(estateDomain());
 
   for (const r of PERSON_ROUTES) {
     const res = await walk(page, home.origin, r);
