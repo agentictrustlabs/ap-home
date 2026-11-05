@@ -176,11 +176,13 @@ export function churchHomeInvoker(deps: ChurchHomeDeps, person: string | undefin
     }
 
     // Her groups. Not said: the ones already kept stay, except those of a church she no longer names. Said: each
-    // church's group must be one that church lists today, and takes the church's own name for it.
+    // church's group must be one that church lists today, and takes the church's own name for it — except a group
+    // she ALREADY keeps, which stays as it was kept when its church stops listing it: an app sends the whole list
+    // on every change, and a church taking a group off its list must not make her next save fail or erase her note.
     let groups: GroupChoiceV1[];
+    const before = keptGroups((await deps.readSubjectRecord(me, CHURCH_HOME_KEY).catch(() => null)) as ChurchHomeRecordV1 | null);
     if (askedGroups === undefined) {
-      const before = (await deps.readSubjectRecord(me, CHURCH_HOME_KEY).catch(() => null)) as ChurchHomeRecordV1 | null;
-      groups = keptGroups(before).filter((g) => g.church === null || kept.some((k) => k.agent === g.church));
+      groups = before.filter((g) => g.church === null || kept.some((k) => k.agent === g.church));
     } else {
       groups = [];
       for (const g of askedGroups) {
@@ -189,7 +191,8 @@ export function churchHomeInvoker(deps: ChurchHomeDeps, person: string | undefin
           const of = kept.find((k) => k.agent === church);
           if (!of) return { refused: 'a group belongs to one of your churches — choose that church first, then its group. Nothing was saved.' };
           const id = str(g.id);
-          const hit = (listed.get(church) ?? []).find((x) => x.id === id);
+          const hit: Pick<GroupChoiceV1, 'id' | 'name' | 'kind'> | undefined = (listed.get(church) ?? []).find((x) => x.id === id)
+            ?? before.find((x) => x.church === church && x.id === id);
           if (!hit) {
             const names = (listed.get(church) ?? []).map((x) => `${x.name} (${x.id})`);
             return { refused: names.length ? `${of.displayName} does not list a group "${id}" — its groups are ${names.join(', ')}. Nothing was saved.` : `${of.displayName} lists no groups yet, so "${id}" cannot be chosen — add it as a group of your own. Nothing was saved.` };

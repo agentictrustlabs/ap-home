@@ -249,6 +249,25 @@ describe('person.church.home — her groups, kept beside her church (spec 204)',
     expect(v.rows.size).toBe(0);
   });
 
+  it('a group she already keeps stays, as it was kept, when its church stops listing it — her next save still works', async () => {
+    const v = vault();
+    const NOW = () => new Date('2026-11-04T12:00:00Z');
+    const first = churchHomeInvoker({ ...v, fetch: network().fetcher, namesOrigin: 'https://names.example', now: NOW }, ALICE, ALICE);
+    await first(CHURCH_HOME_SAVE, { churches: [erie], groups: [{ church: CALVARY, id: 'group_mens' }] }, turn());
+    // The church takes the men's group off its list.
+    const later = network({ describe: { 'https://edge.example/api/a2a/calvary-bible-co.church': describeAnswer(CALVARY, 'Calvary Bible Church', CALVARY_SITES, [CALVARY_GROUPS[1]]) } });
+    const inv = churchHomeInvoker({ ...v, fetch: later.fetcher, namesOrigin: 'https://names.example', now: NOW }, ALICE, ALICE);
+    const out = (await inv(CHURCH_HOME_SAVE, { churches: [erie], groups: [{ church: CALVARY, id: 'group_mens' }, { church: CALVARY, id: 'group_erie_home' }] }, turn())) as { refused?: string };
+    expect(out.refused).toBeUndefined();
+    expect(stored(v).groups).toEqual([
+      { id: 'group_mens', name: 'Men’s Group', kind: 'men', church: CALVARY },
+      { id: 'group_erie_home', name: 'Erie Home Group', kind: 'home', church: CALVARY },
+    ]);
+    // Once left, it cannot be joined again: the church no longer lists it.
+    await inv(CHURCH_HOME_SAVE, { churches: [erie], groups: [] }, turn());
+    expect(((await inv(CHURCH_HOME_SAVE, { churches: [erie], groups: [{ church: CALVARY, id: 'group_mens' }] }, turn())) as { refused: string }).refused).toMatch(/does not list a group "group_mens"/);
+  });
+
   it('a group of a church she has not chosen, a church with no groups, a nameless group and an unreadable list are refused', async () => {
     const { v, inv } = setup();
     const save = async (churches: unknown, groups: unknown) => ((await inv(CHURCH_HOME_SAVE, { churches, groups } as never, turn())) as { refused: string }).refused;
