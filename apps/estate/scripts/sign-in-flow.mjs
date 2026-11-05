@@ -46,9 +46,9 @@ const said = (x, y, title, lines, color, anchor = 'middle') => {
 // coming back to an app: straight to the token endpoint, no page
 arc(X.app, X.token, 130, { color: BACK });
 said((X.app + X.token) / 2, 152, 'COMING BACK TO AN APP', ['the app presents the delegation it holds, and the Home answers with a fresh id_token: no page and no prompt'], BACK);
-// proposed: allowed before, so no sheet and nothing signed
+// the next design (spec 445): allowed before, so no sheet and nothing signed
 arc(X.rec - 14, X.verify, 236, { color: PROPOSED, dash: true });
-said((X.rec + X.verify) / 2, 258, 'PROPOSED, NOT BUILT', ['this app was allowed before and asks for nothing more:', 'no sheet, and the delegation stored at the last Allow is checked on chain again'], PROPOSED);
+said((X.rec + X.verify) / 2, 258, 'THE NEXT DESIGN, NOT YET LIVE', ['this app was allowed before and asks for nothing more:', 'no sheet, nothing signed, and the stored wires are checked on chain again'], PROPOSED);
 // a new app, already signed in: the session stands in for the credential
 arc(X.rec + 14, X.allow, 356, { color: SSO });
 said(X.rec + 32, 378, 'A NEW APP, ALREADY SIGNED IN', ['the Home session is found:', 'no credential, no new account'], SSO, 'start');
@@ -87,10 +87,10 @@ const key = (i, color, dash, text) => out.push(`<path d="M${LX} ${LY + i * 26}h4
 key(0, C.line, false, 'first time in: every step');
 key(1, SSO, false, 'a new app, already signed in: skips 4 and 5');
 key(2, BACK, false, 'coming back to an app: step 10 alone, or no trip at all');
-key(3, PROPOSED, true, 'proposed, not built: would skip 6 and 7');
+key(3, PROPOSED, true, 'the next design, not yet live: would skip 6 and 7');
 key(4, C.line, true, 'only when needed');
 out.push(`<text x="${W - 40}" y="${H - 26}" class="s" text-anchor="end">faithnet.estate/architecture</text>`);
 
 finish(process.argv[2],
   'How sign-in works at a faithnet Home: the first time, a new app while signed in, and coming back',
-  'An app asks the Home to sign a person in. The Home checks the app against its registry and looks for a Home session. Without one the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation signed by the person, its check on chain, a record and a single-use code, and the code exchanged for an id_token. A new app for a person already signed in skips the credential and the new account. An app that still holds its delegation goes straight to the token step. A proposed path, not built, would skip the sheet and the signature for an app allowed before.');
+  'An app asks the Home to sign a person in. The Home checks the app against its registry and looks for a Home session. Without one the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation signed by the person, its check on chain, a record and a single-use code, and the code exchanged for an id_token. A new app for a person already signed in skips the credential and the new account. An app that still holds its delegation goes straight to the token step. A designed path, not yet live, would skip the sheet and the signature for an app allowed before.');
