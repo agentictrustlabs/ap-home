@@ -414,11 +414,11 @@ const SCRIPTURE_BODY = `
 <tbody>
 <tr><td><b>Ask skill</b></td><td>The method for one kind of question</td><td>A rule: a verse is open</td><td>The verse companion</td><td>9; only the verse skill drives live answers</td><td>Live</td></tr>
 <tr><td><b>Answer plan</b></td><td>Which writings the writer may see, and how to answer</td><td>The judge</td><td>Gate, Draft</td><td>1: a person, body or event after the Bible</td><td>Live</td></tr>
-<tr><td><b>Intent</b></td><td>What the reader is asking for. This is the card the judge reads, and it names one scope and one form</td><td>The judge</td><td>Selects the scope and the form</td><td>12</td><td>In testing</td></tr>
-<tr><td><b>Scope</b></td><td>What the question is about, so what is gathered and what the writer may rely on</td><td>The intent, with the rule applied to the scope</td><td>Gather, Gate, Draft</td><td>7: a verse or passage, a book, a subject in the Bible, a word, a topic, outside the Bible, this agent</td><td>In testing</td></tr>
-<tr><td><b>Form</b></td><td>The shape of the answer</td><td>The intent, or the scope's default when no form clearly leads</td><td>Draft, answer checks</td><td>10: exposition, survey, profile, definition, teaching, counsel, reasoned case, verse list, describe and weigh, agent record</td><td>In testing</td></tr>
-<tr><td><b>Reader</b></td><td>How the answer is told. It changes the telling, never the teaching</td><td>A rule, from what the reader's context states</td><td>Draft</td><td>11: eight faith-journey roles and three age bands</td><td>In testing</td></tr>
-<tr><td><b>Standpoint</b></td><td>Whose reading leads, when the reader states a tradition</td><td>A rule, and only for a tradition whose standards the library holds</td><td>Draft</td><td>2: Reformed, Reformed Baptist</td><td>In testing</td></tr>
+<tr><td><b>Intent</b></td><td>What the reader is asking for. This is the card the judge reads, and it names one scope and one form</td><td>The judge</td><td>Selects the scope and the form</td><td>12</td><td>Built, not live. Chooses well in tests</td></tr>
+<tr><td><b>Scope</b></td><td>What the question is about, so what is gathered and what the writer may rely on</td><td>The intent, with the rule applied to the scope</td><td>Gather, Gate, Draft</td><td>7: a verse or passage, a book, a subject in the Bible, a word, a topic, outside the Bible, this agent</td><td>Built, not live. One has passed its test: outside the Bible</td></tr>
+<tr><td><b>Form</b></td><td>The shape of the answer</td><td>The intent, or the scope's default when no form clearly leads</td><td>Draft, answer checks</td><td>10: exposition, survey, profile, definition, teaching, counsel, reasoned case, verse list, describe and weigh, agent record</td><td>Built, not live. Two pass with that scope: profile, describe and weigh</td></tr>
+<tr><td><b>Reader</b></td><td>How the answer is told. It changes the telling, never the teaching</td><td>A rule, from what the reader's context states</td><td>Draft</td><td>11: eight faith-journey roles and three age bands</td><td>Built, off. Most roles did no better than today</td></tr>
+<tr><td><b>Standpoint</b></td><td>Whose reading leads, when the reader states a tradition</td><td>A rule, and only for a tradition whose standards the library holds</td><td>Draft</td><td>2: Reformed, Reformed Baptist</td><td>Built, off. Neither beat today</td></tr>
 <tr><td><b>People group</b></td><td>The people the reader belongs to or serves</td><td>A rule, from a stable id and never a bare name</td><td>To be decided</td><td>None</td><td>Reserved, not built</td></tr>
 </tbody></table></div>
 <p>Four things hold across these categories:</p>
@@ -429,6 +429,17 @@ const SCRIPTURE_BODY = `
 <li><b>Each one earns its place.</b> A category in testing changes answers only after it beats today's answer in blind comparison by two model families, and then only at the exact version pinned. Until then its choice is only recorded, and a question the judge is unsure of runs today's path.</li>
 </ul>
 <p>No skill in any category can switch off the proof or change the edition.</p>
+
+<h2>What testing has shown so far</h2>
+<p>These results come from blind comparisons of today's answers with the new ones on about 360 questions the skills were not written from, in both orders, by judges from two model families. A pair counts only when both orders agree.</p>
+<ul>
+<li><b>Chance sets the bar.</b> The same path judged against itself still gets a clear winner in about one pair in ten, so a small gain means little, and a win has to repeat. One did not: answers about people and places in the Bible looked strongly better in the first round and were level in the second.</li>
+<li><b>The judge chooses well.</b> It placed all 60 of its test phrasings correctly, and it holds back on about one question in six. Those questions run today's path.</li>
+<li><b>One scope has earned its place.</b> Questions from outside the Bible came out about two better for every one worse with both judges, across two rounds. That is a modest gain. The other scopes showed no reliable gain, so they stay off.</li>
+<li><b>More data did not by itself mean better answers.</b> Answers about a person bound to a canonical id were no better than others.</li>
+<li><b>Telling a child differently worked.</b> Answers for a child were preferred on all 8 questions by both judges. That is too few to rely on, and the reader's profile has no age band yet. The role skills mostly did no better than the one line of guidance they would replace.</li>
+<li><b>Accuracy matters more than method.</b> Nearly every win and loss came down to one answer making a specific slip. Most of those slips were a real verse cited with a wrong paraphrase: the wrong speaker, the wrong order of events, or a denial the text does not make. Proof checks that a quotation matches its verse, but not yet that a paraphrase does. That is the next work.</li>
+</ul>
 
 <h2>Three rules that hold it together</h2>
 <ul>
