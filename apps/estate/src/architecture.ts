@@ -1253,7 +1253,7 @@ const TRANSLATION_STEPS: Step[] = [
 ];
 
 const TRANSLATION_BODY = `
-<p class="quiet">A companion page: <a href="/architecture/translation-skills">how a passage's category chooses its translation skill</a>, and what a skill changes at the Draft, Align, Check, Revise and Keep steps.</p>
+<p class="quiet">Companion pages: <a href="/architecture/translation-skills">how a passage's category chooses its translation skill</a>, and <a href="/architecture/testing-translations">how we test the quality of a translation</a>.</p>
 <h2>How this differs from answering a question</h2>
 <p>The <a href="/architecture/scripture-ask">Scripture Agent's ask</a> and this harness share a shape: gather what is held, a model writes, code proves, revise if needed, and leave a record. Three things are different.</p>
 <ul>
@@ -1273,7 +1273,7 @@ const TRANSLATION_BODY = `
 <li><b>A taxonomy of passage forms.</b> One hundred forms, such as genealogy, lament and case law, are held in the ontology as values. The category of a passage can choose a skill, and the skill can change how the passage is drafted, aligned, checked, revised and kept. The checks chosen this way are measured to work; the drafting rules are not yet, and are off. <a href="/architecture/translation-skills">How a passage's category chooses its translation skill</a> has the whole strategy.</li>
 </ul>
 <h2>How a change is measured</h2>
-<p>The harness carries its own tests. Experiments run arms side by side over locked sets of passages, including a floor (the tables' word-by-word glosses) and a ceiling (a published human translation), so a score means something. Errors are planted to measure the checker. A change is accepted by a blind judge on a frozen set of hard passages, because this project's own checks have rewarded changes that a blind reader preferred less.</p>
+<p><a href="/architecture/testing-translations">How we test the quality of a translation</a> has the whole method and the number of verses in each set. In brief: the harness carries its own tests. Experiments run arms side by side over locked sets of passages, including a floor (the tables' word-by-word glosses) and a ceiling (a published human translation), so a score means something. Errors are planted to measure the checker. A change is accepted by a blind judge on a frozen set of hard passages, because this project's own checks have rewarded changes that a blind reader preferred less.</p>
 <h2>Where it stands</h2>
 <p>The edition is RBS, a draft model-made translation from the Hebrew, Aramaic and Greek under CC BY 4.0. The current release, <code>2026-11-05-v4.0.2</code>, has 31,085 verses, of which 26,445 are ready and 4,640 are published as open, each saying what is open. <b>No person has reviewed it.</b> The status on a verse says what the machine checked and nothing more.</p>
 `;
@@ -1494,12 +1494,288 @@ const TSKILL_BODY = `
 <li><b>Decided terms.</b> About thirty words for offerings, rites and sacred times drift between runs. Deciding them once removes more difference than any rule did.</li>
 </ul>
 <p>None of this is proven. Two earlier results in this harness count against adding material to what the drafter reads, and the review does not expect a large gain from any category.</p>
-<h2>What comes first</h2>
+<h2>The approach now taken: decide once, then check</h2>
+<p>The review's largest finding was not about categories. The biggest differences between two runs of the same plan were choices that English forces and the source does not make. Left open, each one moved a whole passage, and the judge charged it as an error on every verse. So the first step was to decide them, once, for the whole edition.</p>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Where</th><th>The edition now writes</th><th>What happened before</th></tr></thead>
+<tbody>
+<tr><td>A rule about anyone, man or woman</td><td>they, them, their, with one pronoun through the passage</td><td>Numbers 6: one run wrote "he" 37 times, another "they" 36 times</td></tr>
+<tr><td>A people spoken of in the singular</td><td>they and them after the first mention</td><td>Deuteronomy 31: "it", "him" and "them" for one people</td></tr>
+<tr><td>Someone speaking to the LORD by name</td><td>"Answer me, LORD."</td><td>Psalm 119: "the LORD" inside nine of twelve addresses, as in "answer me, O the LORD"</td></tr>
+<tr><td>The verb of a ruling</td><td>shall and shall not</td><td>Numbers 9: "are to" and "must" six times in one run, "shall" in the other</td></tr>
+<tr><td>Quotation marks</td><td>open where a speech begins, close where it ends</td><td>Numbers 29 starts inside a speech; four runs punctuated it four ways</td></tr>
+</tbody>
+</table></div>
+<p>These are in the edition's brief, which is what the drafter is told on every passage, and the blind judge is told them too. On the six passages they came from, one run after the change: Numbers 6 reads "they" 39 times and "he" twice, Psalm 119 reads "answer me, LORD", and Numbers 9 says "shall" throughout. Quotation marks are not solved by an instruction. A drafter cannot know that a speech was already open before its first verse, so that fact has to be printed for it by code.</p>
+<p>The second step was a set of false alarms. Each one sent a correct verse back for revision, and a revision rewrites every verse of the passage.</p>
 <ul>
-<li><b>Settle the open decisions.</b> The generic "he" or "they", a people spoken of in the singular, the LORD addressed by name, quotation marks across a cut, and "shall" for a ruling. Each moves a whole passage.</li>
-<li><b>Stop false alarms from driving revision.</b> Most law and list passages ran both revision rounds, some on checks that were wrong.</li>
-<li><b>Measure the room, free.</b> Run the new extractors over the thousand verses already drafted. A category whose measure today's drafts already pass is dropped before anything is spent.</li>
-<li><b>Then one test with a better ruler.</b> Passages as the unit, three runs of each arm, and closed questions with answer keys ("who is the father of X?", "is this a duty or a permission?") read from the English alone.</li>
+<li><b>"They" for one person.</b> The agreement check failed every verse that said "they" of the Nazirite, which is exactly what the edition now asks for. It accepts it.</li>
+<li><b>"Its" taken for a person.</b> "Its appointed time" means the Passover's. The check read "its" as a wrong pronoun for the LORD. An English "it" is no longer counted against a person.</li>
+<li><b>"Two" from a dual.</b> Hebrew says "between the two evenings" with the ending of one word. The number check called "two" an added number. A dual now carries its own two.</li>
+<li><b>An indirect question.</b> "Let me hear what the LORD commands" is not a question. The check wanted a question mark, and one run added "Is it?" to satisfy it.</li>
+</ul>
+<p>Measured at no cost: all 781 planted errors are still caught, and 14 false alarms are gone from 1,115 replayed verses.</p>
+<h2>What comes next</h2>
+<ul>
+<li><b>Print what the drafter cannot know.</b> Whether a speech is open at the first verse and runs past the last.</li>
+<li><b>Decide about thirty terms</b> for offerings, rites and sacred times that drift between runs.</li>
+<li><b>The room was measured, free.</b> On a thousand verses already drafted, names are carried 97 to 100% of the time and no case word was found dropped, so the list and ruling categories have nothing to gain there. Only the line breaks of verse have room: 64 to 70% of main pauses are marked in the English.</li>
+<li><b>Then one test with a better ruler</b>, described in <a href="/architecture/testing-translations">How we test the quality of a translation</a>.</li>
+</ul>
+`;
+
+// ───────────────────────────────────────────────────────────────── how translation quality is tested
+
+const TEVAL_ALT =
+  'A flow diagram in two rows over a strip of numbers. The first row is one change to the harness: lock the passages, set a floor and a ceiling, plant errors to test the checks, ' +
+  'draft the old plan and the new plan, check every verse by code, have another model family judge the two blind, verify a claimed error against the source, and decide against criteria written first. ' +
+  'Three guards feed that row from above: a second identical run, a judge from another model family, and criteria written before any draft. ' +
+  'The second row is the whole edition: every verse is audited, a finding is confirmed against the source, each fix is read token by token, and release gates mark every verse ready or open with the reason. ' +
+  'A confirmed error goes back up to become a planted kind and a check. The strip gives the verses in each set: 327 development, 510 held out, 180 in the hard set, 568 in the skill tests, 839 planted errors, 1,115 stored drafts and 31,085 in the whole edition.';
+const TE_LOCAL = 'Scripts on the operator\'s machine, against a local copy of the translation store and checker. Nothing here touches the published edition.';
+const TE_STORE = 'A private evaluation store. Drafts, judgements and run records stay there; the repository holds the sets, the numbers and the verdicts.';
+
+const TEVAL_STEPS: Step[] = [
+  {
+    id: 'lock', name: 'Lock passages', color: '#8b5cf6', at: [110, 300],
+    summary: 'The passages a change is tested on are chosen and frozen before the change is written.',
+    why: 'A change tested on the passages it was tuned on will look good. So the passages are fixed first, drawn by a seeded rule and not by hand, and some are sealed so that nobody reads them while working.',
+    what: [
+      '<b>The benchmark</b> has 128 passages: 55 for development (327 verses), read freely, and 73 held out (510 verses), written once and locked for a number that will be quoted.',
+      '<b>The hard set</b> has 30 passages (180 verses) drawn from 7,525 candidate windows across nine kinds of difficulty: negation, numbers, dialogue, referents, poetry and prophecy, argument, law, rare words and apocalyptic. Twenty are open. Ten are sealed and run only for a final accept or reject.',
+      '<b>Two skill sets</b> of 32 and 28 passages (317 and 251 verses) test one idea each. The second was drawn by seed after the first, so that a result on hand-picked passages could be confirmed on passages nobody chose.',
+      'A set leaves out everything that could flatter a result: the benchmark, passages used in pilots, verses an outside review named, and curated hard cases.',
+    ],
+    where: ['The sets: <code>evaluations/bible-translation/</code> in the skills repository (<code>translate-v1.*.src.json</code>, <code>rbs-hard-v1.frozen.json</code>, <code>skill-plan-set*.json</code>).', 'The rule that freezes the hard set: <code>scripts/freeze-hard-set.py</code>.'],
+    by: 'Code only. The draw is seeded, so it can be repeated.',
+    reads: ['The frozen source, its parsing and the story layer, to find hard windows.', 'The lists of passages already used.'],
+    leaves: ['A set file with its seed, its rule and its split.'],
+    stops: ['A sealed passage that has been read for a decision is spent. The ten sealed passages of the hard set were used once, on one question.'],
+  },
+  {
+    id: 'bounds', name: 'Floor and ceiling', color: '#3b82f6', at: [290, 300],
+    summary: 'A word-by-word gloss and a published human translation are scored beside every arm.',
+    why: 'A score with nothing beside it means nothing. The floor is what you get with no translator at all. The ceiling is a careful human translation. An arm should land between them, and a check that fails the ceiling is a faulty check.',
+    what: [
+      'The floor is the source tables\' own glosses in source order. The ceiling is a public-domain English translation, used here only as a contestant and never shown to a drafter.',
+      'This is how the checker\'s rules were set. Its first version blocked 67% of the human translation, on curly apostrophes, on a negation rule that wanted one "not" per negator, and on numbers that did not compose. After tuning, the human translation passes 99%.',
+    ],
+    where: [TE_LOCAL, 'The arms: <code>evaluations/bible-translation/translate-arms.json</code>.'],
+    by: 'Code only. Neither arm calls a model.',
+    reads: ['The source tables.', 'The human translation, for scoring only.'],
+    leaves: ['Two reference scores on every set.'],
+    stops: ['A check that fails the ceiling is repaired before it is trusted.'],
+  },
+  {
+    id: 'plant', name: 'Plant errors', color: '#14b8a6', at: [470, 300],
+    summary: 'Code puts known errors into correct text and counts how many the checks catch.',
+    why: 'The checks decide what goes back for revision and what a verse is allowed to say it has passed. Their own accuracy has to be measured, and it can be measured for nothing: no model is called.',
+    what: [
+      'Nine kinds of error are planted, 839 in all: a speaker swapped, a person flipped, a clause added, a name changed, a clause dropped, a theological term added, a negative removed, an emphatic dropped, and a number changed.',
+      'Today the checks catch 781 of the 839. The weakest kinds are a flipped person (89 of 111) and a changed name (85 of 96).',
+      'The other half of the measure is false alarms. 1,115 stored first drafts are replayed through the checker, and every failure is counted by kind.',
+      'A change to the checker is accepted only if it loses no planted error. The latest change kept all 781 and removed 14 false alarms.',
+    ],
+    where: [TE_LOCAL, '<code>scripts/checker-measure.mts</code>, with the planted kinds in the translation harness package.'],
+    by: 'Code only.',
+    reads: ['The development passages and the gloss floor.', 'Stored first drafts from earlier runs.'],
+    leaves: ['Caught and missed by kind, and every failing verse of the replay, so two versions of the checker can be compared line by line.'],
+    stops: ['A planted error that is no longer caught is listed by name, and the change is reworked.'],
+  },
+  {
+    id: 'arms', name: 'Draft the arms', color: '#f59e0b', at: [650, 300],
+    summary: 'Today\'s plan and the changed plan each draft the same passages. So does a second run of today\'s plan.',
+    why: 'The second identical run is the most important thing on this page. A drafter given the same passage twice rewords about nine verses in ten. Without that run beside it, ordinary variation looks like an effect.',
+    what: [
+      'Each arm drafts every passage with the same model, the same source material and the same checks. Only the change under test differs.',
+      'The second run of today\'s plan is scored against the first exactly as the change is. Its result is the noise: what two arms with no difference between them look like.',
+      'Every run has a spending cap, and the cost is quoted before it starts. A comparison on about 300 verses costs about one dollar to draft and half a dollar to judge.',
+    ],
+    where: [TE_LOCAL, 'The run records: the private evaluation store, one file per passage and arm.'],
+    by: 'A model drafts (Claude Haiku 5.5). Code runs the plan.',
+    reads: ['The locked set.', 'The plan for each arm.'],
+    leaves: ['For every passage and arm: the draft, its alignment, every check result and the cost.'],
+    stops: ['The spending cap.', 'A run that fails is recorded as a failure of the environment and left out, not scored as a bad translation.'],
+  },
+  {
+    id: 'checks', name: 'Check by code', color: '#22c55e', at: [830, 300],
+    summary: 'Every verse of every arm is held to the same checks, and failures are counted.',
+    why: 'Checks are exact and repeatable where a judge is not. They cannot say a translation is good. They can say that a word is unaccounted for, a number changed, a name is wrong or a sentence is broken.',
+    what: [
+      'The checks read the alignment between each source word and its English: coverage, additions, negation, numbers, names, decided terms, who is speaking, and whether the sentence is whole.',
+      'Failing checks are a guardrail, not the verdict. This project\'s own checks have rewarded a change that a blind reader liked less: a revision that satisfied the coverage check by tacking words onto a finished sentence.',
+    ],
+    where: ['The checker in <code>apps/translation-mcp</code>, the same code that runs in production.'],
+    by: 'Code only.',
+    reads: ['Each draft and its alignment.', 'The source tokens, the dictionary and the decided names.'],
+    leaves: ['Per verse, which checks failed and why.'],
+    stops: ['A broken sentence is refused outright, whatever else the verse passes.'],
+  },
+  {
+    id: 'judge', name: 'Judge blind', color: '#ec4899', at: [1010, 300],
+    summary: 'Another model family reads the two versions against the source, without knowing which is which.',
+    why: 'The model that drafted should not mark its own work, and a judge that knows which version is new will favour it. So the judge is from another family, sees the versions as A and B, and sees them a second time with the labels exchanged.',
+    what: [
+      'For each verse the judge says which version carries the source more exactly, which reads as better English, and lists each version\'s errors as critical, major or minor.',
+      'A preference counts only when the judge gives it in both orders. A verse on which it changes its mind when the labels are exchanged is a tie.',
+      'The judge is given the source tokens and a dictionary, and is told to judge against the source and not against an English Bible it remembers.',
+      'The judge has limits that are now measured. Scoring the same drafts twice, it agreed on which verses were wrong about a third of the time. Its count of errors on identical text moves by about a fifth.',
+    ],
+    where: [TE_LOCAL, '<code>scripts/fair-compare.mts</code>.'],
+    by: 'A model judges (GPT-5.6 Luna). Code hides the labels, exchanges them and counts.',
+    reads: ['The two versions of each passage.', 'The source tokens and the dictionary.'],
+    leaves: ['Per verse: the preference on faithfulness and on English, and the errors named.'],
+    stops: ['A judge call that fails stops the comparison. It is never counted as a tie.'],
+  },
+  {
+    id: 'verify', name: 'Verify', color: '#0ea5e9', at: [1190, 300],
+    summary: 'A claimed error is checked against the source before it counts.',
+    why: 'A reader that finds errors also invents them. A finding is a claim until something else agrees, and how far each verifier can be trusted has itself been measured.',
+    what: [
+      'On 120 planted errors and 120 clean verses, Claude Haiku confirmed 50 of the errors and called no clean verse wrong. GPT-5.6 Luna confirmed 117 and called 22 clean verses wrong, nearly all by treating an ordinary English word as an addition.',
+      'So neither is a verifier alone. A lost negation, a wrong number or a wrong name stands on the stronger reader\'s word. A claimed addition needs a second vote.',
+      'A "not real" from the weaker verifier clears nothing: it missed 29 of 30 lost negatives.',
+    ],
+    where: [TE_LOCAL, '<code>scripts/verify-suspects.mts</code>.'],
+    by: 'A model verifies. Code decides how many votes a finding needs.',
+    reads: ['The finding, the verse and its source tokens.'],
+    leaves: ['Real or not real, with the evidence quoted from the source.'],
+    stops: ['An unconfirmed finding stays open. It is not treated as cleared.'],
+  },
+  {
+    id: 'decide', name: 'Decide', color: '#ef4444', at: [1370, 300],
+    summary: 'The change passes or fails against criteria written before it ran.',
+    why: 'With enough ways to read a result, one of them will favour the change. Writing the pass mark first removes the choice.',
+    what: [
+      'The criteria are stated in a document before any draft is made: how far the change must beat the noise, what it may not make worse, and what it may cost.',
+      'A near miss fails. Nothing is tuned on the test passages afterwards.',
+      'The verdict is recorded with its numbers whether it passed or failed. Most have failed, and the page below lists them.',
+    ],
+    where: ['The verdicts: <code>docs/bible-translation/</code> in the skills repository, one note per test.'],
+    by: 'Code counts. The rule was written by a person, in advance.',
+    reads: ['The judge\'s preferences, the error counts, the failing checks and the cost, for the change and for the noise.'],
+    leaves: ['A dated verdict, and the default that follows from it.'],
+    stops: ['A change that fails stays off, however promising an earlier run looked.'],
+  },
+  {
+    id: 'audit', name: 'Audit', color: '#a855f7', at: [290, 580],
+    summary: 'Another model family reads every verse of the published edition against its source.',
+    why: 'The tests above are on a few hundred verses. The edition is 31,085. An outside review found verses marked as passed that were not sentences, so the whole edition is read, not sampled.',
+    what: [
+      'The audit read all 31,085 verses in 3,968 passages and filed about 60,000 remarks, of which roughly 17,000 verses kept at least one that touched meaning.',
+      'Those are suspects, not errors. They are ranked, and the ones a check can decide are decided by code.',
+    ],
+    where: [TE_LOCAL, '<code>scripts/audit-edition-critic.mts</code>.'],
+    by: 'A model reads (GPT-5.6 Luna). Code ranks.',
+    reads: ['The published verses and their source tokens.'],
+    leaves: ['A list of suspect verses with the claimed error.'],
+    stops: ['The spending cap. The audit cost about seventeen dollars.'],
+  },
+  {
+    id: 'confirm', name: 'Confirm', color: '#0ea5e9', at: [470, 580],
+    summary: 'A suspect becomes a defect only when it is confirmed, and a defect becomes a test.',
+    why: 'Fixing an error once helps one verse. Turning it into a planted kind and a check helps every verse drafted afterwards.',
+    what: [
+      'The worst suspects were verified against the source, and 134 were traced as confirmed defects with their cause. The largest group, 57 of them, is a wrong meaning at the level of a word.',
+      'The causes were counted. Verses whose first draft failed a check hold 85% of the defects in 45% of the edition, so that is where a second reading is spent.',
+      'A cause that code can recognise becomes a check. The broken-sentence check came from here, and is now a gate on every release.',
+    ],
+    where: [TE_LOCAL, 'The record: the defects specification in the skills repository.'],
+    by: 'A model verifies. Code and a written rule decide what becomes a check.',
+    reads: ['The suspects, the verses and their run records.'],
+    leaves: ['Confirmed defects with a cause, and new checks.'],
+    stops: ['A suspect that cannot be confirmed is left as it is.'],
+  },
+  {
+    id: 'source', name: 'Read the fixes', color: '#6366f1', at: [650, 580],
+    summary: 'A replaced verse is read against its source words before the release is trusted.',
+    why: 'A fix can pass every check and still be worse. A drafter answering a finding about words tends to write stiff English, or to trade one error for another.',
+    what: [
+      'A verse is replaced only by rule: it passes the checks with no new failure, the verifier reads the finding as gone, the blind judge does not prefer the published verse, and a reader of the English alone does not find it less clear.',
+      'Each replaced verse is then read against its source tokens. Of the 73 replaced in one release, four read worse than the verse they replaced, and all four had passed every check.',
+    ],
+    where: [TE_LOCAL, '<code>scripts/redraft-defects.mts</code> and <code>scripts/assemble-patch-release.py</code>.'],
+    by: 'Models draft, verify, judge and read. Code applies the rule.',
+    reads: ['The published verse, the new verse, and the source tokens of both.'],
+    leaves: ['Accepted replacements, and the ones held back with the reason.'],
+    stops: ['Any one of the four rules holds a verse back. It then stays as published and is labelled open.'],
+  },
+  {
+    id: 'gates', name: 'Release gates', color: '#10b981', at: [830, 580],
+    summary: 'Every verse is published as ready or as open, and an open verse says why.',
+    why: 'Nobody reviews this edition, so a verse must not claim more than was checked. The honest output of an evaluation is a label on each verse.',
+    what: [
+      'A verse is ready when its source is accounted for, it reads as a coherent sentence, and anything a reader needs to be told is disclosed in a note.',
+      'In the current release 26,445 of 31,085 verses are ready and 4,640 are open. A confirmed defect that is not yet fixed is published as open with the finding stated.',
+      'The gates run on all 31,085 verses at every release, and the published corpus is compared row by row with the build it came from.',
+    ],
+    where: ['<code>scripts/edition-tiers.py</code> and <code>scripts/check-edition-integrity.mts</code>, then the signed corpus.'],
+    by: 'Code only.',
+    reads: ['Every verse, its checks, its coherence reading and its notes.'],
+    leaves: ['The status on every verse, and the release.'],
+    stops: ['A broken sentence blocks the release.'],
+  },
+];
+
+const TEVAL_BODY = `
+<h2>Where this fits</h2>
+<p>This page goes with <a href="/architecture/translation-harness">How the translation agent translates the Bible</a> and <a href="/architecture/translation-skills">How a passage's category chooses its translation skill</a>. Those describe how a verse is made. This one describes how we find out whether a change to that process made the verses better.</p>
+<h2>How many verses</h2>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Set</th><th>Passages</th><th>Verses</th><th>Used for</th></tr></thead>
+<tbody>
+<tr><td>Benchmark, development</td><td>55</td><td>327</td><td>Everyday comparisons, the floor and the ceiling</td></tr>
+<tr><td>Benchmark, held out</td><td>73</td><td>510</td><td>A number that will be quoted. Locked</td></tr>
+<tr><td>Hard set</td><td>30</td><td>180</td><td>Accepting or rejecting a change. 120 open, 60 sealed</td></tr>
+<tr><td>Skill tests</td><td>60</td><td>568</td><td>The category and skill tests, in two sets</td></tr>
+<tr><td>Planted errors</td><td>839 cases</td><td>on the benchmark</td><td>Measuring the checker, at no cost</td></tr>
+<tr><td>Stored drafts, replayed</td><td>200 runs</td><td>1,115</td><td>Counting false alarms, at no cost</td></tr>
+<tr><td>Verifier test</td><td></td><td>240</td><td>120 planted errors and 120 clean verses</td></tr>
+<tr><td>Whole edition</td><td>3,968</td><td>31,085</td><td>The audit and the release gates</td></tr>
+</tbody>
+</table></div>
+<p>A comparison of two plans reads between 180 and 320 verses. That is a small number. It is enough to see a large effect and not enough to see a small one, which is why a result is always shown beside a second run of the unchanged plan.</p>
+<h2>What is measured, and by what</h2>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Question</th><th>Measured by</th><th>Costs</th></tr></thead>
+<tbody>
+<tr><td>Do the checks catch errors?</td><td>Errors planted by code: 781 of 839 caught</td><td>Nothing</td></tr>
+<tr><td>Do the checks raise false alarms?</td><td>1,115 stored drafts replayed, failures by kind</td><td>Nothing</td></tr>
+<tr><td>Is version B more faithful than A?</td><td>A blind judge of another family, in both orders</td><td>About half a dollar for 300 verses</td></tr>
+<tr><td>Is it better English?</td><td>The same judge, asked separately</td><td>The same call</td></tr>
+<tr><td>Is a claimed error real?</td><td>A verifier, with a second vote for additions</td><td>A tenth of a cent a finding</td></tr>
+<tr><td>Is a verse coherent to a reader?</td><td>A reader shown our English only</td><td>Very little</td></tr>
+<tr><td>Is it copied from an existing Bible?</td><td>Overlap with held editions, as a guardrail that must not rise</td><td>Nothing</td></tr>
+</tbody>
+</table></div>
+<p>Similarity to an existing translation is never a score to raise. Nothing that decides "better" compares our wording with another Bible's.</p>
+<h2>What the tests have decided</h2>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Change</th><th>Result</th><th>Verdict</th></tr></thead>
+<tbody>
+<tr><td>A check that refuses a broken sentence</td><td>Catches the shape behind the edition's worst errors</td><td>Kept, and a release gate</td></tr>
+<tr><td>Asking again when a draft leaves many words unowned</td><td>A draft that skipped words is drafted again, not patched</td><td>Kept</td></tr>
+<tr><td>Fewer false alarms in the checks</td><td>No planted error lost</td><td>Kept</td></tr>
+<tr><td>Checks chosen by the kind of text</td><td>33 of 37 and 26 of 27 planted errors caught</td><td>Kept, scoped to their kind</td></tr>
+<tr><td>Rules for the drafter by kind of text</td><td>Two repeats disagreed</td><td>Off. The test was later found to be unfair to the idea</td></tr>
+<tr><td>A paragraph about the kind of text</td><td>Less faithful on 12 verses, more on 4</td><td>Rejected</td></tr>
+<tr><td>Three drafts, the best picked per verse</td><td>Did not beat a second plain run on the sealed set</td><td>Rejected</td></tr>
+<tr><td>Revising only the words a check names</td><td>Preferred on 9 verses, the full revision on 22</td><td>Rejected</td></tr>
+</tbody>
+</table></div>
+<h2>What this ruler cannot do yet</h2>
+<ul>
+<li><b>It has no human in it.</b> Every reader here is a model. A verse marked ready has passed what a machine checked and nothing more.</li>
+<li><b>The judge is unsteady.</b> It agrees with itself on which verses are wrong about a third of the time, so counting errors by verse cannot show a small gain.</li>
+<li><b>Verses are not independent.</b> In one passage a single choice, "he" or "they" for "a man or a woman", was charged as an error on ten verses. It decided a whole test in one direction and then the other.</li>
+<li><b>The sets are small.</b> A few hundred verses, drafted once or twice.</li>
+</ul>
+<h2>What changes next</h2>
+<ul>
+<li><b>The passage is the unit</b>, with three runs of each arm, so that one choice in one passage counts once.</li>
+<li><b>Closed questions with answer keys.</b> Code writes questions from the source that have one right answer: who is the father of whom, whether a verse states a duty or a permission, whether a rule applies always or only on a condition. A model answers from the English alone, and the score is the share answered as the key says.</li>
+<li><b>A free gate before any spend.</b> A change must first alter the wording more than two identical runs differ. If it does not, there is nothing to judge.</li>
+<li><b>Decide what was left open.</b> Five conventions of English that varied between runs are now decided in the brief, so that they stop appearing as errors.</li>
 </ul>
 `;
 
@@ -1713,6 +1989,19 @@ export const POSTS: Post[] = [
     },
     steps: TSKILL_STEPS,
     body: TSKILL_BODY,
+  },
+  {
+    slug: 'testing-translations',
+    title: 'How we test the quality of a translation',
+    date: '2026-11-05',
+    description:
+      'No person reviews RBS, so every change to the harness is tested on locked passages, beside a second run of the unchanged plan, by a blind judge from another model family. How many verses, what is measured, what the tests decided, and what this ruler cannot do yet.',
+    picture: {
+      svg: '/architecture/translation-eval-flow.svg', png: '/architecture/translation-eval-flow.png', alt: TEVAL_ALT, width: 1460, height: 1040,
+      caption: 'Grey arrows are the test. Pink arrows are guards on the test itself. Dashed arrows happen only when needed.',
+    },
+    steps: TEVAL_STEPS,
+    body: TEVAL_BODY,
   },
   {
     slug: 'sign-in',
