@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the Home for the local end-to-end suite, with the rollout flag these tests need:
-#   skills-app 'shadow', which no committed app is. Everything else is as committed, the reader 'on' among them.
+#   skills-app 'shadow', which no committed app is. Everything else is as committed: the reader, gc-engage and gc-platform 'on'.
 # The flag edit lives only for the build: the file is restored whatever happens, and the suite refuses a dirty tree first.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -11,7 +11,7 @@ trap 'git -C "$ROOT" checkout -- "$CONFIG"; git -C "$ROOT" diff --quiet -- "$CON
 python3 - "$CONFIG" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p, encoding='utf-8').read()
-assert s.count("remembered_consent: 'on',") == 1  # the reader, as committed
+assert s.count("remembered_consent: 'on',") == 3  # the reader, gc-engage and gc-platform, as committed
 a = "client_id: 'skills-app',"; assert s.count(a) == 1; s = s.replace(a, a + " remembered_consent: 'shadow',")
 open(p, 'w', encoding='utf-8').write(s)
 PY
