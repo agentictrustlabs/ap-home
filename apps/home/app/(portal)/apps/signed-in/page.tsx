@@ -7,6 +7,7 @@ import { useSession } from '../../../../src/context/session';
 import { listConnectedApps } from '../../../../src/lib/connected-apps';
 import type { Permission } from '../../../../src/home/types';
 import { SectionShell } from '../../../../src/components/portal/SectionShell';
+import { AppGrantsPanel } from '../../../../src/components/portal/AppGrantsPanel';
 import { ConnectedAppCard } from '../../../../src/components/portal/ConnectedAppCard';
 import { GlobeIcon } from '../../../../src/components/shared/Icons';
 import { Note, EmptyState } from '../../../../src/ui';
@@ -19,6 +20,8 @@ export default function SignedInAppsPage() {
   return (
     <SectionShell title="Apps you signed into" description="Apps that used this home to sign you in — what each was told it may and may not do.">
       <Note>Signing in proves <b>who you are</b> to an app. It gives the app no standing access to your records: what any app may read is a separate yes, listed under <a href="/apps/readers">Who can read your records</a>, and that is where you take it back. This list is what <b>this device</b> remembers; the record of what you authorized is on chain.</Note>
+      {/* Spec 445 §7 — what each app may do, from the Home, with Revoke, Forget and Ask me every time. Below it, this device's own list. */}
+      <AppGrantsPanel kind="apps" />
       {apps === null ? null : apps.length === 0 ? (
         <EmptyState icon={<GlobeIcon size={32} />} title="No app has signed you in from this device yet" hint="When one does, it appears here with what it was told it may and may not do." />
       ) : apps.map((a) => <ConnectedAppCard key={a.clientId} app={a} />)}

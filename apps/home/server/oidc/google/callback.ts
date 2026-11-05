@@ -87,6 +87,12 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     returnTo?: string;
   };
 
+  // Spec 445 W7 — A SIGN-IN FINISHES ONLY IN THE BROWSER THAT STARTED IT. `state` is checked against the server's store, so a
+  // return link someone prepared for their own account would otherwise sign any browser that opens it in as them. Before the
+  // exchange: nothing is asked of the provider for a link that will be refused. (A connector authorization is not a sign-in: it
+  // is bound to the person whose Home session started it.)
+  if (!stash.purpose && !(await startedInThisBrowser(request, state))) return json({ error: 'sign_in_started_elsewhere', message: 'This sign-in was started in another browser. Please start again here.' }, 403);
+
   // Token exchange (client_secret server-side) + id_token verification.
   const result = await completeLogin({
     code,
@@ -254,11 +260,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     signer,
   );
 
-  // Spec 445 §8 — only the browser that started this sign-in is recognized by it. Another browser (a link) still gets what
-  // it always did, and no cookie.
-  const bound = await startedInThisBrowser(request, state);
-  if (!bound) console.warn('[recognition] a sign-in callback in a browser that did not start it: not recognized');
-  const proved = async (res: Response): Promise<Response> => (bound ? withRecognition(res, { request, env }, { sub: agent, principal: sessionPrincipal, assurance: custodyGrade ? 'onchain-confirmed' : 'asserted', ttlSeconds: 3600 }) : res);
+  const proved = (res: Response): Promise<Response> => withRecognition(res, { request, env }, { sub: agent, principal: sessionPrincipal, assurance: custodyGrade ? 'onchain-confirmed' : 'asserted', ttlSeconds: 3600 });
 
   // §4a / CN-9: stash under a single-use code; deliver the CODE, not the token. The code-exchange aud is
   // the REQUESTING client (stash.aud) — distinct from the session's internal (home) aud for custody clients.

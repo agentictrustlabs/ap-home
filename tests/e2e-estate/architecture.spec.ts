@@ -74,8 +74,9 @@ test('sign-in: the next design is there, reachable from the callout, and every i
 
 test('sign-in: the picture says the arc is the next design, and the tiles link to their steps', async ({ page }) => {
   const svg = await (await page.request.get('/architecture/sign-in-flow.svg')).text();
-  expect(svg).toContain('THE NEXT DESIGN, NOT YET LIVE');
+  expect(svg).toContain('THE NEXT DESIGN, LIVE IN SHADOW');
   expect(svg).not.toContain('PROPOSED');
+  expect(svg).not.toContain('does not');
   await page.goto('/architecture/sign-in');
   const picLinks = await page.locator('a[href^="#step-"]').count();
   expect(picLinks).toBeGreaterThanOrEqual(10);
@@ -102,6 +103,8 @@ test('a visitor gets the cover, and the steward pages stay back', async ({ page 
 
 test('an unknown post is a 404, not an empty page', async ({ page }) => {
   expect((await page.goto('/architecture/no-such-post'))?.status()).toBe(404);
+  await expect(page.locator('h1')).toHaveText('That page is not here');
+  await expect(page.locator('main a[href="/architecture"]')).toBeVisible();
 });
 
 test('the manage door refuses another origin', async ({ request }) => {

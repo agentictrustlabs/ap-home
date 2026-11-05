@@ -1,7 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { CAST, onboardPersona } from './demo-user';
-import { onboard } from './onboard';
+import { onboard, signInAsSeededPerson } from './onboard';
 import { estateDomain } from './estate';
 
 // FULL SURFACE COVERAGE of the Home (`apps/home`) — every route in its own navigation.
@@ -38,14 +37,33 @@ const PERSON_ROUTES: Route[] = [
   { path: '/network', label: 'Network' },
   { path: '/you', label: 'Profile' },
   { path: '/agent', label: 'Agent' },
-  { path: '/metadata', label: 'Metadata' },
   { path: '/records', label: 'Records' },
   { path: '/visibility', label: 'Visibility' },
   { path: '/security', label: 'Security' },
   { path: '/apps', label: 'Connected' },
   { path: '/attestations', label: 'Attestations' },
-  { path: '/activity', label: 'Activity' },
+  { path: '/activities', label: 'Activities' },
   { path: '/data-sources', label: 'Data sources' },
+  { path: '/friends', label: 'Friends' },
+  { path: '/grants', label: 'Grants' },
+  { path: '/search', label: 'Search' },
+  { path: '/household', label: 'Household' },
+  { path: '/developer', label: 'Developer' },
+  { path: '/developer/apps', label: 'Developer apps' },
+  { path: '/developer/runtimes', label: 'Developer runtimes' },
+  { path: '/developer/evals', label: 'Developer evals' },
+  { path: '/developer/evals/skills', label: 'Developer evals skills' },
+  { path: '/developer/evals/acts', label: 'Developer evals acts' },
+  { path: '/developer/evals/techniques', label: 'Developer evals techniques' },
+  { path: '/developer/evals/gates', label: 'Developer evals gates' },
+  { path: '/developer/evals/run', label: 'Developer evals run' },
+  { path: '/apps/accounts', label: 'Apps accounts' },
+  { path: '/apps/tools', label: 'Apps tools' },
+  { path: '/apps/signed-in', label: 'Apps signed in' },
+  { path: '/apps/assistants', label: 'Apps assistants' },
+  { path: '/apps/readers', label: 'Apps readers' },
+  { path: '/security/sign-in', label: 'Security sign in' },
+  { path: '/discussion-replies', label: 'Discussion replies' },
 ];
 
 /** Org routes, walked as a steward. `<org>` is substituted with a real org SA. */
@@ -86,6 +104,9 @@ async function walk(page: Page, origin: string, r: Route): Promise<Result> {
     // The blank shell: 200, valid HTML, nothing rendered. Invisible to a status check, and the most
     // common way a route "exists" while being useless.
     if (body.length < 60) return { ...r, ok: false, detail: `${body.length} chars — blank shell?` };
+    // The sign-in screen is a 200 with text on it. A route that shows it to a signed-in member has lost the session, and for a
+    // run that never signed in, every route looks like this: 465 chars and a green tick, each one meaningless.
+    if (/Continue with (Google|email|a wallet)/i.test(body)) return { ...r, ok: false, detail: 'shows the sign-in screen: no session' };
     if (/application error|something went wrong|unhandled/i.test(body)) return { ...r, ok: false, detail: body.slice(0, 100) };
     if (errs.length) return { ...r, ok: false, detail: `pageerror: ${errs[0]}` };
     if (fatal.length) return { ...r, ok: false, detail: `5xx: ${fatal.slice(0, 2).join(', ')}` };
@@ -111,11 +132,11 @@ test('every route in the Home’s navigation renders for a signed-in member', as
   const fresh = process.env.COVERAGE_FRESH === '1';
   const home = fresh
     ? { ...(await onboard(page, `cov${Date.now().toString(36).slice(-7)}`)), existing: false }
-    : await onboardPersona(page, CAST.ada);
-  console.log(`[coverage] persona=${fresh ? 'FRESH' : CAST.ada.name} home=${home.origin} existing=${home.existing}`);
+    : await signInAsSeededPerson(page);
+  console.log(`[coverage] persona=${fresh ? 'FRESH' : home.name} home=${home.origin} existing=${home.existing}`);
   // The one hard gate. Every route below reads a signed-in session, so without a home they would all
   // fail for that single reason and the report would be noise wearing the shape of findings.
-  expect(home.origin, 'ada never reached a home').toContain(estateDomain());
+  expect(home.origin, 'never reached a home').toContain(estateDomain());
 
   for (const r of PERSON_ROUTES) {
     const res = await walk(page, home.origin, r);
@@ -151,6 +172,15 @@ test('every route in the Home’s navigation renders for a signed-in member', as
    * button text is elided by design and can never yield the other 32 characters.
    */
   const findOrg = async (): Promise<string | null> => {
+    // The person's own record of what they steward, read over their session. The list on the page renders orgs as buttons.
+    const fromRecord = await page.evaluate(async () => {
+      const raw = localStorage.getItem('agenticprimitives:demo-sso:session');
+      const token = raw ? (JSON.parse(raw) as { token?: string }).token : '';
+      if (!token) return null;
+      const b = (await fetch('/connect/related-orgs', { headers: { authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => ({}))) as { orgs?: Array<{ orgAgent?: string; kind?: string; relationship?: string }> };
+      return (b.orgs ?? []).find((o) => o.relationship === 'steward' && (o.kind === 'org' || o.kind === 'organization' || o.kind === 'church'))?.orgAgent ?? null;
+    }).catch(() => null);
+    if (fromRecord) return fromRecord;
     await page.goto(`${home.origin}/organizations`);
     await page.waitForTimeout(6000);
     const hrefs = await page
@@ -230,7 +260,7 @@ test('the route list covers everything the app’s nav offers', async () => {
   // interop shim, which throws "require is not defined in ES module scope" — reported at line 3, for a
   // call forty lines away, with a caret on a comment. Two wrong fixes before the third stuck; the
   // misleading line number is why. Playwright runs with cwd = this directory.
-  const nav = await readFile('../../apps/home/src/components/portal/nav.ts', 'utf8');
+  const nav = await readFile(new URL('../../apps/home/src/components/portal/nav.ts', import.meta.url), 'utf8');
 
   const declared = new Set(
     [...nav.matchAll(/href:\s*'(\/[a-z0-9/-]*)'/g)]

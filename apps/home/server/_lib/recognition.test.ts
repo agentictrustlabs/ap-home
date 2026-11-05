@@ -158,10 +158,13 @@ describe('every place a Home session is minted', () => {
     const callers = all.filter((f) => !f.endsWith('recognition.ts') && /\bwithRecognition\(/.test(readFileSync(f, 'utf8')));
     expect(callers.sort()).toEqual(checked.sort()); // never minted from a token, a link, or a name
   });
-  it('a social callback recognizes only the browser that started it', () => {
+  it('a social sign-in finishes only in the browser that started it, before any session is minted', () => {
     for (const p of ['google', 'youversion']) {
       expect(readFileSync(join(root, 'oidc', p, 'start.ts'), 'utf8')).toContain('markLoginStart(');
-      expect(readFileSync(join(root, 'oidc', p, 'callback.ts'), 'utf8')).toMatch(/startedInThisBrowser\(request, state\)[\s\S]*bound \? withRecognition/);
+      const cb = readFileSync(join(root, 'oidc', p, 'callback.ts'), 'utf8');
+      const refusal = cb.search(/startedInThisBrowser\(request, state\)\)\) return json\(\{ error: 'sign_in_started_elsewhere'/);
+      expect(refusal, p).toBeGreaterThan(0);
+      expect(refusal, p).toBeLessThan(cb.indexOf('mintAgentSession('));
     }
   });
   it('the decision endpoint reads the cookie and never a bearer', () => {

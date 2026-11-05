@@ -32,7 +32,7 @@ export default function ConnectedOverviewPage() {
       .then((xs) => live && setC((p) => ({ ...p, accounts: xs.reduce((a, b) => a + b, 0) })));
     void mcpConnectors({ token }, 'list').then((r) => live && setC((p) => ({ ...p, tools: r.ok ? r.connectors.length : 0 }))).catch(() => fail('your tools'));
     if (live) setC((p) => ({ ...p, signedIn: listConnectedApps(agentAddress as Address).length }));
-    void listAppGrants(token).then((g) => live && setC((p) => ({ ...p, assistants: g.filter((x) => x.template === 'ask-as-me').length }))).catch(() => fail('your assistants'));
+    void listAppGrants(token).then((g) => live && setC((p) => ({ ...p, assistants: g.filter((x) => x.template === 'ask-as-me' || x.template === 'act-as-me').length }))).catch(() => fail('your assistants'));
     void listReadGrants(agentAddress as Address).then((g) => live && setC((p) => ({ ...p, readers: g.filter((x) => !x.revoked).length }))).catch(() => fail('who can read your records'));
     return () => { live = false; };
   }, [session?.token, agentAddress]);
