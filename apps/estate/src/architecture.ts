@@ -831,7 +831,7 @@ const SIGNIN_BODY = `
 <ul>
 <li><b>The app is switched on for this,</b> one reviewed app at a time. An app members register themselves never is, because its owner can change its key at any time.</li>
 <li><b>The sign-in is a plain one:</b> <code>site-login</code> or <code>ask-as-me</code>. Never a payment, a ceremony or act-as-me, and never an app that mints a payment leg as it signs in.</li>
-<li><b>No request for a new signature or a new consent:</b> no <code>session_key</code>, since a new leaf must be signed, and no <code>prompt=consent</code>. So Gather27, which sends a session key every time, keeps its sheet.</li>
+<li><b>No request for a new signature or a new consent:</b> no <code>session_key</code>, since a new leaf must be signed, and no <code>prompt=consent</code>. A <code>prompt=login</code> or <code>select_account</code> asks for a credential and then shows the sheet. So Gather27, which sends a session key every time, keeps its sheet.</li>
 <li><b>No request through a host.</b> An Allow for Claude is not an Allow for another assistant.</li>
 <li><b>The right person:</b> the person on the page is the person the cookie proved, and any name the app pinned is theirs.</li>
 <li><b>An Allow is on record,</b> with no "ask me every time", for a return address the person has been sent to before.</li>
@@ -870,8 +870,8 @@ const SIGNIN_BODY = `
 <h3>Still open</h3>
 <ul>
 <li><b>A forwarded link.</b> An invitation link or a <code>#session=</code> link can still open a session in someone else's browser. It sets no cookie, so no sheet is skipped, and the sheet names whose session it is.</li>
-<li><b>How long recognition lasts.</b> One hour for now. Thirty days would mean no prompt at all on return, and a browser left signed in could enter allowed apps for a month.</li>
-<li><b>Apps with a session key,</b> Gather27 among them, need a design of their own.</li>
+<li><b>How long recognition lasts.</b> One hour, decided for now, and looked at again once the shadow numbers are in. Thirty days would mean no prompt at all on return, and a browser left signed in could enter allowed apps for a month.</li>
+<li><b>Apps with a session key,</b> Gather27 among them. There is a draft design in spec 445: the right to ask for a leaf becomes part of the Allow. Not built.</li>
 </ul>
 
 <h2 id="pauls-points">Paul's points, answered</h2>
