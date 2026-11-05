@@ -1064,7 +1064,7 @@ const TRANSLATION_STEPS: Step[] = [
     what: [
       'The draft and each revision are compared by their strict failures, and the best is kept.',
       'The kept pass is checked once more with the strict rules, under which a word no token accounts for blocks. Matthew 10:4 was once proposed with "Judas the son of James", which belongs to Luke\'s list, and this is the check that stops it.',
-      'Still to come: the comparison is per passage, so a good verse can be lost with a bad passage. A per-verse rule that keeps a verse\'s earlier wording unless its revision improved it is the next thing being tested.',
+      'The comparison is per passage, so a good verse can be lost with a bad passage. A per-verse rule that keeps a verse\'s earlier wording unless its revision improved it has been tested on 120 verses, and the result is not yet good enough to turn on.',
     ],
     where: [TR_RUNTIME, TR_MCP, 'Source: <code>local.best_pass</code> in <code>packages/translation-orchestration</code>.'],
     by: 'Code only. No model is called.',
@@ -1112,7 +1112,7 @@ const TRANSLATION_STEPS: Step[] = [
       'For each confirmed defect, the verses around it go back to Read, with the finding put to the drafter as a claim to test against the tokens, not as a fact.',
       'A new verse replaces the published one only if: it passes the code checks with no new failure; the verifier reads the finding as gone, twice; a blind judge of the other family does not prefer the old verse in either order; and the reader finds it no less clear. Refusing a verse in which the judge notes a major error was added on 2026-11-05 and is not yet in the script: it was applied by hand to the last pass, and ten verses published before it carry such a note.',
       'A defect not fixed stays visible: the verse is published as open, with the reason.',
-      'This step is the least settled. The verifier rejects nearly everything, so a defect list built on it is probably too short, and a verse can pass it and still be wrong. Reading 11 accepted verses against their tokens held 2 back (Job 19:13 had changed the verb\'s person).',
+      'This step is the least settled. Given 120 errors planted by code, the verifier confirmed 50, and only 1 of 30 lost negatives, with no false alarms on the unaltered verses. So the defect list is a floor, and a verse can pass and still be wrong. Reading 11 accepted verses against their tokens held 2 back (Job 19:13 had changed the verb\'s person).',
     ],
     where: ['Scripts on the operator\'s machine: <code>verify-suspects.mts</code> and <code>redraft-defects.mts</code>.', 'The list of open defects: <code>docs/bible-translation/rbs-v4-defects-spec-2026-11-04.md</code>.'],
     by: 'Two model families, under a rule written in code.',
@@ -1155,6 +1155,7 @@ const TRANSLATION_BODY = `
 <li><b>The story and meaning.</b> For each book, the scenes, who is present and who each pronoun means. It is built from the source and sources of the book's own time, and code removes any sentence resting on a later interpretation. It decides structure, such as who is speaking, and never wording.</li>
 <li><b>The brief and skills.</b> What the drafter is told, as published skills under the <code>bible-translation</code> domain.</li>
 <li><b>The ontology.</b> Spelling rules, number words, free words and check kinds are generated from it, and a repository check refuses any drift.</li>
+<li><b>A taxonomy of passage forms.</b> One hundred forms, such as genealogy, lament and case law, are held in the ontology as values. Routing a drafter by them is being tested and is off: a first test on 20 passages showed nothing beyond the difference between two identical runs.</li>
 </ul>
 <h2>How a change is measured</h2>
 <p>The harness carries its own tests. Experiments run arms side by side over locked sets of passages, including a floor (the tables' word-by-word glosses) and a ceiling (a published human translation), so a score means something. Errors are planted to measure the checker. A change is accepted by a blind judge on a frozen set of hard passages, because this project's own checks have rewarded changes that a blind reader preferred less.</p>
