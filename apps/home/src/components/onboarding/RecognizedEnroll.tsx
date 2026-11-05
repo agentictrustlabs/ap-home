@@ -37,6 +37,9 @@ import { homeLabel, type Home } from '../../home/types';
 import { whitelabel, fmt, isPaymentTemplate } from '../../whitelabel/config';
 import { createManagedAgent, fetchProfile, listManagedAgents, resolveHomeNameForLabel, resolveTreasuryByConvention } from '../../connect-client';
 import { readSsoCookie, setSsoCookie, clearSsoCookie } from '../../lib/sso-cookie';
+import { endRecognition } from '../../lib/home-recognition';
+import { askRemembered } from './remembered';
+import { addedLines, consentLinesFor, isRememberedTemplate, termsFor } from '../../lib/consent-terms';
 import { nameLabel, subdomainHandle, personalAuthOrigin } from '../../lib/domain';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import { provisionCommunityMessaging } from '../../lib/messaging-ceremony';
@@ -59,7 +62,7 @@ import { withMissionRegistry } from '../../lib/mission-registry';
  *  workspace is not one (a service, with no members): its people belong to the organization that governs it. */
 const TEAM_CLASS = new Set(['team', 'org', 'organization', 'circle', 'church', 'household']);
 
-type Phase = 'resolving' | 'choose-org' | 'consent' | 'granting' | 'connected' | 'error';
+type Phase = 'resolving' | 'remembering' | 'choose-org' | 'consent' | 'granting' | 'connected' | 'error';
 
 /** What a person is told at a workspace with no governing organization (2026-10-02): membership is recorded on
  *  organizations only, so neither an invitation into it nor a join of it can succeed until its host runs the
@@ -113,6 +116,10 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   // Chooser-mode org-create (spec 246 select-existing): the enroll carries NO org_base/existing_org —
   // the member picks a stewarded org (grant-only) or names a new one HERE before consenting.
   const [orgSel, setOrgSel] = useState<OrgChoice | null>(null);
+  // Spec 445 §5.4 — the app's registration asks for more than the person agreed to: the sheet says so, and says what.
+  const [askingMore, setAskingMore] = useState<ReturnType<typeof termsFor> | null>(null);
+  // "Not you?" while the Home decides: the answer that comes back afterwards is not delivered.
+  const notYou = useRef(false);
 
   const enroll = api.enroll;
   const relyingApp = enroll
@@ -161,6 +168,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         if (!sessionStorage.getItem(k)) {
           sessionStorage.setItem(k, '1'); // one-time: after the chooser + re-sign-in, proceed normally (no loop)
           clearSsoCookie();
+          void endRecognition();
           return onUnrecognized(); // → EntryExperience: wallet/SIWE · Google · YouVersion · passkey
         }
       }
@@ -186,6 +194,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       if (pinned && nameLabel(profile.name ?? '') !== pinned) {
         console.warn('[connect] pinned identity ≠ active session — re-choosing credentials', { pinned, session: profile.name });
         clearSsoCookie();
+        void endRecognition();
         return onUnrecognized();
       }
       // BIND the owner-op to the owner the relying app authenticated: the home session's SA MUST equal the
@@ -203,6 +212,27 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // Sign with the credential that actually authenticated this session (wallet/passkey/KMS), not the
       // cookie's defaulted via — which sent a wallet member to passkey at authorize time.
       const v = resolveVia(profile.credential, sso.via);
+
+      // Spec 445 §6 — ALLOWED BEFORE? Asked before the sheet and before the passkey hop: a yes signs nothing, so a passkey
+      // person has no reason to leave this host. A no carries on exactly as it did, to the sheet its reason calls for.
+      if (isRememberedTemplate(enroll.template || 'site-login')) {
+        setHome({ address: addr, name: profile.name ?? '' });
+        // Only an app that can actually skip says "signing you in"; for the rest the sheet follows, so it must not promise.
+        if (relyingApp?.remembered_consent === 'on') setPhase('remembering');
+        const asked = await askRemembered(enroll, addr);
+        if (notYou.current) return;
+        if (asked.kind === 'code') {
+          // The same healing a sheet sign-in runs for an app that asks the person's agent as them. It grants nothing.
+          if (relyingApp?.ask_with_login) {
+            await Promise.race([ensurePlaybook(addr, sso.token), new Promise<void>((r) => setTimeout(r, 12_000))]).catch((e: unknown) => console.warn('[enroll] playbook heal skipped:', e));
+          }
+          setSsoCookie(sso.token, v);
+          setFedcmLoginStatus('logged-in');
+          deliverEnrollCode(enroll, api.popupMode, asked.code);
+          return;
+        }
+        if (asked.kind === 'sheet' && asked.reason === 'terms_widened' && asked.storedTerms) setAskingMore(asked.storedTerms);
+      }
 
       // passkey is rpId-bound to the home subdomain — hop there if we're not already on it (the passkey
       // can't assert at the apex). Google/KMS + wallet sign on any origin, so they authorize in place.
@@ -932,6 +962,22 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     );
   }
 
+  // Spec 445 §6 — the one line a person allowed before sees, for as long as the Home takes to decide.
+  if (phase === 'remembering') {
+    return (
+      <Shell>
+        <div className="onboarding-busy">
+          <WorkingBar />
+          <span className="spinner spinner-lg" role="status" aria-label="Signing you in" />
+          <p className="onboarding-busy-msg">Signing you in to {appName}{signedInAs ? ` as ${signedInAs}` : ''}</p>
+        </div>
+        <button className="btn-ghost onboarding-secondary" onClick={() => { notYou.current = true; clearSsoCookie(); void endRecognition(); onUnrecognized(); }}>
+          Not you?
+        </button>
+      </Shell>
+    );
+  }
+
   if (phase === 'choose-org') {
     return (
       <Shell>
@@ -1000,7 +1046,11 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     relyingApp,
   );
   // The coin's consent lines belong to the plain sign-in, where the coin is granted (see the mandate leg).
-  const tpl = plainSignIn ? withCurrencyConsent(baseTpl, relyingApp, appName) : baseTpl;
+  const coinTpl = plainSignIn ? withCurrencyConsent(baseTpl, relyingApp, appName) : baseTpl;
+  // Spec 445 §4 — what the sheet says is what is stored: for a sign-in that can be remembered, the lines come from the terms.
+  const terms = relyingApp && isRememberedTemplate(enroll.template) ? termsFor(relyingApp, enroll.template) : null;
+  const tpl = terms ? consentLinesFor(coinTpl, terms) : coinTpl;
+  const newLines = askingMore && terms ? addedLines(coinTpl, askingMore, terms) : [];
   return (
     <div className="onboarding-screen">
       <div className="onboarding-card wide">
@@ -1019,7 +1069,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           <ActAsMeConsent token={token} agent={home.address} onChange={onActChoices} />
         )}
         <ConsentSheet
-          title={fmt(c.authorizeStepTitle, { app: appName })}
+          title={askingMore ? `${appName} is asking for more` : fmt(c.authorizeStepTitle, { app: appName })}
+          newLines={newLines}
           signedInAs={signedInAs}
           appName={appName}
           appDomain={enroll.viaHost ? `through ${registeredName} · ${appDomain}` : appDomain}
@@ -1029,7 +1080,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           onAuthorize={onAuthorize}
           onDecline={onDecline}
         />
-        <button className="btn-ghost onboarding-secondary" onClick={() => { clearSsoCookie(); onUnrecognized(); }}>
+        <button className="btn-ghost onboarding-secondary" onClick={() => { clearSsoCookie(); void endRecognition(); onUnrecognized(); }}>
           Not {home?.name?.trim() || 'you'}? Use a different custodian
         </button>
       </div>

@@ -5,7 +5,10 @@
 // bring it back short of you authorizing again.
 import { useEffect, useState } from 'react';
 import { useSession } from '../../context/session';
-import { listAppGrants, forgetAppGrant, forgetAppGrantWire, type AppGrant, type AppGrantWire } from '../../lib/app-grants';
+import { listAppGrants, forgetAppGrant, forgetAppGrantWire, forgetAppConsent, forgetAppPart, forgetSupersededWire, setAskEveryTime, type AppGrant, type AppGrantWire } from '../../lib/app-grants';
+import { consentLinesFor } from '../../lib/consent-terms';
+import { whitelabel } from '../../whitelabel/config';
+import type { DelegationWire } from '../../lib/delegation';
 import { actWireWords } from '../../lib/act-as-me';
 import { revokeGrantedDelegation } from '../../connect-client';
 import { signHashFor, type Via } from '../../home/onboarding';
@@ -60,7 +63,10 @@ export function AppGrantsPanel({ showEmpty = false }: { showEmpty?: boolean } = 
   const via = (session.via ?? 'passkey').toLowerCase() as Via;
   const revoke = async (g: AppGrant) => {
     const n = g.wires?.length ?? 0;
-    if (!window.confirm(`Revoke ${g.appName}${n ? ` and its ${n} act wire${n === 1 ? '' : 's'}` : ''}? It takes effect immediately on chain — its next ask is refused at your agent.`)) return;
+    // Spec 445 §7 — every wire this app still holds: the ask and vault wires beside the sign-in, and the older ones.
+    const others: DelegationWire[] = [...(g.askDelegation ? [g.askDelegation] : []), ...(g.selfVaultGrant ? [g.selfVaultGrant] : []), ...(g.superseded ?? []).map((s) => s.wire)];
+    const count = n + others.length;
+    if (!window.confirm(`Revoke ${g.appName}${count ? ` and its ${count} other wire${count === 1 ? '' : 's'}` : ''}? It takes effect immediately on chain — its next ask is refused at your agent.`)) return;
     setBusy(g.clientId); setErr(null);
     try {
       // Spec 397 §11 — THE SET: every act wire first (each its own delegator — a payment wire is the treasury's), then
@@ -71,6 +77,10 @@ export function AppGrantsPanel({ showEmpty = false }: { showEmpty?: boolean } = 
         await forgetAppGrantWire(session.token, g.clientId, w.ref);
       }
       const signHash = await signHashFor(via, g.delegation.delegator, { token: session.token });
+      for (const w of others) {
+        const r = await revokeGrantedDelegation(w, signHash);
+        if (!r.ok) { setErr(r.error); return; }
+      }
       const r = await revokeGrantedDelegation(g.delegation, signHash);
       if (!r.ok) { setErr(r.error); return; }
       await forgetAppGrant(session.token, g.clientId);
@@ -90,6 +100,20 @@ export function AppGrantsPanel({ showEmpty = false }: { showEmpty?: boolean } = 
     } catch (e) { setErr(e instanceof Error ? e.message : 'revoke failed'); }
     finally { setBusy(null); }
   };
+  const change = (clientId: string, f: (g: AppGrant) => AppGrant) => setGrants((gs) => (gs ?? []).map((x) => (x.clientId === clientId ? f(x) : x)));
+  /** Spec 445 §7 — one wire of a row: revoked on chain, then forgotten here. The next sign-in shows the sheet. */
+  const revokeOne = async (key: string, words: string, wire: DelegationWire, forget: () => Promise<unknown>, after: () => void) => {
+    if (!window.confirm(`Revoke ${words}? It takes effect immediately on chain.`)) return;
+    setBusy(key); setErr(null);
+    try {
+      const r = await revokeGrantedDelegation(wire, await signHashFor(via, wire.delegator, { token: session.token }));
+      if (!r.ok) { setErr(r.error); return; }
+      await forget();
+      after();
+    } catch (e) { setErr(e instanceof Error ? e.message : 'revoke failed'); }
+    finally { setBusy(null); }
+  };
+  const lineRow = { display: 'flex', gap: '.6rem', alignItems: 'center', justifyContent: 'space-between', padding: '.25rem 0', borderTop: '1px solid var(--line, #e5e7eb)' } as const;
   return (
     <div style={{ marginTop: '1.5rem' }} data-testid="app-grants">
       <h3 style={{ margin: '0 0 .3rem', fontSize: '.95rem' }}>Connected assistants</h3>
@@ -98,17 +122,50 @@ export function AppGrantsPanel({ showEmpty = false }: { showEmpty?: boolean } = 
       </p>
       {grants.map((g) => {
         const what = WHAT[g.template] ?? { can: `Template ${g.template}.`, cannot: 'Anything the template does not name.' };
+        const tpl = whitelabel.delegationTemplates[g.template];
+        const agreed = g.terms ? consentLinesFor({ canDo: tpl?.canDo ?? [what.can], cannotDo: tpl?.cannotDo ?? [what.cannot] }, g.terms) : null;
         return (
           <div key={g.clientId} className="connected-app-card" data-testid={`app-grant-${g.clientId}`}>
             <div className="connected-app-head">
               <div className="connected-app-logo placeholder" aria-hidden="true">{g.appName.slice(0, 1).toUpperCase()}</div>
               <div>
                 <div className="connected-app-name">{g.appName}</div>
-                <div className="connected-app-domain">since {fmt(g.issuedAt)} · until {fmt(g.validUntil)}</div>
+                <div className="connected-app-domain">since {fmt(g.issuedAt)} · until {fmt(g.validUntil)}{g.lastUsedAt ? ` · last signed in ${fmt(g.lastUsedAt)}` : ''}</div>
               </div>
             </div>
-            <ul className="consent-list can"><li>{what.can}</li></ul>
-            <ul className="consent-list cannot"><li>{what.cannot}</li></ul>
+            {agreed ? (
+              <>
+                <ul className="consent-list can">{agreed.canDo.map((l) => <li key={l}>{l}</li>)}</ul>
+                <ul className="consent-list cannot">{agreed.cannotDo.map((l) => <li key={l}>{l}</li>)}</ul>
+              </>
+            ) : (
+              <>
+                <ul className="consent-list can"><li>{what.can}</li></ul>
+                <ul className="consent-list cannot"><li>{what.cannot}</li></ul>
+              </>
+            )}
+            {(g.askDelegation || g.selfVaultGrant || (g.superseded ?? []).length > 0) && (
+              <ul style={{ listStyle: 'none', padding: 0, margin: '.4rem 0' }} data-testid={`app-grant-others-${g.clientId}`}>
+                {g.askDelegation && (
+                  <li style={lineRow}><span style={{ fontSize: '.85rem' }}>Ask your agent as you <span className="muted">· until {fmt(g.ask?.validUntil ?? null)}</span></span>
+                    <BusyButton className="btn ghost" busy={busy === `${g.clientId}:ask`} busyLabel="Revoking…" onClick={() => void revokeOne(`${g.clientId}:ask`, 'this wire', g.askDelegation!, () => forgetAppPart(session.token, g.clientId, 'ask'), () => change(g.clientId, ({ askDelegation: _a, ...x }) => x))}>Revoke</BusyButton></li>
+                )}
+                {g.selfVaultGrant && (
+                  <li style={lineRow}><span style={{ fontSize: '.85rem' }}>Keep its records in your vault <span className="muted">· until {fmt(g.vault?.validUntil ?? null)}</span></span>
+                    <BusyButton className="btn ghost" busy={busy === `${g.clientId}:vault`} busyLabel="Revoking…" onClick={() => void revokeOne(`${g.clientId}:vault`, 'this wire', g.selfVaultGrant!, () => forgetAppPart(session.token, g.clientId, 'vault'), () => change(g.clientId, ({ selfVaultGrant: _v, ...x }) => x))}>Revoke</BusyButton></li>
+                )}
+                {(g.superseded ?? []).map((s) => (
+                  <li key={s.ref} style={lineRow} data-testid={`app-grant-superseded-${s.ref}`}><span style={{ fontSize: '.85rem' }}>An older permission, still live <span className="muted">· until {fmt(s.validUntil)}</span></span>
+                    <BusyButton className="btn ghost" busy={busy === s.ref} busyLabel="Revoking…" onClick={() => void revokeOne(s.ref, 'this older permission', s.wire, () => forgetSupersededWire(session.token, g.clientId, s.ref), () => change(g.clientId, (x) => ({ ...x, superseded: (x.superseded ?? []).filter((y) => y.ref !== s.ref) })))}>Revoke</BusyButton></li>
+                ))}
+              </ul>
+            )}
+            {g.terms && (
+              <div style={{ display: 'flex', gap: '.6rem', alignItems: 'center', flexWrap: 'wrap', margin: '.4rem 0', fontSize: '.85rem' }}>
+                <label><input type="checkbox" checked={!!g.askEveryTime} data-testid={`app-grant-ask-every-time-${g.clientId}`} onChange={(e) => { const on = e.target.checked; void setAskEveryTime(session.token, g.clientId, on).then(() => change(g.clientId, ({ askEveryTime: _a, ...x }) => (on ? { ...x, askEveryTime: true as const } : x))); }} /> Ask me every time</label>
+                <button type="button" className="btn ghost" data-testid={`app-grant-forget-${g.clientId}`} onClick={() => void forgetAppConsent(session.token, g.clientId).then(() => change(g.clientId, ({ terms: _t, ...x }) => x))}>Forget this app</button>
+              </div>
+            )}
             {g.template === 'act-as-me' && (
               <div className="app-grant-acts" data-testid={`app-grant-acts-${g.clientId}`}>
                 <p className="muted" style={{ margin: '.4rem 0 .3rem', fontSize: '.82rem' }}><b>Acts it may run without asking you</b> — one wire each:</p>

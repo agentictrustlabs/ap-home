@@ -14,6 +14,7 @@ import { recordOidcFacet, readOidcFacet, readRotation } from '../../../src/lib/k
 import { signBridgeCall } from '../../_lib/bridge-hmac';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
 import { isSocialCustodyAud, isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
+import { withRecognition } from '../../_lib/recognition';
 import { getServer, json, resolveOrigin, type Env, type FnContext } from '../../_lib/server-broker';
 
 /** App-layer return-URL policy (mirrors the Google handler): trust this site's own apex + per-handle
@@ -233,6 +234,8 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     signer,
   );
 
+  const proved = (res: Response): Promise<Response> => withRecognition(res, { request, env }, { sub: agent, principal: sessionPrincipal, assurance: custodyGrade ? 'onchain-confirmed' : 'asserted', ttlSeconds: 3600 });
+
   // §4a / CN-9: stash under a single-use code; deliver the CODE, not the token. `via=youversion` tells
   // the client which credential opened the session (KMS-custodied, like Google).
   const authCode = newAuthCode();
@@ -245,7 +248,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     const dest = new URL(stash.rpRedirect);
     dest.searchParams.set('code', authCode);
     dest.searchParams.set('via', 'youversion');
-    return new Response(null, { status: 302, headers: { location: dest.toString() } });
+    return proved(new Response(null, { status: 302, headers: { location: dest.toString() } }));
   }
-  return json({ status: 'issued', code: authCode, via: 'youversion' });
+  return proved(json({ status: 'issued', code: authCode, via: 'youversion' }));
 };

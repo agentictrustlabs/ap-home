@@ -89,6 +89,10 @@ export interface RelyingApp {
    *  holds a site delegate for sign-in but asks the person's agent from a DIFFERENT key (a Worker's own
    *  custody key that signs `A2A-Session` assertions). Absent ⇒ `delegate`, as the Home MCP's entry has it. */
   ask_delegate?: `0x${string}`;
+  /** OPTIONAL — spec 445: may a sign-in by a person who already allowed this app skip the sheet? Absent means no: the
+   *  sheet, every time. `'shadow'` decides and records the decision and still shows the sheet. `'on'` skips it, signing
+   *  nothing, when the app asks for nothing more and its wires still verify on chain. Turns something ON — review it hardest. */
+  remembered_consent?: 'shadow' | 'on';
   /** The `ask-as-me` wire is minted IN the plain sign-in (one ceremony, one more signature) instead of a separate
    *  ask-as-me connect — for an app whose whole purpose is to put the person's question to their own agent. Needs
    *  `ask_delegate` and `ask-as-me` among the allowed templates; the wire rides the token exchange as

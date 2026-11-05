@@ -15,6 +15,7 @@ import { recordOidcFacet, readOidcFacet, readRotation, recordEmailOwner } from '
 import { resolveKmsAgent } from '../../_lib/kms-resolve';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
 import { isSocialCustodyAud, isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
+import { withRecognition } from '../../_lib/recognition';
 import { getServer, json, resolveOrigin, type FnContext } from '../../_lib/server-broker';
 import { connectorBridge } from '../../connect/connector-calendar';
 
@@ -253,6 +254,8 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     signer,
   );
 
+  const proved = (res: Response): Promise<Response> => withRecognition(res, { request, env }, { sub: agent, principal: sessionPrincipal, assurance: custodyGrade ? 'onchain-confirmed' : 'asserted', ttlSeconds: 3600 });
+
   // §4a / CN-9: stash under a single-use code; deliver the CODE, not the token. The code-exchange aud is
   // the REQUESTING client (stash.aud) — distinct from the session's internal (home) aud for custody clients.
   const authCode = newAuthCode();
@@ -265,7 +268,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     }
     const dest = new URL(stash.rpRedirect);
     dest.searchParams.set('code', authCode);
-    return new Response(null, { status: 302, headers: { location: dest.toString() } });
+    return proved(new Response(null, { status: 302, headers: { location: dest.toString() } }));
   }
-  return json({ status: 'issued', code: authCode });
+  return proved(json({ status: 'issued', code: authCode }));
 };

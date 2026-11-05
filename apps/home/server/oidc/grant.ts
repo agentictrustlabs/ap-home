@@ -30,6 +30,9 @@ import { idTokenTtl } from '../_lib/session-ttl';
 import { nameClaimForIdToken } from '../../src/lib/new-member';
 import { orgCommonNameFields, sanitizeOrgProfileProjection } from '../../src/lib/org-profile';
 import { isPaymentTemplate } from '../../src/whitelabel/config';
+import { isRememberedTemplate, termsFor } from '../../src/lib/consent-terms';
+import { resolveClient } from '../_lib/oidc-registry';
+import { nextAppGrantRow, readRows } from './app-grant-row';
 
 const CODE_TTL_MS = 300_000; // 5 min PKCE exchange window
 
@@ -295,10 +298,22 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!body.org && body.delegation?.delegator) {
     const person = String(body.delegation.delegator).toLowerCase();
     const key = `app-grants:${person}`;
-    const rows = JSON.parse((await env.AUTH_CODES.get(key)) ?? '[]') as Array<{ clientId: string }>;
-    const next = rows.filter((r) => r.clientId !== grant.client_id);
-    next.unshift({ clientId: grant.client_id, template: grant.delegation_template, delegate: grant.delegate, delegation: body.delegation, issuedAt: Date.now(), ...(actTemplate ? { wires: body.delegations } : {}) } as never);
-    await env.AUTH_CODES.put(key, JSON.stringify(next.slice(0, 50)));
+    const rows = await readRows(env.AUTH_CODES, person);
+    // Spec 445 §4 — what this Allow agreed to: computed here from the registry, never taken from the request.
+    const client = isRememberedTemplate(grant.delegation_template) ? await resolveClient(env, grant.client_id) : null;
+    const row = nextAppGrantRow(rows.find((r) => r.clientId === grant.client_id), {
+      clientId: grant.client_id,
+      template: grant.delegation_template,
+      delegate: grant.delegate,
+      delegation: body.delegation,
+      askDelegation: body.askDelegation,
+      selfVaultGrant: body.selfVaultGrant,
+      ...(actTemplate ? { wires: body.delegations } : {}),
+      terms: client ? termsFor(client, grant.delegation_template) : null,
+      origin: new URL(grant.redirect_uri).origin,
+      now: Date.now(),
+    });
+    await env.AUTH_CODES.put(key, JSON.stringify([row, ...rows.filter((r) => r.clientId !== grant.client_id)].slice(0, 50)));
   }
 
   // spec 272 — WHY NOTHING WAS CHARGED, said out loud.

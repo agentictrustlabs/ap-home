@@ -29,6 +29,7 @@ import { buildActAsMeSet, signActAsMeSet, PAYMENT_CAPABILITY, type ActChoice } f
 import type { Address, CredentialPrincipal, Hex } from '@agenticprimitives/types';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
+import { withRecognition } from '../_lib/recognition';
 import { clientSessionTtl } from '../_lib/session-ttl';
 import { demoCustodianAddress, demoPersonaFor, listDemoPersonas, signDigestAsDemoPersona } from '../_lib/demo-custody';
 import { issueAskAsMeDelegation, issueSiteDelegation, toWire } from '../../src/lib/delegation';
@@ -222,7 +223,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     } catch (e) { console.warn(`[demo-signin] read grant for ${clientId} not issued:`, e instanceof Error ? e.message : String(e)); }
   }
 
-  return json({
+  return withRecognition(json({
     ok: true,
     sub,
     agent: sa,
@@ -236,5 +237,5 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     ...(actSet ? { delegations: actSet } : {}),
     homeSession,
     homeSessionExpiresIn: HOME_SESSION_TTL,
-  });
+  }), { request, env }, { sub, principal, assurance: 'onchain-confirmed', ttlSeconds: HOME_SESSION_TTL });
 };

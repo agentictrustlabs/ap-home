@@ -11,6 +11,7 @@
 // is a navigation — the `fc` param walks the relying-app list (teardown above is idempotent).
 import { useEffect } from 'react';
 import { clearSsoCookie } from '../../src/lib/sso-cookie';
+import { endRecognition } from '../../src/lib/home-recognition';
 import { setFedcmLoginStatus, SESSION_KEY, forgetActingAsReturn } from '../../src/context/session';
 import { getClient, isAllowedRelyingOrigin } from '../../src/lib/oidc-clients';
 import { HOME_ORIGIN } from '../../src/lib/domain';
@@ -58,6 +59,7 @@ export default function LogoutPage() {
     }
     forgetActingAsReturn(); // the acting-as stash is the ended connection's, not the next person's
     clearSsoCookie(); // end the cross-subdomain `.impact-agent.me` SSO session
+    void endRecognition(); // and the HttpOnly recognition cookie, which only the server can end (spec 445)
     setFedcmLoginStatus('logged-out'); // FedCM: don't auto-recognize / show the chooser next time
     // This page tears the session down directly (not via session.signOut), so also drop the dApp
     // from MetaMask's "Connected sites" here (EIP-2255). Best-effort + silent; no-op for non-wallet.

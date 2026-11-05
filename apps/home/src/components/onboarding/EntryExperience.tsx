@@ -18,6 +18,7 @@ import { appRequestOf, rememberAppRequest } from '../../lib/app-request';
 import { EmailAuthCard } from '../portal/EmailAuthCard';
 import { PhoneAuthCard } from '../portal/PhoneAuthCard';
 import { readSsoCookie } from '../../lib/sso-cookie';
+import { askRemembered } from './remembered';
 import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName, parseAgentSubdomain } from '../../lib/domain';
 
 const googleEnabled = whitelabel.onboarding.credentialMethods.includes('google');
@@ -259,12 +260,23 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       return;
     }
     // OIDC prompt=none — SILENT SSO (spec 230): the relying app asked for a no-UI outcome, so never
-    // render the connect experience. No home session (no ap_sso cookie) → `login_required` (the app
-    // clears its silent-SSO hint and shows its own Connect button). A recognized session → still
-    // `interaction_required`: a silent grant here would mint a delegation without a consent gesture,
-    // and this broker keeps no per-client remembered-consent store (yet) to justify skipping it.
+    // render the connect experience. No home session → `login_required` (the app clears its silent-SSO
+    // hint and shows its own Connect button). A recognized session asks the server (spec 445 §6): for an
+    // app this person already allowed that asks for nothing more, a code, and nothing is signed. Anything
+    // else is `interaction_required`, because a sheet would have to be shown and none can be here.
     if (api.enroll.prompt === 'none') {
-      api.deliverError(readSsoCookie() ? 'interaction_required' : 'login_required');
+      const silent = api.enroll;
+      const sso = readSsoCookie();
+      if (!sso?.token) { api.deliverError('login_required'); return; }
+      void (async () => {
+        const person = (await fetchProfile(sso.token).catch(() => null))?.agent?.split(':').pop();
+        if (!person) { api.deliverError('login_required'); return; }
+        const asked = await askRemembered(silent, person as Address);
+        // A live session with no recognition cookie is still a session: a person the app should invite to connect, not
+        // one whose silent-SSO hint it should clear.
+        if (asked.kind === 'code') api.deliverCode(asked.code);
+        else api.deliverError('interaction_required');
+      })();
       return;
     }
     void (async () => {

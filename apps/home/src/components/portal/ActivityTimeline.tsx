@@ -12,6 +12,9 @@ import { List, Row, Panel, Mono, DayHeader, timeLabel, type PanelState } from '.
 import { InboxIcon } from './today-icons';
 import { useManagedAgents } from '../../components/portal/ManagedAgents';
 import { listControlEvents, toManagedAgentEntry } from '../../home/control-plane';
+import { listRememberedSignIns, type RememberedSignIn } from '../../lib/app-grants';
+import { displayAppName } from '../onboarding/org-chooser-label';
+import { knownRelyingClient } from '../../lib/relying-clients';
 import { AddressChip } from '../../components/shared/AddressChip';
 import { RunHistory } from './runs/RunHistory';
 
@@ -44,11 +47,14 @@ export function ActivityTimeline({ agent }: { agent?: string } = {}) {
   const { session, agentAddress } = useSession();
   const [events, setEvents] = useState<HomeControlEventV1[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [signIns, setSignIns] = useState<RememberedSignIn[]>([]);
   const { agents } = useManagedAgents(session?.token ?? null);
 
   useEffect(() => {
     if (!session) { setLoaded(true); return; }
     let cancelled = false;
+    // Spec 445 §7 — sign-ins that passed with no sheet. A read that fails leaves this panel out; the timeline stands.
+    if (!agent) void listRememberedSignIns(session.token).then((s) => { if (!cancelled) setSignIns(s); }).catch(() => undefined);
     void listControlEvents(session.token).then((e) => {
       if (!cancelled) { setEvents(e); setLoaded(true); }
     });
@@ -92,6 +98,18 @@ export function ActivityTimeline({ agent }: { agent?: string } = {}) {
           ))}
         </div>
       </Panel>
+
+      {signIns.length > 0 && (
+        <Panel title="Apps you signed in to" count={signIns.length} state="ready" aside={<span>apps you allowed before: nothing was signed and no permission changed</span>}>
+          <List>
+            {signIns.map((s) => (
+              <Row key={s.auditRef} title={`Signed in to ${displayAppName(knownRelyingClient(s.clientId)?.name, s.clientId)}. No new permission.`}
+                meta={<>audit <Mono>{s.auditRef.slice(0, 8)}</Mono></>}
+                side={<span className="ui-row-time" title={new Date(s.at).toLocaleString()}>{timeLabel(s.at)}</span>} />
+            ))}
+          </List>
+        </Panel>
+      )}
 
       {entries.length > 0 && (
         <Panel title="Managed agents" count={entries.length} state="ready" aside={<span>the portable <Mono>ManagedAgentEntryV1</Mono> rows any Home would render for your tree</span>}>
