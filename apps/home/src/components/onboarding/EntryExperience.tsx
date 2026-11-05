@@ -297,7 +297,10 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
         // Do NOT re-run this when `session`/`phase` later updates — that remounts
         // RecognizedEnroll and restarts Gather/demo connect in a loop.
         if (hasSessionHandoff() || readSsoCookie()) {
-          markEnrollChooserDone(api.enroll);
+          // An app that asked for the person to be asked (`prompt=login` / `select_account`) gets that: the recognized path
+          // ends this session and opens the chooser once. A handoff has just proved who this is, so it is already answered.
+          const reauth = api.enroll!.prompt === 'login' || api.enroll!.prompt === 'select_account';
+          if (hasSessionHandoff() || !reauth) markEnrollChooserDone(api.enroll);
           setView({ k: readSsoCookie() ? 'enroll-recognized' : 'checking' });
           return;
         }

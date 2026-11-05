@@ -50,7 +50,7 @@
     "tsx": "^4.22.4",
     "@agenticprimitives/ontology": "1.0.0-alpha.46",
     "viem": "2.52.2",
-    "@playwright/test": "^1.49.0",
+    "@playwright/test": "1.63.0",
     "@agenticprimitives/agent-account": "1.0.0-alpha.46",
     "@agenticprimitives/agent-naming": "1.0.0-alpha.46",
     "@agenticprimitives/agent-profile": "1.0.0-alpha.46",

@@ -77,6 +77,7 @@ test('sign-in: the picture says the arc is the next design, and the tiles link t
   expect(svg).toContain('THE NEXT DESIGN, LIVE IN SHADOW');
   expect(svg).not.toContain('PROPOSED');
   expect(svg).not.toContain('does not');
+  expect(svg).toContain('IN CHROME (FEDCM)');
   await page.goto('/architecture/sign-in');
   const picLinks = await page.locator('a[href^="#step-"]').count();
   expect(picLinks).toBeGreaterThanOrEqual(10);
