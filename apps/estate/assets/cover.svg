@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 460" width="600" height="460" role="img" aria-labelledby="t d">
+<title id="t">The estate and what every agent in it has</title>
+<desc id="d">Decorative.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#8b95b5"/></marker><marker id="b" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#8b95b5"/></marker><marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#f472b6"/></marker><marker id="bs" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#f472b6"/></marker>
+<style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#eef1fb}.h{font-size:30px;font-weight:700}.n{font-size:16px;font-weight:650}.t{font-size:13px;font-weight:600}.k{font-size:12px;font-weight:700}.s{font-size:13px;fill:#9aa5c7}.b{font-size:12px;font-weight:700;letter-spacing:.09em;fill:#9aa5c7}</style></defs>
+<ellipse cx="300" cy="230" rx="232" ry="170" fill="none" stroke="#3a4670" stroke-width="2" stroke-dasharray="6 8"/>
+<path d="M300 230L300 60" stroke="#3a4670" stroke-width="2"/>
+<path d="M300 230L464 110" stroke="#3a4670" stroke-width="2"/>
+<path d="M300 230L532 230" stroke="#3a4670" stroke-width="2"/>
+<path d="M300 230L464 350" stroke="#3a4670" stroke-width="2"/>
+<path d="M300 230L300 400" stroke="#3a4670" stroke-width="2"/>
+<path d="M300 230L136 350" stroke="#3a4670" stroke-width="2"/>
+<path d="M300 230L68 230" stroke="#3a4670" stroke-width="2"/>
+<path d="M300 230L136 110" stroke="#3a4670" stroke-width="2"/>
+<g>
+<rect x="268" y="28" width="64" height="64" rx="18" fill="#8b5cf6"/>
+<g transform="translate(283.36,43.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20c.8-4 3.8-6 7.5-6s6.7 2 7.5 6"/></g>
+<text x="300" y="116" text-anchor="middle" class="n"></text>
+</g>
+<g>
+<rect x="432" y="78" width="64" height="64" rx="18" fill="#22c55e"/>
+<g transform="translate(447.36,93.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M17.5 12v3.5M20.5 12v2.5"/></g>
+<text x="464" y="166" text-anchor="middle" class="n"></text>
+</g>
+<g>
+<rect x="500" y="198" width="64" height="64" rx="18" fill="#ef4444"/>
+<g transform="translate(515.36,213.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M7 20h10M5 7h14"/><path d="M5 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/><path d="M19 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/></g>
+<text x="532" y="286" text-anchor="middle" class="n"></text>
+</g>
+<g>
+<rect x="432" y="318" width="64" height="64" rx="18" fill="#6366f1"/>
+<g transform="translate(447.36,333.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="14" rx="2"/><circle cx="12" cy="11.5" r="3"/><path d="M12 8.5v-1M7 18.5v2M17 18.5v2"/></g>
+<text x="464" y="406" text-anchor="middle" class="n"></text>
+</g>
+<g>
+<rect x="268" y="368" width="64" height="64" rx="18" fill="#f59e0b"/>
+<g transform="translate(283.36,383.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h12v17l-2.4-1.6-2.4 1.6-2.4-1.6-2.4 1.6L6 20.5z"/><path d="M9 8.5h6M9 12h6M9 15.5h3.5"/></g>
+<text x="300" y="456" text-anchor="middle" class="n"></text>
+</g>
+<g>
+<rect x="104" y="318" width="64" height="64" rx="18" fill="#0ea5e9"/>
+<g transform="translate(119.36,333.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8" width="14" height="10.5" rx="3"/><path d="M12 8V4.5"/><circle cx="12" cy="3.8" r="1"/><circle cx="9.3" cy="13" r="1.2"/><circle cx="14.7" cy="13" r="1.2"/></g>
+<text x="136" y="406" text-anchor="middle" class="n"></text>
+</g>
+<g>
+<rect x="36" y="198" width="64" height="64" rx="18" fill="#3b82f6"/>
+<g transform="translate(51.36,213.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h10.5a2.5 2.5 0 0 1 2.5 2.5v12.5H7.5A2.5 2.5 0 0 1 5 17z"/><path d="M5 17a2.5 2.5 0 0 1 2.5-2.5H18"/><path d="M9 8.5h5.5"/></g>
+<text x="68" y="286" text-anchor="middle" class="n"></text>
+</g>
+<g>
+<rect x="104" y="78" width="64" height="64" rx="18" fill="#14b8a6"/>
+<g transform="translate(119.36,93.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.3"/><circle cx="18" cy="7" r="2.3"/><circle cx="12" cy="18" r="2.3"/><path d="M8.2 6.4l7.5.400M7.2 8l3.7 8M16.8 9l-3.7 7"/></g>
+<text x="136" y="166" text-anchor="middle" class="n"></text>
+</g>
+<g>
+<rect x="244" y="174" width="112" height="112" rx="18" fill="#f472b6"/>
+<g transform="translate(270.88,200.88) scale(2.4266666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 4.5l8 7"/><path d="M6.5 10v9.5h11V10"/><path d="M10 19.5v-5h4v5"/></g>
+<text x="300" y="310" text-anchor="middle" class="n"></text>
+</g>
+</svg>

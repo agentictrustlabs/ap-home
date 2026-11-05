@@ -4,6 +4,7 @@
 // session they hold, exactly as at the Home — this Worker adds no authority and takes none.
 import { fmtAgo, isStale, parseHeartbeat, tilesOf, type Heartbeat } from './model.js';
 import { page } from './html.js';
+import { architectureIndex, architecturePost, postCards } from './architecture.js';
 
 export interface Env {
   ASSETS: Fetcher;
@@ -75,9 +76,16 @@ export default {
       return relay(env, m[1]!, body);
     }
     if (path === '/' || path === '/connected' || path === '/waiting') {
-      return new Response(page({ id: env.ESTATE_ID, name: env.ESTATE_NAME, home: env.HOME_ORIGIN, view: path === '/waiting' ? 'waiting' : 'overview' }), {
+      return new Response(page({ id: env.ESTATE_ID, name: env.ESTATE_NAME, home: env.HOME_ORIGIN, view: path === '/waiting' ? 'waiting' : path === '/connected' ? 'connecting' : 'overview', cards: postCards(3) }), {
         headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
       });
+    }
+    // The architecture posts: public, static, written in this repository. A picture under /architecture/ is an asset.
+    const a = /^\/architecture(?:\/([a-z0-9-]*))?$/.exec(path);
+    if (a && (req.method === 'GET' || req.method === 'HEAD')) {
+      const input = { name: env.ESTATE_NAME, origin: env.PUBLIC_ORIGIN };
+      const html = a[1] ? architecturePost(input, a[1]) : architectureIndex(input);
+      if (html) return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=300' } });
     }
     return env.ASSETS.fetch(req);
   },
