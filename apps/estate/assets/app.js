@@ -13,8 +13,11 @@ const h = (tag, attrs = {}, ...kids) => {
   return e;
 };
 const show = (...kids) => main.replaceChildren(...kids);
-const read = () => { try { const c = JSON.parse(sessionStorage.getItem(KEY) ?? 'null'); return c?.token ? c : null; } catch { return null; } };
-const write = (c) => { try { c ? sessionStorage.setItem(KEY, JSON.stringify(c)) : sessionStorage.removeItem(KEY); } catch { /* no storage: unconnected */ } };
+// A session from before a Home sign-out (sso-logout.js, in any tab) is over.
+const signedOutAt = () => { try { return Number(localStorage.getItem('estate.signed-out')) || 0; } catch { return 0; } };
+const read = () => { try { const c = JSON.parse(sessionStorage.getItem(KEY) ?? 'null'); if (!c?.token) return null; if ((c.at ?? 0) < signedOutAt()) { sessionStorage.removeItem(KEY); return null; } return c; } catch { return null; } };
+const write = (c) => { try { c ? sessionStorage.setItem(KEY, JSON.stringify({ at: Date.now(), ...c })) : sessionStorage.removeItem(KEY); } catch { /* blocked */ } };
+window.addEventListener('storage', (e) => { if (e.key === 'estate.signed-out') { write(null); location.reload(); } });
 const b64url = (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const claims = (jwt) => { try { return JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch { return {}; } };
 

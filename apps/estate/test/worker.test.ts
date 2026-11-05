@@ -102,6 +102,15 @@ describe('the architecture posts', () => {
   });
 });
 
+describe('a Home\'s sign-out', () => {
+  it('passes through a page of this site, which names the Home it may return to', async () => {
+    const res = await worker.fetch(new Request('https://faithnet.estate/sso-logout?return=x'), env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(await res.text()).toContain('<script src="/sso-logout.js" data-home="https://www.faithnet.me">');
+  });
+});
+
 describe('who sees what', () => {
   const get = async (path: string) => (await worker.fetch(new Request(`https://faithnet.estate${path}`), env)).text();
   const links = (html: string) => [...html.slice(html.indexOf('<nav>'), html.indexOf('</nav>')).matchAll(/<a href="([^"]+)"( data-auth)?/g)].map((m) => `${m[1]}${m[2] ? ' (signed in)' : ''}`);

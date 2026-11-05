@@ -57,6 +57,10 @@ said(X.rec + 32, 378, 'A NEW APP, ALREADY SIGNED IN', ['the Home session is foun
 out.push(`<text x="1046" y="282" text-anchor="start" class="b">IN CHROME (FEDCM)</text>`);
 note(1046, 302, ['Nothing new is signed. You get', 'the wire from your last Allow,', 'or this same flow in a popup,', 'with the sheet.'], { anchor: 'start' });
 
+// signing out: what reaches every app, and what only some can take part in
+out.push(`<text x="40" y="852" text-anchor="start" class="b">SIGNING OUT</text>`);
+note(40, 872, ['Ends the Home session and every', "app's silent renewal, then walks", 'the apps with a sign-out page.', 'A token an app already holds', 'lasts until it expires.'], { anchor: 'start' });
+
 // what happens today, said where the eye lands first
 out.push(`<text x="104" y="262" text-anchor="start" class="b">TODAY</text>`);
 note(104, 282, ['Every trip to the Home still ends', 'at the Allow sheet. The Home now', 'looks up whether you allowed this', 'app before, and only records the answer.'], { anchor: 'start' });
