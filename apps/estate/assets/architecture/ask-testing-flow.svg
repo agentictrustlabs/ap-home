@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1460 930" width="1460" height="930" role="img" aria-labelledby="t d">
 <title id="t">How we test the Scripture Agent's answers</title>
-<desc id="d">Questions are drawn from a large library of articles across every category. Clearly denominational questions are set aside for a later test. A key is built from each article. Today's path and the path with skills answer. A judge compares them blind, in both orders, with the article and two other products as contestants; planted errors and a noise control test the judge. A second model family confirms any claimed error. Answers are scored against the key, real errors are remembered, and a scorecard per skill says what to change next.</desc>
+<desc id="d">Questions are drawn from a large library of articles across every category. Clearly denominational questions are set aside for a later test. A key is built from each article. Today's path and the path with skills answer. A judge compares them blind, in both orders, on one question only: did it answer what was asked. The article and two other products are contestants; planted errors and a noise control test the judge. Accuracy is checked separately, against the article and the verses, and a second model family confirms claimed errors. The verses and writings each answer links to are graded on their own. Real errors are remembered, and a scorecard per skill says what to change next.</desc>
 <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#8b95b5"/></marker><marker id="b" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#8b95b5"/></marker><marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#f472b6"/></marker><marker id="bs" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#f472b6"/></marker><marker id="m0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#a855f7"/></marker><marker id="m0s" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#a855f7"/></marker>
 <style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#eef1fb}.h{font-size:30px;font-weight:700}.n{font-size:16px;font-weight:650}.t{font-size:13px;font-weight:600}.k{font-size:12px;font-weight:700}.s{font-size:13px;fill:#9aa5c7}.b{font-size:12px;font-weight:700;letter-spacing:.09em;fill:#9aa5c7}</style></defs>
 <rect width="1460" height="930" rx="22" fill="#0b1020"/>
 <text x="40" y="52" class="h">How we test the Scripture Agent's answers</text>
-<text x="40" y="78" class="s" text-anchor="start">Blind, in both orders, under one neutral standard. A judge's claim of an error counts only once it is confirmed. Being built: the pilot is running.</text>
+<text x="40" y="78" class="s" text-anchor="start">Blind, in both orders, under one neutral standard. A judge's claim of an error counts only once it is confirmed. The 300-question run is under way.</text>
 <path d="M112 400H144" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
 <path d="M228 400H260" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
 <path d="M344 400H376" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
@@ -54,22 +54,22 @@
 <rect x="640" y="368" width="64" height="64" rx="18" fill="#ef4444"/>
 <g transform="translate(655.36,383.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M7 20h10M5 7h14"/><path d="M5 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/><path d="M19 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/></g>
 <circle cx="643" cy="371" r="11" fill="#0b1020" stroke="#ef4444" stroke-width="2"/><text x="643" y="375" text-anchor="middle" class="k">5</text>
-<text x="672" y="456" text-anchor="middle" class="n">Judge</text>
-<text x="672" y="475" text-anchor="middle" class="s">blind, both orders</text>
+<text x="672" y="456" text-anchor="middle" class="n">Answering</text>
+<text x="672" y="475" text-anchor="middle" class="s">did it answer?</text>
 </g>
 <g>
 <rect x="756" y="368" width="64" height="64" rx="18" fill="#22c55e"/>
 <g transform="translate(771.36,383.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 7.8-7.5 9.5-4.3-1.7-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></g>
 <circle cx="759" cy="371" r="11" fill="#0b1020" stroke="#22c55e" stroke-width="2"/><text x="759" y="375" text-anchor="middle" class="k">6</text>
-<text x="788" y="456" text-anchor="middle" class="n">Confirm</text>
-<text x="788" y="475" text-anchor="middle" class="s">second family</text>
+<text x="788" y="456" text-anchor="middle" class="n">Accuracy</text>
+<text x="788" y="475" text-anchor="middle" class="s">errors, confirmed</text>
 </g>
 <g>
 <rect x="872" y="368" width="64" height="64" rx="18" fill="#0ea5e9"/>
 <g transform="translate(887.36,383.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.6"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></g>
 <circle cx="875" cy="371" r="11" fill="#0b1020" stroke="#0ea5e9" stroke-width="2"/><text x="875" y="375" text-anchor="middle" class="k">7</text>
-<text x="904" y="456" text-anchor="middle" class="n">Score</text>
-<text x="904" y="475" text-anchor="middle" class="s">against the key</text>
+<text x="904" y="456" text-anchor="middle" class="n">Links</text>
+<text x="904" y="475" text-anchor="middle" class="s">verses and writings</text>
 </g>
 <g>
 <rect x="998" y="368" width="64" height="64" rx="18" fill="#a855f7"/>
