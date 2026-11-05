@@ -22,7 +22,7 @@ export interface Step {
   why: string;
   what: string[];
   where: string[];
-  /** a model, or code */
+  /** a model, or code; or, in a flow with no model, who acts */
   by: string;
   reads: string[];
   leaves: string[];
@@ -39,6 +39,8 @@ export interface Post {
   picture: { svg: string; png: string; alt: string; width: number; height: number; caption: string };
   /** A flow post lists its steps beside the picture. An article has none: it is prose under its picture. */
   steps?: Step[];
+  /** The heading over each step's `by` line. The harness posts ask "a model, or code"; a flow with no model asks who acts. */
+  byHeading?: string;
   body: string;
 }
 
@@ -403,6 +405,31 @@ const SCRIPTURE_BODY = `
 <li><b>Its body, to write.</b> The writer reads the plan's instructions alongside its own rules.</li>
 </ul>
 
+<h2>The categories of skills that drive it</h2>
+<p>As of 5 November 2026, two kinds of skill shape live answers: the method for a verse, and one answer plan. The rest of the table is built and in testing. It is not live and not yet in the registry. It moves the judge to the front of the flow, so that what the reader is asking decides what is gathered and how the answer is written.</p>
+<figure class="picture"><a href="/architecture/scripture-intent-flow.svg"><img src="/architecture/scripture-intent-flow.svg" width="1460" height="990" alt="The Scripture ask as it is being built. A question goes through admission to a judge, which picks one of twelve intents or holds. An intent names a scope, which drives planning, gathering and the gate, and a form, which drives the draft. The reader's stated context adds a standpoint and a reader skill to the draft by rule; a people-group skill is reserved and not built. A model drafts, code proves every verse, and the answer returns with a receipt. Skills come from the registry through a pinned playbook."></a>
+<figcaption>The design in testing. It is not what answers readers today; the picture at the top of this page is. Pink arrows are skills. Dashed pink arrows show which stages each skill drives.</figcaption></figure>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Category</th><th>What it decides</th><th>Chosen by</th><th>Drives</th><th>How many</th><th>State</th></tr></thead>
+<tbody>
+<tr><td><b>Ask skill</b></td><td>The method for one kind of question</td><td>A rule: a verse is open</td><td>The verse companion</td><td>9; only the verse skill drives live answers</td><td>Live</td></tr>
+<tr><td><b>Answer plan</b></td><td>Which writings the writer may see, and how to answer</td><td>The judge</td><td>Gate, Draft</td><td>1: a person, body or event after the Bible</td><td>Live</td></tr>
+<tr><td><b>Intent</b></td><td>What the reader is asking for. This is the card the judge reads, and it names one scope and one form</td><td>The judge</td><td>Selects the scope and the form</td><td>12</td><td>In testing</td></tr>
+<tr><td><b>Scope</b></td><td>What the question is about, so what is gathered and what the writer may rely on</td><td>The intent, with the rule applied to the scope</td><td>Gather, Gate, Draft</td><td>7: a verse or passage, a book, a subject in the Bible, a word, a topic, outside the Bible, this agent</td><td>In testing</td></tr>
+<tr><td><b>Form</b></td><td>The shape of the answer</td><td>The intent, or the scope's default when no form clearly leads</td><td>Draft, answer checks</td><td>10: exposition, survey, profile, definition, teaching, counsel, reasoned case, verse list, describe and weigh, agent record</td><td>In testing</td></tr>
+<tr><td><b>Reader</b></td><td>How the answer is told. It changes the telling, never the teaching</td><td>A rule, from what the reader's context states</td><td>Draft</td><td>11: eight faith-journey roles and three age bands</td><td>In testing</td></tr>
+<tr><td><b>Standpoint</b></td><td>Whose reading leads, when the reader states a tradition</td><td>A rule, and only for a tradition whose standards the library holds</td><td>Draft</td><td>2: Reformed, Reformed Baptist</td><td>In testing</td></tr>
+<tr><td><b>People group</b></td><td>The people the reader belongs to or serves</td><td>A rule, from a stable id and never a bare name</td><td>To be decided</td><td>None</td><td>Reserved, not built</td></tr>
+</tbody></table></div>
+<p>Four things hold across these categories:</p>
+<ul>
+<li><b>They compose.</b> One question gets one scope and one form, and the reader's context may add a reader and a standpoint. About forty documents cover the range, with no skill per subject or per doctrine.</li>
+<li><b>Scripture comes first.</b> Five scopes are about the Bible itself, and they are built first. The other two take questions from around it and bring them back to Scripture, with no new source or stage.</li>
+<li><b>Context is stated, never guessed.</b> Nothing about the reader is inferred from how a question is worded, and a tradition the library holds no standards for is not presented as served.</li>
+<li><b>Each one earns its place.</b> A category in testing changes answers only after it beats today's answer in blind comparison by two model families, and then only at the exact version pinned. Until then its choice is only recorded, and a question the judge is unsure of runs today's path.</li>
+</ul>
+<p>No skill in any category can switch off the proof or change the edition.</p>
+
 <h2>Three rules that hold it together</h2>
 <ul>
 <li><b>The model drafts. Code proves.</b> A model chooses words. It never decides what a verse says.</li>
@@ -510,7 +537,343 @@ const SUBSTRATE_BODY = `
 <li><a href="https://agenticprimitives.dev">Agentic Primitives</a>: the substrate.</li>
 </ul>`;
 
+// ───────────────────────────────────────────────────────────────── sign-in at the Home (ap-home apps/home)
+
+const SIGNIN_ALT =
+  'A flow diagram. An app asks the Home to sign a person in. The Home checks the app against its registry and looks for a Home session. ' +
+  'Without a session the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation the ' +
+  'person signs, its check on chain, a record with a single-use code, and the code exchanged for an id_token. Three arcs run above the row. ' +
+  'A new app for a person already signed in goes from Recognize to Allow. An app that still holds its delegation goes straight to Token. ' +
+  'A proposed path, not built, would go from Recognize to Verify, with no sheet and no new signature.';
+
+const HOME_PAGES = "The Home's pages, in the person's browser. The Home is a Next.js app (<code>apps/home</code>) at <code>www.faithnet.me</code>.";
+const HOME_SERVER = "The Home's server (<code>apps/home/server</code>). Tickets, codes and rows are kept in its key-value store, <code>AUTH_CODES</code>.";
+
+const SIGNIN_STEPS: Step[] = [
+  {
+    id: 'ask', name: 'Ask', color: '#8b5cf6', at: [191, 520],
+    summary: 'The app sends the person to their Home with a PKCE request.',
+    why: 'An app never sees a credential. It asks the Home to sign the person in and waits for a code. The request carries a PKCE challenge so that only the tab that asked can finish, even if the code is seen on the way back.',
+    what: [
+      'The app makes a random verifier, keeps it, and sends its SHA-256 as the challenge. It opens the Home, in a popup or as a full page, at <code>/?client_id=…&amp;redirect_uri=…&amp;response_type=code&amp;code_challenge=…&amp;code_challenge_method=S256&amp;state=…&amp;delegation_template=site-login</code>.',
+      'Optional parts: <code>agent_name</code> pins the request to one named Home, <code>nonce</code> is echoed in the id_token, <code>session_key</code> asks for a session leaf, and <code>prompt</code> changes how the Home treats an existing session.',
+      'The Home copies the request into its own storage for twenty minutes, so it survives a trip out to Google or an email link and back.',
+    ],
+    where: ["The app's own page. On this site that is <code>apps/estate/assets/app.js</code> (<code>signIn</code>).", 'The Home reads the request in <code>src/components/onboarding/useEnrollReq.ts</code> (<code>parseEnrollReq</code>).'],
+    by: 'The app starts it. The person has done nothing yet but press Sign in.',
+    reads: ['Nothing at the Home yet.'],
+    leaves: ["The verifier and <code>state</code>, in the app's storage.", "The request, in the Home's <code>sessionStorage</code> and a short <code>ap_pending_enroll</code> cookie."],
+    stops: [
+      'A request without a client, a redirect, a challenge and a template is not a sign-in request. The Home shows its own front door.',
+      'Only the code flow and only S256 are read. Anything else is ignored.',
+      '<code>prompt=none</code> never shows a page. The Home answers <code>login_required</code> when there is no session and <code>interaction_required</code> when there is one. It does not sign anyone in this way today.',
+    ],
+  },
+  {
+    id: 'check', name: 'Check', color: '#3b82f6', at: [309, 520],
+    summary: 'Is this app registered, and may it ask for this?',
+    why: 'Everything in the request is written by the app, so none of it can be trusted to say who the app is. The registry is the one place that says which origins an app may return to, which permissions it may ask for, and which key its delegations go to.',
+    what: [
+      "The Home looks the client up in its registry. An estate's own apps are in the white-label config. An app a member registered is looked up once at <code>/connect/client-info</code>.",
+      "The redirect must match a registered one exactly, and its origin must be on the Home's list of relying origins. The template must be one the app is allowed.",
+      'The name and logo on the consent sheet come from the registry. The <code>delegate</code> in the URL is only a hint: the server takes the delegate from the registry and ignores the one that was sent.',
+    ],
+    where: [HOME_PAGES, 'Source: <code>src/lib/oidc-clients.ts</code>, <code>src/whitelabel/config.ts</code> (<code>relyingApps</code>).', 'The server checks again at <code>/oidc/authorize-grant</code> and at <code>/token</code> (<code>server/_lib/oidc-registry.ts</code>).'],
+    by: 'Code only.',
+    reads: ["The app's registry entry: redirects, allowed templates, delegate keys, the claims it may receive, its session lifetime."],
+    leaves: ['Nothing. It is a gate.'],
+    stops: ['An unknown client or an unlisted origin gets the page "Request blocked". Nothing is sent back to the app.'],
+  },
+  {
+    id: 'recognize', name: 'Recognize', color: '#14b8a6', at: [428, 520],
+    summary: 'Is this person already signed in at the Home?',
+    why: 'This step is single sign-on. A person who proved who they are at the Home once should not prove it again for every app. What they should still decide is whether this app gets in.',
+    what: [
+      "The Home looks for its own session: a token it signed for this person, kept in the Home's <code>localStorage</code> and mirrored in the <code>ap_sso</code> cookie on the Home's parent domain, so every host of the Home sees it. The token lasts one hour. The cookie that carries it lasts thirty days, so after the hour the cookie is still there and no longer works.",
+      "The token is tried by reading the person's profile with it. It must name an account that is deployed. If the request pinned a name, the session must be that name.",
+      'With a session, the person goes straight to Allow. A passkey only works on the host it was made for, so a passkey person is first moved to their own subdomain of the Home, with the request carried along.',
+      'Without a session, the person goes to Prove.',
+      'This step does not ask whether the person has allowed this app before. Nothing in sign-in asks that.',
+    ],
+    where: [HOME_PAGES, 'Source: <code>EntryExperience.tsx</code> (the routing), <code>RecognizedEnroll.tsx</code> (the recognized path), <code>src/lib/sso-cookie.ts</code>, <code>src/context/session.tsx</code>.'],
+    by: 'Code only.',
+    reads: ['The <code>ap_sso</code> cookie.', "The person's profile, read with the token inside it."],
+    leaves: ['The person and how they sign (server-held key, passkey or wallet), for the steps after.'],
+    stops: ['A missing, expired or mismatched session is not an error. It falls to Prove, the one fallback.'],
+  },
+  {
+    id: 'prove', name: 'Prove', color: '#ef4444', at: [547, 520],
+    summary: 'The person proves who they are with one credential.',
+    why: 'Someone has to establish who is at the keyboard, and it should happen in one place. The Home is that place, so an app never handles a password, a code or a key.',
+    what: [
+      'The Home shows its sign-in methods. The app may narrow which ones are offered, for display only.',
+      "Social (Google, YouVersion) is a full-page trip to the provider and back. The Home restores the app's request from where it was put aside in step 1.",
+      'Email and phone send a one-time code.',
+      "A passkey is made and used on the person's own subdomain of the Home, so a new passkey person chooses a name first.",
+      'A wallet signs a sign-in message.',
+      'Any of these ends the same way: the Home signs a session token, stores it, writes the <code>ap_sso</code> cookie, and tells the browser the person is signed in here.',
+    ],
+    where: [HOME_PAGES, 'Source: <code>EntryExperience.tsx</code> (<code>CredentialFirstStart</code>), <code>GoogleEnrollResume.tsx</code> (the return from a provider), <code>src/home/onboarding.ts</code>.', 'The provider legs and the code checks run on the server (<code>server/oidc/google</code>, <code>server/connect/email-verify.ts</code>, <code>phone-verify.ts</code>, <code>passkey.ts</code>, <code>siwe.ts</code>).'],
+    by: 'The person, with their credential.',
+    reads: ["The credential, checked by the Home's server or by the provider."],
+    leaves: ["The Home session: in the Home's <code>localStorage</code>, and in the <code>ap_sso</code> cookie. The token is good for one hour."],
+    stops: [
+      'A failed code, a cancelled provider trip or a refused wallet signature leaves the person on the sign-in page.',
+      'A Google account that already opens a different Home than the one the request named is explained, not connected.',
+    ],
+  },
+  {
+    id: 'home', name: 'Make a Home', color: '#f59e0b', at: [666, 520],
+    summary: 'First time only: the person gets an account of their own.',
+    why: 'What an app receives is a delegation from an account the person controls. That account, a smart account on the chain, has to exist before it can sign anything.',
+    what: [
+      'For a person with an account already, this step does nothing.',
+      'For a new social, email or phone person, the Home deploys an account with no name. The key is held for them on the server, so there is no prompt. They can claim a name later.',
+      'For a new passkey person, the account is made with the name they chose, and that one approval both founds the Home and registers the name. A wallet person can take a name or go without.',
+      'If the app declared what its new members need, such as a name on their profile or a money account, that is set up here, before the sheet.',
+    ],
+    where: [HOME_PAGES, 'Source: <code>src/home/onboarding.ts</code> (<code>secureHomeNoName</code>, <code>secureHome</code>), <code>NewMemberSetup.tsx</code>, <code>OnboardingJourney.tsx</code>.', 'The account is deployed on faithchain.'],
+    by: 'Code, signing with the credential from Prove.',
+    reads: ["The app's registry entry, for what a new member needs."],
+    leaves: ["The person's account on chain: their agent."],
+    stops: ['A deploy that fails is said on the page, and the person can try again. Nothing is sent to the app.', 'A name that was reserved but never finished is refused, with a way to pick another.'],
+  },
+  {
+    id: 'allow', name: 'Allow', color: '#eab308', at: [784, 520],
+    summary: 'The sheet: allow this app, or not now.',
+    why: 'Knowing who a person is does not say what an app may do as them. That is a separate decision and it is the person\'s. The sheet is where they make it, with the terms in front of them.',
+    what: [
+      'The sheet names who is signed in, then the app by its registered name, domain and logo.',
+      'It lists what the app can do and what it cannot, from the permission template. For a plain sign-in: sign in as you and read your profile, and never move funds, add sign-in methods or change recovery.',
+      'It adds a line for anything else the registry lets this app receive: a name, an email, the right to ask your agent as you.',
+      'Allow goes on to Sign. Not now sends the app a refusal. A third link lets a different person sign in.',
+      'The sheet is shown on every trip to the Home that gets this far. A first sign-in, a new app, and the same app for the tenth time all see it. Why, and what would change it, is <a href="#pauls-points">answered at the bottom of the page</a>.',
+    ],
+    where: [HOME_PAGES, 'Source: <code>RecognizedEnroll.tsx</code>, <code>src/components/shared/ConsentSheet.tsx</code>, with the lines in <code>src/whitelabel/config.ts</code> (<code>delegationTemplates</code>).'],
+    by: 'The person decides.',
+    reads: ['The permission template.', "The app's registry entry."],
+    leaves: ['Nothing until Allow is pressed.'],
+    stops: ['Not now returns <code>enroll_error=denied</code> to the app, or closes the popup with a cancel message.'],
+  },
+  {
+    id: 'sign', name: 'Sign', color: '#22c55e', at: [903, 520],
+    summary: 'The person signs a delegation to the app\'s registered key.',
+    why: 'The app should hold something narrow, dated and revocable, signed by the person, and never the person\'s credential. A delegation is that: what one key may do as this account, until when.',
+    what: [
+      'The page first asks the server for a ticket: <code>POST /oidc/authorize-grant</code>. The server binds the client, redirect, PKCE challenge, nonce, template and the delegate from the registry under a random id, for ten minutes and one use.',
+      "The page builds the site delegation, from the person's account to that delegate, and approves its digest on chain in one sponsored operation. A server-held key signs with no prompt. A wallet prompts. A passkey asks for one touch.",
+      'Other wires are signed in the same ceremony when the registry declares them: an ask-as-me wire (30 days), a session-key leaf, a grant on the person\'s own vault, a capped payment mandate.',
+      'A bare site delegation that this browser already made for the same person and delegate is reused, with no new signature. That holds only in the same browser, only when nothing else rides along, and never in the delegation\'s last thirty days.',
+    ],
+    where: [HOME_PAGES, 'Source: <code>src/home/onboarding.ts</code> (<code>givePermission</code>), <code>src/lib/delegation.ts</code>, <code>src/lib/grant-cache.ts</code>.', 'The ticket: <code>server/oidc/authorize-grant.ts</code>.'],
+    by: 'The person\'s credential signs. Code builds what is signed.',
+    reads: ['The ticket and the delegate it names.', 'The standing delegation in this browser, if there is one.'],
+    leaves: ['A delegation whose digest is approved on chain.', "A copy in the Home's <code>localStorage</code>, for reuse in this browser."],
+    stops: ['The ticket is refused when it is not asked from the Home\'s own origin, or when the client, redirect or template is not registered.', 'A refused prompt or a failed approval stops here and is said on the page.'],
+  },
+  {
+    id: 'verify', name: 'Verify', color: '#0ea5e9', at: [1022, 520],
+    summary: 'The server proves the delegation on chain.',
+    why: 'The page is the person\'s browser, and a browser can be made to say anything. So the server takes nothing on trust: it checks the delegation against the chain and against the ticket it issued.',
+    what: [
+      'The page sends the ticket id and the delegation to <code>POST /oidc/grant</code>. The ticket is read and deleted, so it works once.',
+      "The delegation's delegate must be the one the registry named when the ticket was made.",
+      "The signature is checked against the person's account on chain (ERC-1271). The delegation must not be revoked and must be inside its dates. If the chain cannot be read, the answer is no.",
+      'Every extra wire is proved on its own, against its own signer.',
+    ],
+    where: [HOME_SERVER, 'Source: <code>server/oidc/grant.ts</code>, <code>server/_lib/verify-delegation.ts</code>, deciding with <code>verifyLiveDelegation</code> from <code>@agenticprimitives/delegation</code>.'],
+    by: 'Code only.',
+    reads: ['The ticket.', "The chain: the account's signature check and the revocation registry."],
+    leaves: ["The delegation's digest, used as a key in the next step."],
+    stops: [
+      '<code>403</code> when the call does not come from the Home\'s own origin.',
+      '<code>400</code> for a ticket that is unknown or already used.',
+      '<code>401</code> when the delegate does not match or a proof fails.',
+      'A reused delegation that is refused is dropped from the browser, and a fresh one is signed, once.',
+    ],
+  },
+  {
+    id: 'record', name: 'Record', color: '#6366f1', at: [1140, 520],
+    summary: 'An id_token is minted, a row is written, a code goes back.',
+    why: 'The token must never travel in a URL, and the app that asked must be the only one able to collect it. So the Home keeps the answer and hands back a code that is good once, for five minutes, to the holder of the PKCE verifier.',
+    what: [
+      'Still inside <code>/oidc/grant</code>. The server mints the id_token: issued by the Home, about the person\'s account, for this client, with the nonce and whatever name or email the registry permits.',
+      "It binds the delegation's digest to this client (<code>oidc-deleg:&lt;digest&gt;</code>), so the delegation can renew a session for this app and no other.",
+      'It writes the Allow as a row under the person (<code>app-grants:&lt;person&gt;</code>): the client, the template, the delegate, the delegation and the time. A newer Allow for the same app replaces the row.',
+      'It puts the whole answer under a single-use code and returns the code to the page.',
+      "The page makes sure the person's vault key is bound, refreshes the session cookie, and delivers the code: a message to the app's exact origin from a popup, or a redirect with <code>?code</code> and <code>state</code>.",
+    ],
+    where: [HOME_SERVER, 'Source: <code>server/oidc/grant.ts</code>. Delivery: <code>useEnrollReq.ts</code> (<code>deliverEnrollCode</code>).'],
+    by: 'Code only.',
+    reads: ['The ticket, for the client, the nonce and the PKCE challenge.'],
+    leaves: [
+      'A binding from the delegation to the client. It lasts as long as an id_token.',
+      'A row for this Allow. The Connected Apps page lists it and revokes from it. Sign-in does not read it.',
+      'A code, for five minutes and one use.',
+    ],
+    stops: ['Nothing new can stop here. Every refusal is in Verify.'],
+  },
+  {
+    id: 'token', name: 'Token', color: '#3b82f6', at: [1259, 520],
+    summary: 'The app trades the code, or a delegation it holds, for an id_token.',
+    why: 'The app gets two things and they do different work. The id_token says who the person is. The delegation says what the app may do as them. Keeping them apart is what lets the delegation renew the session later without a page.',
+    what: [
+      'After a trip to the Home: the app posts the code, its PKCE verifier, its client id and its redirect to <code>/token</code>. The code is deleted as it is read. The client and redirect must match, and the verifier must hash to the challenge.',
+      "The answer is the id_token, the delegation, and any extra wires. Whoever relies on the token checks it against the Home's published keys.",
+      'Coming back: the app posts <code>grant_type: delegation</code> with the delegation it kept. The server checks that the delegate is the app\'s registered one, proves the delegation on chain again, and looks for the binding made in step 9. Then it mints a fresh id_token and renews the binding. No page is shown.',
+      'An id_token lasts seven days unless the estate or the app\'s registration says otherwise.',
+    ],
+    where: [HOME_SERVER, 'Source: <code>server/token.ts</code>, <code>server/_lib/session-ttl.ts</code>.', "The app's side on this site: <code>apps/estate/assets/app.js</code> (<code>finishSignIn</code>)."],
+    by: 'Code only.',
+    reads: ['The code, or the binding for the presented delegation.', 'The chain, for a delegation.'],
+    leaves: ["In the app's own storage: the id_token and the delegation."],
+    stops: [
+      '<code>400</code> for a code that is unknown, used, or presented with the wrong client, redirect or verifier.',
+      '<code>401</code> "re-enroll required" when a presented delegation has no binding here, or was issued for another client. The app must send the person to the Home again.',
+    ],
+  },
+];
+
+const SIGNIN_BODY = `
+<h2>Two things come back, not one</h2>
+<p>A sign-in at the Home returns an <b>id_token</b> and a <b>delegation</b>. The id_token is identity: the Home's signed statement of who this person is, for this app, for a few days. The delegation is authority: the person's own signed statement of what this app's key may do as them, until a date, revocable on chain. The Home issues the first. Only the person can issue the second.</p>
+<p>The row in the picture is the first sign-in, every step. The three arcs above it are the other visits. Each one skips what it does not need.</p>
+<p class="callout"><b>From review.</b> Paul's points on remembered consent are quoted and answered one by one at the bottom of this page: <a href="#pauls-points">Paul's points, answered</a>.</p>
+
+<h2>First time in</h2>
+<p>A person who has never used the estate presses Sign in at an app.</p>
+<ul>
+<li><b>The app asks</b> (1). It sends the person to the Home with a PKCE challenge and keeps the verifier.</li>
+<li><b>The Home checks the app</b> (2) against its registry, and finds <b>no session</b> (3).</li>
+<li><b>The person proves who they are</b> (4) with Google, YouVersion, an email or phone code, a passkey or a wallet. The Home now has a session for them, good for one hour.</li>
+<li><b>The Home makes their account</b> (5): a smart account on the chain that is theirs. This happens once in a person's life at the estate.</li>
+<li><b>The sheet asks</b> (6): allow this app? It lists what the app can and cannot do.</li>
+<li><b>The person signs</b> a delegation to the app's registered key (7), and <b>the server proves it</b> on chain (8).</li>
+<li><b>The Home records the Allow</b> and hands back a single-use code (9), which <b>the app trades</b> for the id_token and the delegation (10).</li>
+</ul>
+<p>How many prompts that is depends on the credential. A person whose key the Home holds for them (social, email, phone) sees the sheet and presses Allow. A wallet or passkey person also approves on their device.</p>
+
+<h2>A new app, already signed in</h2>
+<p>This is single sign-on, the green arc. The person signed in at the Home for one app and, within the hour, opens another.</p>
+<ul>
+<li>Steps 1 and 2 are the same.</li>
+<li>At step 3 the Home finds its session in the <code>ap_sso</code> cookie. The cookie sits on the Home's parent domain, so it is there whichever host of the Home the request lands on.</li>
+<li>Steps 4 and 5 are skipped. No credential is asked. No account is made.</li>
+<li>The sheet (6) is shown, because this app has never been allowed. Then steps 7 to 10 as before.</li>
+</ul>
+<p>The session carries identity from one app to the next. It carries no authority. Each app gets its own delegation, to its own registered key.</p>
+
+<h2>Coming back to an app</h2>
+<p>What happens depends on what the app still holds.</p>
+<ul>
+<li><b>A live id_token.</b> Nothing happens at the Home. The app is signed in until the token lapses. How long the app keeps it is the app's choice: this site keeps its session in one tab, so a new tab starts over.</li>
+<li><b>A lapsed token and the delegation.</b> The blue arc. The app posts the delegation to <code>/token</code>. The Home proves it on chain, finds the binding from the last Allow, and answers with a fresh id_token. No page, no prompt. Each renewal also renews the binding, so an app that comes back within one token lifetime can go on for as long as the delegation lives.</li>
+<li><b>Nothing it can use.</b> The storage was cleared, it is another device, or the binding lapsed because the app stayed away longer than one token lifetime. The app sends the person to the Home. If the person proved a credential at the Home within the last hour, the session is still good and steps 4 and 5 are skipped. Otherwise they prove it again. Either way the sheet is shown again, for an app the person already allowed.</li>
+</ul>
+<p>That last visit is the one that feels wrong. It is what Paul raised in review, and his points are <a href="#pauls-points">answered at the bottom of this page</a>.</p>
+
+<h2>In Chrome: the browser's own chooser</h2>
+<p>Where the browser supports FedCM, an app can ask the browser itself. The browser shows its own account chooser, reads the same Home session, and collects a thin id_token from <code>/fedcm/assertion</code>. The app then asks <code>/fedcm/grant</code> for the delegation. For a person whose key the Home holds, the server has a site delegation signed with no further prompt: choosing the account in the browser's chooser was the gesture. For a passkey or wallet person the server cannot sign, so the app falls back to the popup and the flow in the picture. FedCM is another way to reach the same two things. It adds no authority of its own.</p>
+
+<h2>What is remembered, and where</h2>
+<ul>
+<li><b>The Home session.</b> The Home's <code>localStorage</code> and the <code>ap_sso</code> cookie. The token lasts one hour and nothing renews it. The cookie that carries it lasts thirty days, so recognition lasts the hour, not the month. Read by Recognize and by FedCM. It is written and read by page script.</li>
+<li><b>The request.</b> The Home's <code>sessionStorage</code> and a cookie, twenty minutes. Only so a provider trip can return to it.</li>
+<li><b>The ticket.</b> Server, ten minutes, one use.</li>
+<li><b>The code.</b> Server, five minutes, one use.</li>
+<li><b>The binding</b> from a delegation to its client. Server, one token lifetime, renewed by each silent renewal. Read by <code>/token</code>.</li>
+<li><b>The row for an Allow.</b> Server, under the person, the newest row for each app. Read by the Connected Apps page and by credential rotation. Not read by sign-in.</li>
+<li><b>The standing delegation.</b> The Home's <code>localStorage</code> in one browser, keyed by person and delegate. Read by Sign, to avoid signing the same bare site delegation twice.</li>
+<li><b>The delegation itself.</b> Held by the app, with its digest approved on chain. A site delegation runs 365 days, an ask-as-me wire 30.</li>
+<li><b>The id_token.</b> Held by the app. Seven days by default.</li>
+</ul>
+
+<h2>Three rules that hold it together</h2>
+<ul>
+<li><b>Identity is the Home's to state. Authority is the person's to give.</b> The id_token and the delegation are separate on purpose.</li>
+<li><b>The registry decides, never the request.</b> An app's name, its return address, its key and what it may receive are read from the registry. The URL is only a hint.</li>
+<li><b>Nothing is taken on trust from a page.</b> Every delegation is proved on chain before a code exists, and again each time it renews a session.</li>
+</ul>
+<p>What an app does with the delegation once it is signed in is the next picture: <a href="/architecture/agent-harness">How an ask runs at an agent</a>.</p>
+
+<h2 id="pauls-points">Paul's points, answered</h2>
+<p>Paul reviewed the sign-in and wrote up what he found and what he would do about it. His words are quoted below, a point at a time, each with a direct answer from the code as it stands. File names are under <code>apps/home</code>.</p>
+
+<h3>1. Is consent remembered?</h3>
+<blockquote><p>"The Home never checks whether a person has already allowed an app."</p></blockquote>
+<p><b>Correct.</b> Nothing on the sign-in path reads a past Allow. The row for an Allow is written by <code>server/oidc/grant.ts</code> and read in two places: <code>server/connect/app-grants.ts</code>, for the Connected Apps page, and <code>src/home/rotation.ts</code>, for credential rotation. No file under <code>src/components/onboarding</code> reads it. The Home says so itself where it handles <code>prompt=none</code> in <code>EntryExperience.tsx</code>: it answers <code>interaction_required</code> to a signed-in person because it keeps no store of remembered consent.</p>
+
+<h3>2. Is the sheet shown every time?</h3>
+<blockquote><p>"RecognizedEnroll sends every recognized sign-in straight to the 'Allow &lt;app&gt;?' sheet."</p></blockquote>
+<p><b>Correct.</b> Once the session resolves, <code>RecognizedEnroll.tsx</code> goes to the sheet. The only turns before it are a session that fails, a pinned name that does not match, a passkey that needs its own host, and the organization chooser. None of them looks at past Allows.</p>
+<p>There is one path with no sheet, and it is not this component. In Chrome's FedCM lane, a person whose key the Home holds gets a site delegation from <code>/fedcm/grant</code> after choosing their account in the browser's own chooser.</p>
+
+<h3>3. Is a new delegation signed every time?</h3>
+<blockquote><p>"…and signs a fresh delegation (meaning, every sign-in gets a new delegation)."</p></blockquote>
+<p><b>Correct for the Seed Bible Reader. Not for every app.</b></p>
+<ul>
+<li><b>An ask-as-me wire is signed fresh at every sign-in.</b> There is no reuse for it, whether the app asks for the ask-as-me permission or takes the wire beside a plain sign-in. The reader is such an app, so for the reader every sign-in is the sheet and a new delegation, thirty days each.</li>
+<li><b>A bare site sign-in reuses.</b> <code>givePermission</code> in <code>src/home/onboarding.ts</code> first looks for the delegation this browser already made for the same person and delegate (<code>src/lib/grant-cache.ts</code>). If it finds one, the sheet is still shown, but nothing new is signed. A session key or a payment in the request turns the reuse off. So does a vault grant, unless the app's registration opts in to reusing it.</li>
+<li><b>The reuse is per browser.</b> Another browser, another device or cleared storage signs a new one.</li>
+</ul>
+<p>One thing follows that is worth more than the extra prompt. A newer delegation does not revoke the older one. Each stays valid until it expires or the person revokes it on chain.</p>
+
+<h3>4. Is the row from the last Allow there?</h3>
+<blockquote><p>"…even though the app-grants row from the last Allow is already there."</p></blockquote>
+<p><b>Correct, and the row is thinner than it sounds.</b> It holds the client, the permission template, the delegate, the main delegation and the time. It is written only for an Allow that names no organization, and a newer Allow for the same app replaces it.</p>
+<p>What it does not hold: the terms the sheet showed, and an ask wire signed beside a plain sign-in. So the row can say that an app was allowed. It cannot yet say what was agreed, and it does not list every wire that is live.</p>
+
+<h3>5. The fix: store what each Allow agreed to</h3>
+<blockquote><p>"If we were to fix it, the best case is that the Home stores what each Allow agreed to…"</p></blockquote>
+<p><b>Agreed, and this is the part that is missing.</b> A later sign-in has to compare what the app asks for now with what the person agreed to then. That needs the terms kept in a form that can be compared: the template, the claims the app receives, and every wire signed with it. Two constraints from the code:</p>
+<ul>
+<li><b>Key it by app, not by delegate.</b> Several apps share one delegate address, and the browser's reuse cache is keyed by delegate.</li>
+<li><b>Put the terms in the person's vault.</b> This estate's rule is that the vault is the record and apps hold references. The server row stays a pointer.</li>
+</ul>
+
+<h3>6. The fix: when the server may skip the sheet</h3>
+<blockquote><p>"…and, on a later sign-in, the server skips the sheet only when the app's registry entry asks for nothing more and the stored delegation still verifies on chain…"</p></blockquote>
+<p><b>Agreed. Both checks have their parts already. The place to run them does not exist.</b></p>
+<ul>
+<li><b>The registry</b> is read on the server (<code>server/_lib/oidc-registry.ts</code>).</li>
+<li><b>The chain check</b> is the one step 8 uses (<code>server/_lib/verify-delegation.ts</code>). It checks the signature, revocation and the dates, and it says no when the chain cannot be read.</li>
+<li><b>The decision is in the wrong place today.</b> The browser decides to show the sheet. The two grant endpoints take a call from the Home's own pages with no session at all, because a fresh signature is the proof. A skip has no fresh signature, so it needs a new server step that knows who is asking.</li>
+<li><b>Nothing may be signed on a skipped sheet.</b> The wires that are signed fresh today must be stored and presented again, or an app that needs them keeps the sheet.</li>
+<li><b>The ways back to the sheet must hold.</b> Revoking on chain, forgetting the app in Connected Apps, a registry entry that asks for more, <code>prompt=login</code> and "not you?" each bring it back.</li>
+</ul>
+
+<h3>7. The fix: a cookie script cannot read</h3>
+<blockquote><p>"…with a server-set HttpOnly cookie proving who is asking instead of the script-readable session token."</p></blockquote>
+<p><b>Agreed, and it has to come first.</b> Today the session is a token in <code>localStorage</code> and in the <code>ap_sso</code> cookie, and page script writes and reads both. On a skipped sheet that session is the only proof of who is asking. It should be one that script cannot read. The cookie is also sent on cross-site requests today, which FedCM needs, so the new step must answer the Home's own pages only.</p>
+
+<h3>8. Is any of it built?</h3>
+<blockquote><p>"You already have a note about this but it has not been done yet."</p></blockquote>
+<p><b>Correct.</b> There are two notes and no code. <code>src/lib/sso-cookie.ts</code> carries a hardening note that a server-set HttpOnly cookie should replace the script-managed one. <code>EntryExperience.tsx</code> notes at <code>prompt=none</code> that there is no remembered-consent store yet. Nothing for either is in this repository. In the picture this is the dashed amber arc, marked proposed and not built.</p>
+<p>The design is now written down as spec 445, <i>The Home remembers an Allow</i>: the cookie first, then the stored terms, then the server step that skips the sheet, turned on for one app at a time.</p>
+
+<h3>In short</h3>
+<ul>
+<li>Points 1, 2, 4 and 8 are right as written.</li>
+<li>Point 3 is right for the reader and for any app that takes an ask wire. A bare site sign-in reuses its delegation in the same browser.</li>
+<li>Points 5 to 7 are the right fix. The order is the cookie first, then the stored terms, then the server step that skips.</li>
+<li>Once it is built, <code>prompt=none</code> can return a code. Today it cannot.</li>
+</ul>`;
+
 export const POSTS: Post[] = [
+  {
+    slug: 'sign-in',
+    title: 'How sign-in works: the first time, a new app, and coming back',
+    date: '2026-11-05',
+    description:
+      'The path from pressing Sign in at an app to the app holding a delegation: what the Home checks, what the person signs, what is remembered, and what a second app or a return visit skips.',
+    picture: {
+      svg: '/architecture/sign-in-flow.svg', png: '/architecture/sign-in-flow.png', alt: SIGNIN_ALT, width: 1460, height: 1020,
+      caption: 'Grey arrows are a first sign-in. Green is a new app for a person already signed in. Blue is an app coming back. Dashed amber is proposed and not built.',
+    },
+    steps: SIGNIN_STEPS,
+    byHeading: 'Who acts',
+    body: SIGNIN_BODY,
+  },
   {
     slug: 'harness-needs-substrate',
     title: 'Great Agent Harness requires Agentic Primitives Substrate',
@@ -528,7 +891,7 @@ export const POSTS: Post[] = [
     title: 'How the Scripture Agent answers a question',
     date: '2026-11-05',
     description:
-      'The path a question takes through the Scripture Agent: what it gathers, how a model drafts and code proves every verse, and where answer plans from the skills registry enter.',
+      'The path a question takes through the Scripture Agent: what it gathers, how a model drafts and code proves every verse, and the categories of skills that drive it.',
     picture: {
       svg: '/architecture/scripture-ask-flow.svg', png: '/architecture/scripture-ask-flow.png', alt: SCRIPTURE_ALT, width: 1460, height: 900,
       caption: 'Grey arrows are the question. Pink arrows are a skill on its way in. Dashed arrows happen only when needed.',
@@ -580,7 +943,7 @@ export function architectureIndex(p: ArchitectureInput): string {
 const list = (items: string[]): string => `<ul>${items.map((x) => `<li>${x}</li>`).join('')}</ul>`;
 
 /** One step's details: the panel that opens on the right when the step is chosen. `#closed` shuts it. */
-function stepPanel(steps: Step[], i: number): string {
+function stepPanel(steps: Step[], i: number, byHeading = 'A model, or code'): string {
   const s = steps[i]!, prev = steps[i - 1], next = steps[i + 1];
   return `<aside class="fly" id="step-${s.id}" role="dialog" aria-labelledby="step-${s.id}-name">
 <a class="shade" href="#closed" tabindex="-1" aria-hidden="true"></a>
@@ -594,7 +957,7 @@ function stepPanel(steps: Step[], i: number): string {
 ${s.what.map((x) => `<p>${x}</p>`).join('\n')}
 <h3>Where it runs</h3>
 ${list(s.where)}
-<h3>A model, or code</h3>
+<h3>${byHeading}</h3>
 <p>${s.by}</p>
 <h3>What it reads</h3>
 ${list(s.reads)}
@@ -644,7 +1007,7 @@ ${items}
 </ol>
 </nav>
 <div class="flys">
-${steps.map((_, i) => stepPanel(steps, i)).join('\n')}
+${steps.map((_, i) => stepPanel(steps, i, post.byHeading)).join('\n')}
 </div>
 </div>
 ${post.body}

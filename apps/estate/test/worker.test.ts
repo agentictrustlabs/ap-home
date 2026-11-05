@@ -71,7 +71,7 @@ describe('the architecture posts', () => {
         // in the list, on its tile in the picture, and as a panel that says why the step exists and where it runs
         expect(html.split(`href="#step-${step.id}"`).length - 1).toBeGreaterThanOrEqual(2);
         const panel = html.slice(html.indexOf(`<aside class="fly" id="step-${step.id}"`)).split('</aside>')[0]!;
-        for (const heading of ['Why this step exists', 'What happens', 'Where it runs', 'A model, or code', 'What it reads', 'What it leaves behind', 'How it stops or holds']) expect(panel).toContain(`<h3>${heading}</h3>`);
+        for (const heading of ['Why this step exists', 'What happens', 'Where it runs', post.byHeading ?? 'A model, or code', 'What it reads', 'What it leaves behind', 'How it stops or holds']) expect(panel).toContain(`<h3>${heading}</h3>`);
         expect(panel).toContain(step.why);
         // the tile is inside the picture
         expect(step.at[0]).toBeLessThan(post.picture.width);
@@ -85,6 +85,16 @@ describe('the architecture posts', () => {
     expect(html).toContain('<meta property="og:image" content="https://faithnet.estate/architecture/harness-on-substrate.png">');
     expect(html).toContain('href="/architecture/agent-harness"');
     expect(html).not.toContain('class="flow"');
+  });
+  it('asks who acts at a step of a flow with no model, and a model or code at the harness', async () => {
+    const signIn = await (await get('/architecture/sign-in')).text();
+    expect(signIn).toContain('<h1>How sign-in works: the first time, a new app, and coming back</h1>');
+    expect(signIn).toContain('<h3>Who acts</h3>');
+    expect(signIn).not.toContain('<h3>A model, or code</h3>');
+    expect(signIn).toContain('id="step-allow"');
+    const harness = await (await get('/architecture/agent-harness')).text();
+    expect(harness).toContain('<h3>A model, or code</h3>');
+    expect(harness).not.toContain('<h3>Who acts</h3>');
   });
   it('leaves a picture and an unknown post to the assets (a 404 there, never an empty page here)', async () => {
     expect(await (await get('/architecture/agent-harness-flow.svg')).text()).toBe('asset');

@@ -47,6 +47,8 @@ input { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radi
 .picture.wide { width:min(1200px, calc(100vw - 32px)); margin:24px 0 20px; } .picture.wide .canvas { min-width:900px; }
 @media (min-width:1000px) { .picture.wide { margin-left:calc((min(1200px, 100vw - 32px) - 928px) / -2); } }
 .post h3 { font-size:1.05rem; margin:26px 0 4px; }
+.post blockquote { margin:10px 0 8px; padding:6px 14px; border-left:3px solid var(--accent); background:var(--card); border-radius:0 8px 8px 0; } .post blockquote p { margin:4px 0; font-style:italic; }
+.callout { padding:10px 14px; border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:0 8px 8px 0; background:var(--card); } .post h2[id] { scroll-margin-top:16px; }
 /* a clear link over each numbered tile */
 .hots { position:absolute; inset:0; width:100%; height:100%; } .hots rect { fill:transparent; stroke:transparent; stroke-width:3; cursor:pointer; }
 .hots a:hover rect, .hots a:focus rect { stroke:#fff; }
@@ -74,3 +76,5 @@ input { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radi
 .post-card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin:20px 0; }
 .post-card h2 { margin:14px 0 2px; font-size:1.25rem; } .post-card h2 a { color:var(--fg); text-decoration:none; } .post-card p { margin:6px 0; }
 .post-card .thumb img { display:block; width:100%; height:auto; border-radius:8px; }
+.table-wrap { overflow-x:auto; margin:12px 0 16px; } .skills-table { border-collapse:collapse; width:100%; min-width:720px; font-size:.9rem; line-height:1.35; } .skills-table th, .skills-table td { text-align:left; vertical-align:top; padding:8px 10px; border-bottom:1px solid var(--line, #d9d9d9); } .skills-table th { font-weight:600; white-space:nowrap; }
+.picture > a > img { display:block; width:100%; max-width:100%; height:auto; border-radius:14px; }

@@ -37,6 +37,13 @@ export const I = {
   books: '<path d="M4.5 4.5h4v15h-4zM8.5 4.5h4v15h-4z"/><path d="M14.200 6l3.600-1 3 13.500-3.600 1z"/>',
   bolt: '<path d="M13 3.5L5.5 13.5H11l-1 7 7.5-10H12z"/>',
   seal: '<circle cx="12" cy="10" r="6"/><path d="M9.300 10l2 2 3.400-3.800"/><path d="M8.500 15l-1.500 5.500 5-2.500 5 2.500-1.500-5.500"/>',
+  app: '<rect x="3.500" y="5" width="17" height="14" rx="2.500"/><path d="M3.500 9.500h17"/><path d="M6.500 7.300h.010M9 7.300h.010"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.700 0l3-3a4 4 0 0 0-5.700-5.700l-1.200 1.200"/><path d="M14 10a4 4 0 0 0-5.700 0l-3 3a4 4 0 0 0 5.700 5.700l1.200-1.200"/>',
+  mail: '<rect x="3.500" y="5.500" width="17" height="13" rx="2"/><path d="M4 7.500l8 6 8-6"/>',
+  wallet: '<path d="M4 7.500h14.500a1.500 1.500 0 0 1 1.500 1.500v9a1.500 1.500 0 0 1-1.500 1.500H5.500A1.500 1.500 0 0 1 4 18z"/><path d="M4 7.500V6a1.500 1.500 0 0 1 1.500-1.500H16"/><path d="M16 13.500h1.500"/>',
+  id: '<rect x="3" y="5.500" width="18" height="13" rx="2"/><circle cx="8.500" cy="10.800" r="1.900"/><path d="M5.500 15.800c.500-1.500 1.700-2.200 3-2.200s2.500.700 3 2.200M14 10h4.500M14 13.500h3"/>',
+  cookie: '<path d="M20.500 12.500A8.500 8.500 0 1 1 11.500 3.500a3.500 3.500 0 0 0 4 4 4 4 0 0 0 5 5z"/><circle cx="9" cy="10" r=".900"/><circle cx="8.500" cy="15" r=".900"/><circle cx="13.500" cy="14" r=".900"/>',
+  finger: '<path d="M12 11v5.500"/><path d="M8.500 16V11a3.500 3.500 0 0 1 7 0v5"/><path d="M5.500 14.500V11a6.500 6.500 0 0 1 13 0v3.500"/>',
 };
 
 /** A picture W×H: push raw SVG to `out`, or use tile / arrow / note; `finish` writes the file. */
@@ -57,14 +64,22 @@ export function picture(W, H) {
     sub.forEach((t, i) => out.push(`<text x="${x}" y="${ly + 19 + i * 16}" text-anchor="middle" class="s">${esc(t)}</text>`));
     out.push(`</g>`);
   };
-  const arrow = (d, o = {}) => out.push(`<path d="${d}" fill="none" stroke="${o.color ?? C.line}" stroke-width="${o.w ?? 2}" ${o.dash ? 'stroke-dasharray="6 6"' : ''} marker-end="url(#${o.color === C.skill ? 'as' : 'a'})"${o.both ? ` marker-start="url(#${o.color === C.skill ? 'bs' : 'b'})"` : ''}/>`);
+  // an arrowhead takes its line's colour: the ask and a skill have theirs already, any other colour gets its own pair
+  const extra = new Map();
+  const head = (color, start) => {
+    if (!color || color === C.line) return start ? 'b' : 'a';
+    if (color === C.skill) return start ? 'bs' : 'as';
+    if (!extra.has(color)) extra.set(color, `m${extra.size}`);
+    return extra.get(color) + (start ? 's' : '');
+  };
+  const arrow = (d, o = {}) => out.push(`<path d="${d}" fill="none" stroke="${o.color ?? C.line}" stroke-width="${o.w ?? 2}" ${o.dash ? 'stroke-dasharray="6 6"' : ''} marker-end="url(#${head(o.color)})"${o.both ? ` marker-start="url(#${head(o.color, true)})"` : ''}/>`);
   const note = (x, y, lines, o = {}) => lines.forEach((t, i) => out.push(`<text x="${x}" y="${y + i * 16}" text-anchor="${o.anchor ?? 'middle'}" class="${o.cls ?? 's'}"${o.color ? ` style="fill:${o.color}"` : ''}>${esc(t)}</text>`));
   const finish = (file, title, desc) => {
     const marker = (id, color, start) => `<marker id="${id}" viewBox="0 0 10 10" refX="${start ? 1 : 9}" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="${start ? 'M10 0 0 5l10 5z' : 'M0 0l10 5-10 5z'}" fill="${color}"/></marker>`;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="t d">
 <title id="t">${esc(title)}</title>
 <desc id="d">${esc(desc)}</desc>
-<defs>${marker('a', C.line)}${marker('b', C.line, true)}${marker('as', C.skill)}${marker('bs', C.skill, true)}
+<defs>${marker('a', C.line)}${marker('b', C.line, true)}${marker('as', C.skill)}${marker('bs', C.skill, true)}${[...extra].map(([color, id]) => marker(id, color) + marker(`${id}s`, color, true)).join('')}
 <style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:${C.text}}.h{font-size:30px;font-weight:700}.n{font-size:16px;font-weight:650}.t{font-size:13px;font-weight:600}.k{font-size:12px;font-weight:700}.s{font-size:13px;fill:${C.muted}}.b{font-size:12px;font-weight:700;letter-spacing:.09em;fill:${C.muted}}</style></defs>
 ${out.join('\n')}
 </svg>
@@ -73,5 +88,5 @@ ${out.join('\n')}
     writeFileSync(file, svg.replace(/(\d)\.(\d*?)0+(?=[^\d])/g, (m, a, b) => (b ? `${a}.${b}` : a)));
     console.log('wrote', file, svg.length);
   };
-  return { out, esc, tile, arrow, note, finish };
+  return { out, esc, tile, arrow, note, head, finish };
 }
