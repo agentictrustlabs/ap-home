@@ -306,7 +306,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // ones, and the next sign-in would skip the sheet on a consent nobody gave. So terms are stored only beside the
     // recognition cookie of the person whose wire this is. Without it the row lists the wires and remembers nothing.
     const proved = (await readRecognition(request, env.AUTH_CODES))?.sub.toLowerCase().endsWith(person);
-    const client = proved && isRememberedTemplate(grant.delegation_template) ? await resolveClient(env, grant.client_id) : null;
+    // AND ONLY FOR A PLAIN ALLOW. A request through a host, or one that had a session-key leaf signed, always shows the
+    // sheet (remembered.ts). The sheet the person saw for it named the host or the key, so it is not a record of allowing
+    // the app asking by itself: stored as plain terms, it would let a later plain request skip a sheet nobody has seen.
+    const plain = !grant.via_host && !body.sessionDelegation;
+    const client = proved && plain && isRememberedTemplate(grant.delegation_template) ? await resolveClient(env, grant.client_id) : null;
     const row = nextAppGrantRow(rows.find((r) => r.clientId === grant.client_id), {
       clientId: grant.client_id,
       template: grant.delegation_template,

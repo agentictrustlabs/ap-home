@@ -4,7 +4,8 @@
 // `everywhere` (spec 445 §16) also deletes the renewal binding of every wire the person's apps hold, so that no app, whether or not it
 // has a /sso-logout of its own, can silently renew its sign-in afterwards: its next renewal fails and it has to send the person to the
 // Home. An id_token already issued stays valid to its own expiry: the Home cannot recall a token an app holds.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { getServer, json, ownIssuer, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { clearRecognition, readRecognition } from '../_lib/recognition';
 import { readRows, wireRef, type AppGrantRow } from '../oidc/app-grant-row';
@@ -18,7 +19,7 @@ async function personLeaving(request: Request, env: FnContext['env']): Promise<s
   const auth = request.headers.get('authorization') ?? '';
   if (!auth.startsWith('Bearer ')) return null;
   const { jwks } = await getServer(env);
-  const v = await verifyAgentSession(auth.slice(7), { keys: await importJwks(jwks), expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(auth.slice(7), { keys: await importJwks(jwks), expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   return v.ok && v.session.principal?.kind ? tail(v.session.sub) : null;
 }
 

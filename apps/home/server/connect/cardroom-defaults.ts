@@ -10,7 +10,8 @@
 // Gates, fail-closed: a valid Home session; the acts are ALWAYS for the SA in that session's own `sub`.
 // Idempotent: what is already there is left alone. Nothing here widens authority — the grant is the bounded
 // study grant the Coaches page issues, and the person can fire the coach there.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { agentProfileResolverAbi, buildRegisterProfileCall } from '@agenticprimitives/agent-profile';
 import { buildExecuteBatchCallData } from '@agenticprimitives/agent-account';
@@ -46,7 +47,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!token) return json({ error: 'session required' }, request, 401);
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (!v.ok) return json({ error: 'invalid session' }, request, 401);
   const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() as Address;
   if (!person) return json({ error: 'no agent in session' }, request, 400);

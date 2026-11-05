@@ -8,7 +8,8 @@
 // `auditRef`. If the audit append fails the event is not recorded (spec 291).
 // Server-side flows (inbox decisions, manifest publish) append through
 // `appendControlEvent` directly; UI flows (revoke, agent-added) POST here.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import type { HomeControlEventV1 } from '@agenticprimitives/home';
 import type { Address } from '@agenticprimitives/types';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
@@ -51,7 +52,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (!v.ok) return null;
   return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
 }

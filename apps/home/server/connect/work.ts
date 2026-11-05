@@ -15,7 +15,8 @@
 //   POST { action:'commit', org, … , signature }            → endeavor.commit (participant-signed; binds exact plan revision hash)
 //   POST { action:'decide', org, endeavorId, decisionId, …} → endeavor.decide (declared approver only; a steward as the organization when it is named — spec 393)
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { callInteractions, stewardWireFor } from './channels';
 
@@ -37,7 +38,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<{ pe
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (!v.ok) return null;
   const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
   return person ? { person, token } : null;

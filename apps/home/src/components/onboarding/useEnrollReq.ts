@@ -222,6 +222,8 @@ export async function beginEnrollmentGrant(
       ...(profileName ? { profile_name: profileName } : {}),
       ...(profileEmail ? { profile_email: profileEmail } : {}),
       delegation_template: enroll.template,
+      // Spec 445 §5 — an Allow given through a host is not remembered for the app asking by itself.
+      ...(enroll.viaHost ? { via_host: enroll.viaHost } : {}),
     }),
   });
   const b = (await r.json().catch(() => ({}))) as { grant_id?: string; delegate?: Address; error?: string };

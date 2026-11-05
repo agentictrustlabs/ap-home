@@ -13,7 +13,8 @@
 //                      (the same raw-or-EIP-191 path delegations use)
 // The stored manifest is served verbatim by /.well-known/agentic-home on the
 // person's subdomain. Consumers still run isManifestCurrent — serving ≠ trust.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { validateHomeManifest, type HomeManifestV1 } from '@agenticprimitives/home';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
@@ -46,7 +47,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (!v.ok) return null;
   return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
 }

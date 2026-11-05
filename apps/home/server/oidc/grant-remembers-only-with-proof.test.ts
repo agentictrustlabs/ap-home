@@ -23,9 +23,9 @@ import { onRequestPost } from './grant';
 
 let store: Map<string, string>;
 const env = { AUTH_CODES: { get: async (k: string) => store.get(k) ?? null, put: async (k: string, v: string) => { store.set(k, v); }, delete: async (k: string) => { store.delete(k); } } } as never;
-const redeem = async () => {
-  store.set('oidc-grant:g1', JSON.stringify({ client_id: 'reader', delegate: DELEGATE, nonce: '', agent_name: '', code_challenge: 'c', redirect_uri: 'https://reader.test/', delegation_template: 'site-login' }));
-  const r = await onRequestPost({ request: new Request(`${ISS}/oidc/grant`, { method: 'POST', headers: { 'content-type': 'application/json', origin: ISS }, body: JSON.stringify({ grant_id: 'g1', delegation: { delegator: PERSON, delegate: DELEGATE } }) }), env });
+const redeem = async (grantExtra: Record<string, unknown> = {}, bodyExtra: Record<string, unknown> = {}) => {
+  store.set('oidc-grant:g1', JSON.stringify({ ...grantExtra, client_id: 'reader', delegate: DELEGATE, nonce: '', agent_name: '', code_challenge: 'c', redirect_uri: 'https://reader.test/', delegation_template: 'site-login' }));
+  const r = await onRequestPost({ request: new Request(`${ISS}/oidc/grant`, { method: 'POST', headers: { 'content-type': 'application/json', origin: ISS }, body: JSON.stringify({ grant_id: 'g1', delegation: { delegator: PERSON, delegate: DELEGATE }, ...bodyExtra }) }), env });
   expect(r.status).toBe(200);
   return (JSON.parse(store.get(`app-grants:${PERSON}`)!) as Array<{ terms?: { clientId: string }; delegation: unknown }>)[0]!;
 };
@@ -45,5 +45,17 @@ describe('/oidc/grant', () => {
   it('remembers nothing beside someone else\'s cookie', async () => {
     h.recognition.value = { sub: 'eip155:34348:0x1111111111111111111111111111111111111111' };
     expect((await redeem()).terms).toBeUndefined();
+  });
+  // The skip rule always shows the sheet for a request through a host or with a session key. An Allow given on such a
+  // sheet is not a record of allowing the app asking by itself.
+  it('remembers nothing for an Allow given through a host', async () => {
+    h.recognition.value = { sub: `eip155:34348:${PERSON}` };
+    const row = await redeem({ via_host: true });
+    expect(row.terms).toBeUndefined();
+    expect(row.delegation).toBeDefined();
+  });
+  it('remembers nothing for an Allow that had a session-key leaf signed', async () => {
+    h.recognition.value = { sub: `eip155:34348:${PERSON}` };
+    expect((await redeem({}, { sessionDelegation: { delegate: '0x2' } })).terms).toBeUndefined();
   });
 });

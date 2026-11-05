@@ -9,7 +9,8 @@
 // On success, mint a custody-grade AgentSession for the agent. If the credential is NOT
 // a custodian of that agent → 403 (add it first from a custody session).
 import { verify as verifySiwe, parseMessage } from '@agenticprimitives/connect-auth/siwe';
-import { mintAgentSession, verifyAgentSession, importJwks } from '@agenticprimitives/connect';
+import { mintAgentSession, importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { addressOf } from '@agenticprimitives/identity-directory-adapters';
 import type { CredentialPrincipal, Hex } from '@agenticprimitives/types';
@@ -38,7 +39,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   // The target agent is bound to the verified Google session — not client-chosen.
   const keys = await importJwks(jwks);
-  const g = await verifyAgentSession(body.googleToken, { keys, expectedIss: ownIssuer(request, env), expectedAud: body.aud });
+  const g = await verifySession(body.googleToken, { keys, expectedIss: ownIssuer(request, env), expectedAud: body.aud });
   if (!g.ok) return json({ error: 'invalid Google session' }, 401);
   const agentId = g.session.sub;
   const agent = addressOf(agentId);

@@ -13,7 +13,8 @@
 // machine then enforces the ROLE for every transition (a session alone cannot
 // approve a case it is not the responder/resource-owner of). All decisions and
 // admissions are audit-backed fail-closed inside src/home/inbox-data.ts.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import type { InteractionMandateV1, InteractionTransitionType } from '@agenticprimitives/fabric/interactions';
 import type { Address, Hex } from '@agenticprimitives/types';
@@ -52,7 +53,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (v.ok) return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
   // Relying-app path (spec: messaging-from-relying-app): a registered client (e.g. the uupg tracker) drives
   // the signed-in person's inbox with the OIDC id_token it received at connect — a Home-signed, aud-scoped,

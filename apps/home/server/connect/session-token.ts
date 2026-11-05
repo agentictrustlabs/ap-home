@@ -16,7 +16,8 @@
 // (spec 426 §6/§8 — v1 is self-acting). The audience is a registered client, never a free string, so
 // the token cannot be replayed to an app the Home does not know. Nothing here is a grant: the executor
 // re-runs its own authority server-side (ADR-0041 — the bearer is an ingress envelope).
-import { importJwks, mintIdToken, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks, mintIdToken } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { resolveClient } from '../_lib/oidc-registry';
 
@@ -56,10 +57,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const { jwks, signer, directory } = await getServer(env);
   const keys = await importJwks(jwks);
   const iss = ownIssuer(request, env);
-  let v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: iss });
+  let v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: iss });
   if (!v.ok) {
     const aud = unverifiedAud(token);
-    if (aud && (await resolveClient(env, aud))) v = await verifyAgentSession(token, { keys, expectedAud: aud, expectedIss: iss });
+    if (aud && (await resolveClient(env, aud))) v = await verifySession(token, { keys, expectedAud: aud, expectedIss: iss });
   }
   if (!v.ok) return json({ error: 'session not verified' }, 401);
 

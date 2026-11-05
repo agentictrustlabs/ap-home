@@ -6,7 +6,8 @@
 // importJwks + verifyAgentSession — app-layer verify per spec 227 §7/U1), then
 // gates on the session's assurance (P1-E). Token via `Authorization: Bearer` or
 // `?token=`. Exact `aud` match (P1-F); fail-closed everywhere.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import type { Address } from '@agenticprimitives/types';
 import { getServer, json, type FnContext } from '../_lib/server-broker';
@@ -39,7 +40,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // Verify signature/alg/aud/exp/owner (the alg-pin rejects HS256 BrokerSession tokens), then
   // accept the issuer if it's the request origin OR one of our own Connect origins — a Google
   // session is minted on the central origin but consumed on the member's per-handle subdomain.
-  const v = await verifyAgentSession(token, { keys, expectedAud: AUD, expectedIss: (i) => i === iss || isOwnConnectOrigin(i) });
+  const v = await verifySession(token, { keys, expectedAud: AUD, expectedIss: (i) => i === iss || isOwnConnectOrigin(i) });
   if (!v.ok) return json({ error: `invalid AgentSession: ${v.reason}` }, 401);
   const session = v.session;
   // An app's id_token has the same signature and shape. Only a real session names the credential behind it (spec 445 §8).
