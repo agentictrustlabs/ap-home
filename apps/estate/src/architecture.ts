@@ -384,53 +384,58 @@ const SCRIPTURE_STEPS: Step[] = [
 
 
 const ANSWER_ALT =
-  "A flow diagram of how the Scripture Agent answers today. A question goes through admission to a judge, which records what is being asked and changes nothing. The verses that carry the answer are chosen and read from the signed corpus before anything is written. A model drafts, citing only those verses, and code proves every one. The draft goes back once if it cites another verse or runs long. Up to three writings that truly bear on the answer are chosen to sit beside it, and a receipt names the skills used. Intent cards reach the judge from the registry through a pinned playbook, and one answer plan reaches the draft. In grey: scopes and forms are recorded but do not act, age bands are a later option, and a people-group skill is reserved and not built.";
+  "A flow diagram of how the Scripture Agent answers today. A question goes through admission to a judge, which names what is gathered: Scripture, general knowledge, or both. The verses that carry the answer are chosen and read from the signed corpus before anything is written; a question that names a verse also reads the study notes and commentaries on it, and a general question reads one encyclopedia article. A model drafts from what was read, and code proves every verse. The draft goes back once if it cites another verse or runs long. Up to three writings that truly bear on the answer are chosen to sit beside it, and a receipt names the skills used. Intent cards reach the judge from the registry through a pinned playbook, and one answer plan reaches the draft. In grey: scopes and forms are recorded but do not act, age bands are a later option, and a people-group skill is reserved and not built.";
 const inherited = (id: string, at: [number, number], over: Partial<Step> = {}): Step => ({ ...SCRIPTURE_STEPS.find((x) => x.id === id)!, at, ...over });
 const ANSWER_STEPS: Step[] = [
   inherited('admit', [188, 470]),
   {
     id: 'judge', name: 'Judge', color: '#ef4444', at: [304, 470],
-    summary: 'What is the reader asking for? It is recorded, and it changes nothing yet.',
-    why: 'A definition, a question about a verse and a request for practical help look as if they want different answers. But on 300 questions a deliberately wrong skill did as well as the right one, so the pick does not shape the answer. It is kept as a record, because the record is what the next test builds on.',
+    summary: 'What is the reader asking for, and what should be gathered to answer it: Scripture, general knowledge, or both.',
+    why: 'Telling the writer how to write changed nothing: on 300 questions a deliberately wrong skill did as well as the right one. Telling the path what to gather did. Answers to general questions lost to a product that simply knew the subject, because the writer was pulled toward verses. So the intent now names its sources, and the rest of its pick is only recorded.',
     what: [
-      'One call to a small model reads the question against twelve intent cards from the playbook and gives a probability for each, and for "none". Each card names a scope and a form.',
-      'Code applies the rule and records the pick. No scope or form acts on the answer, because the playbook pins none of them to act.',
+      'One call to a small model reads the question against thirteen intent cards from the playbook and gives a probability for each, and for "none". Each card names its sources, a scope and a form.',
+      'Code applies the rule. The sources act: general knowledge alone reads no verses, and a question the judge cannot place reads both. The scope and form are recorded, because the playbook pins none of them to act.',
+      'A name that is held nowhere in the corpus or the ontology influences the plan and does not decide it: it tips an unplaced question toward general knowledge, and the writer is told what was not found, never that the Bible does not say it.',
       'A reader with a verse open still goes to the short verse companion, by a rule in code, with no judge.',
     ],
     where: [SCRIPTURE, 'Source: <code>src/harness/intent-stage.ts</code> and <code>intent-rule.ts</code>. The judge is <code>selectByJudgment</code> from <code>@agenticprimitives/orchestration</code>, the same one the agent harness uses.'],
     by: 'A small model chooses. A rule in code accepts.',
     reads: ['The question.', 'The intent cards, at their pinned versions.'],
-    leaves: ['<code>intentStage</code>: every probability, the pick, and each skill\'s version and commitment.'],
-    stops: ['A failed call or an unreadable registry is a hold. The question is still answered, because nothing depends on the pick.'],
+    leaves: ['<code>intentStage</code>: every probability, the pick, and each skill\'s version and commitment.', '<code>sources</code>: the plan, what the judge said, the names checked and where each was found.'],
+    stops: ['A failed call or an unreadable registry falls to Scripture. A hold reads both. The question is always answered.'],
   },
   {
-    id: 'verses', name: 'Choose verses', color: '#14b8a6', at: [432, 470],
-    summary: 'The passages that carry the answer, read before anything is written.',
+    id: 'verses', name: 'Choose sources', color: '#14b8a6', at: [432, 470],
+    summary: 'The passages that carry the answer, the notes on a named verse, or an article on a general subject: all read before anything is written.',
     why: 'Written from memory, answers said things about verses that the verses do not say. Choosing the verses first and handing the writer their real text is the largest part of why answers with an error fell from 146 to 58 of 300. Choosing them is also a large part of what makes an answer good.',
     what: [
       'A small model chooses two to four passages a careful teacher would open to. It sees what search found, and may add others. Sharing a word with the question does not qualify a verse.',
       'Code resolves each reference and fetches its text from the signed corpus, in the reader\'s edition.',
       'A reference that does not resolve is dropped and recorded.',
+      'A question that names a verse also reads the study notes on it: up to two study notes and two commentaries, one from each publisher. Code chooses them over entries that only list the verse, and holds back a placement it is not sure of. Each is a reading, never Scripture.',
+      'A general question reads one encyclopedia article, bound to the subject by search and a model\'s match that code checks. That is a heuristic match, recorded at 0.8 and never as certain. An article found for the wrong thing is refused.',
     ],
-    where: [SCRIPTURE, 'Source: <code>src/harness/answer-links.ts</code> (<code>chooseVerses</code>).', LIBRARY],
-    by: 'A small model chooses. Code fetches and verifies.',
-    reads: ['The question.', 'The passages found by meaning.', 'The signed corpus.'],
-    leaves: ['<code>chosenVerses</code>: each passage and why it was chosen, and any that did not resolve.'],
-    stops: ['If this step fails, the writer is not restricted, and the proof still checks every reference.', 'At most ten verses are read.'],
+    where: [SCRIPTURE, 'Source: <code>src/harness/answer-links.ts</code> (<code>chooseVerses</code>), <code>verse-notes.ts</code> and <code>general-source.ts</code>.', LIBRARY],
+    by: 'A small model chooses verses and matches an article. Code fetches, verifies and chooses the notes.',
+    reads: ['The question.', 'The passages found by meaning.', 'The signed corpus.', 'The notes filed at a named verse.', 'One encyclopedia search, for a general subject.'],
+    leaves: ['<code>chosenVerses</code>: each passage and why it was chosen, and any that did not resolve.', '<code>verseNotes</code>: each note read, with its licence, attribution and placement confidence, and each held back with the reason.', '<code>sources.general</code>: the article, its licence, and the confidence of the match.'],
+    stops: ['If a step fails, the writer is not restricted, and the proof still checks every reference.', 'At most ten verses are read, and notes at the first two verses named.'],
   },
   {
     id: 'draft', name: 'Draft', color: '#f59e0b', at: [560, 470],
-    summary: 'Answer the person, from those verses.',
+    summary: 'Answer the person, from what was read.',
     why: 'Our answers used to read as reports on whatever search returned. A plain question got a study of the sources, and one question was reinterpreted because of what was found. The writer now answers what was asked, as a knowledgeable teacher would to a friend.',
     what: [
       'The writer takes the question in its plain meaning, gives the answer in the first sentence, then the few things most worth knowing. It takes a clear position, and uses what is well established in Scripture and Christian teaching.',
-      'It may cite only the verses chosen, and must not say a verse says more than its words do.',
+      'It may cite only the verses chosen, and must not say a verse says more than its words do. Under general knowledge alone it cites no verse and does not bring in the Bible unasked.',
+      'The notes on a named verse are for its understanding, said in its own words. A commentary is named to it as one tradition\'s reading, not to be given as the verse\'s meaning. An article\'s verdict on a disputed subject is not given as its own.',
       'It does not mention sources or what it was given, and adds no study exercise and no closing summary.',
+      'Usually 100 to 160 words. A comparison, a change over time, a list or two questions asked as one may run to about 250, which code decides from the question\'s shape, because twice, left to the writer, nearly every answer grew.',
       'The one answer plan, for a person, body or event after the Bible, adds its instructions when the judge that runs while the agent gathers chooses it.',
     ],
     where: [SCRIPTURE, 'Source: <code>src/harness/draft-prove.ts</code> (<code>ANSWER_FIRST</code>).'],
     by: 'One model call.',
-    reads: ['The question.', 'The chosen verses, in the edition\'s own words.', 'The answer plan, if one was chosen.'],
+    reads: ['The question.', 'The chosen verses, in the edition\'s own words.', 'The notes on a named verse, or the article on a general subject.', 'The answer plan, if one was chosen.'],
     leaves: ['The draft.'],
     stops: ['A draft cut off by the output limit fails the run and is not shown.'],
   },
@@ -440,7 +445,7 @@ const ANSWER_STEPS: Step[] = [
     summary: 'Back to the writer when code finds a problem.',
     why: 'The writer does not reliably follow what it is only told. It ran well past the length it was given. Code can see these failures, so code sends them back.',
     what: [
-      'The draft goes back once if the proof found a problem, if it cites a verse that was not chosen, if it talks about what it was supplied, or if it runs over 190 words.',
+      'The draft goes back once if the proof found a problem, if it cites a verse that was not chosen, if it talks about what it was supplied, if it runs over 190 words (300 where the question\'s shape earned room), if it repeats a study note word for word, or if a general-knowledge answer cites a verse or brings in the Bible unasked.',
       'If a quoted word is still not in the verse it cites, one more call deals with that alone.',
       'A revision is proved again, and kept only if it is no worse.',
     ],
@@ -452,11 +457,12 @@ const ANSWER_STEPS: Step[] = [
   },
   {
     id: 'further', name: 'Read further', color: '#a855f7', at: [920, 470],
-    summary: 'Up to three writings that truly bear on the answer, or none.',
+    summary: 'Up to three writings that truly bear on the answer, or none. For a named verse, its study note comes first.',
     why: 'The library is what this agent has that others do not, but it was crowding the answer. Moved beside the answer, a writing can be chosen against what the answer actually says, and given a reason.',
     what: [
       'After the answer is proved, a small model looks at the writings found and chooses at most three that are truly about what was asked, each with one line on what the reader will find there.',
       'None is an acceptable result: an unrelated link is worse than no link. On 300 questions, 272 answers had at least one, and 39 of 638 chosen writings were graded off-topic.',
+      'For a question that names a verse, the study note on that verse is placed first by code. Before this, the agent asked for four notes and got them in the order of the publishers\' names, so the note on the verse reached readers for 2 verse questions in 20. Now it does for 95 in 100.',
       'Neither the writer nor the proof depends on them.',
     ],
     where: [SCRIPTURE, 'Source: <code>src/harness/answer-links.ts</code> (<code>chooseWritings</code>).', LIBRARY],
@@ -474,11 +480,11 @@ const ANSWER_STEPS: Step[] = [
 
 const SCRIPTURE_BODY = `
 <h2>Where this stands</h2>
-<p>As of 6 November 2026, the picture and steps above are what answers readers on faithnet. A sample of live questions after the switch took 11 to 15 seconds and ran 140 to 171 words, with every citation verified.</p>
+<p>As of the evening of 6 November 2026, the picture and steps above are what answers readers on faithnet. Three changes went live that day on top of the answer-first design: the intent names what is gathered, a question that names a verse reads the notes on it, and code decides which questions may run longer. Live questions after the switch took 9 to 19 seconds, and every citation verified.</p>
 <p>Three limits remain:</p>
 <ul>
 <li>Readers who ask through their own person agent get the answer and its citations, and the Read further list does not yet pass through that hop.</li>
-<li>Answers on subjects outside the Bible are still the weakest. See <a href="#next">What comes next</a>.</li>
+<li>A general-knowledge answer rests on one encyclopedia article. On a disputed subject the writer is told not to adopt the article's verdict, and it still tends to open with the article's framing. Nothing in such an answer is checked against a signed source, and the page says so.</li>
 <li>The agent reached this design by testing on questions from one publisher's library, not on what readers here ask. <a href="/architecture/testing-answers">How we test</a> says what that can and cannot show.</li>
 </ul>
 
@@ -501,14 +507,14 @@ const SCRIPTURE_BODY = `
 </ul>
 
 <h2>The categories of skills</h2>
-<p>As of 6 November 2026, two kinds of skill shape live answers: the method for a verse, and one answer plan. Intents, scopes and forms are in the registry and pinned, and are only recorded. We removed three categories after testing: passage kinds, reader roles and standpoints.</p>
+<p>As of 6 November 2026, three kinds of skill shape live answers: the method for a verse, one answer plan, and the intent, which names what is gathered. Scopes and forms are in the registry and pinned, and are only recorded. We removed three categories after testing: passage kinds, reader roles and standpoints.</p>
 <div class="table-wrap"><table class="skills-table">
 <thead><tr><th>Category</th><th>What it decides</th><th>Chosen by</th><th>How many</th><th>State</th></tr></thead>
 <tbody>
 <tr><td><b>Ask skill</b></td><td>The method for one kind of question</td><td>A rule: a verse is open</td><td>9; only the verse skill drives live answers</td><td>Acting</td></tr>
 <tr><td><b>Answer plan</b></td><td>Which writings may be used, and how to answer</td><td>A judge, while the agent gathers</td><td>1: a person, body or event after the Bible</td><td>Acting</td></tr>
-<tr><td><b>Intent</b></td><td>What the reader is asking for. It names one scope and one form</td><td>The judge</td><td>12</td><td>Recorded. Places questions well, and changes nothing</td></tr>
-<tr><td><b>Scope</b></td><td>What the question is about</td><td>The intent</td><td>7: a verse or passage, a book, a subject in the Bible, a word, a topic, outside the Bible, this agent</td><td>Recorded. Outside the Bible is the next test</td></tr>
+<tr><td><b>Intent</b></td><td>What the reader is asking for, and its sources: Scripture, general knowledge or both. It names one scope and one form</td><td>The judge</td><td>13</td><td>Acting, on the sources only. On the questions it changes, 15 better and 2 worse over 200 fresh questions</td></tr>
+<tr><td><b>Scope</b></td><td>What the question is about</td><td>The intent</td><td>7: a verse or passage, a book, a subject in the Bible, a word, a topic, outside the Bible, this agent</td><td>Recorded</td></tr>
 <tr><td><b>Form</b></td><td>The shape of the answer</td><td>The intent</td><td>10: exposition, survey, profile, definition, teaching, counsel, reasoned case, verse list, describe and weigh, agent record</td><td>Recorded. No gain over a wrong form</td></tr>
 <tr><td><b>Age band</b></td><td>How the answer is told to a child or a teenager. It changes the telling, never the teaching</td><td>A rule, from what the reader's context states</td><td>3</td><td>Off. A later option, once a profile holds an age band</td></tr>
 <tr><td><b>People group</b></td><td>The people the reader belongs to or serves</td><td>A rule, from a stable id and never a bare name</td><td>None</td><td>Reserved, not built</td></tr>
@@ -530,17 +536,27 @@ const SCRIPTURE_BODY = `
 <tr><td>Same design, with the skill pick acting</td><td>189</td><td>64 of 300 (21%)</td><td>32</td><td>6</td><td>49%</td><td>9%</td></tr>
 </tbody></table></div>
 <p><b>What worked.</b> The design, not any one skill: take the question in its plain meaning, answer first, choose the verses before writing and hold the writer to them, and keep writings beside the answer. 94% of the writings chosen to read further were graded central or supporting. The accuracy check named 19 of 26 planted errors, so the true counts are higher for every version. Compare the versions, and do not read the counts as totals.</p>
-<p><b>Why the skill pick is off.</b> With it acting, answers were 13 better, 10 worse and 277 tied against no pick, and errors were no lower. Keeping it off means a simpler path with nothing lost.</p>
+<p><b>Why the form pick is off.</b> With it acting, answers were 13 better, 10 worse and 277 tied against no pick, and errors were no lower. Keeping it off means a simpler path with nothing lost.</p>
+
+<h2>What went live on 6 November</h2>
+<p>Each of these was tested on questions nobody had looked at, the live design against the change, blind and in both orders. The full figures are in <a href="/architecture/testing-answers">How we test</a>.</p>
+<ul>
+<li><b>The intent names the sources.</b> The largest remaining loss had been on subjects outside the Bible, where holding the writer to verses pulled the answer toward Scripture. Across six runs of 100 questions, the design won 32 and lost 13 overall, and on the questions it changes, about four in ten, it won 15 and lost 2 in the two runs that match what shipped. Answers with an error stayed level within the noise of the check. The second of those runs missed the error limit by one answer, and the decision to ship was the owner's.</li>
+<li><b>A named verse reads its notes.</b> On 100 fresh verse questions the answers tied 100 to 0, and answers with an error fell from 14 to 11. The gain is in the links: the study note on the verse now reaches Read further in 95 answers in 100, against 13 before. The text of the answers changed little, because the writer already handled verse questions well.</li>
+<li><b>Room by the question's shape.</b> Told it could write more "when the question needs it", the writer lengthened 93 answers in 100 and lost ground. With no guide at all it did worse still. So code decides: a comparison, a change over time, a list or two questions as one may run to about 250 words. About four questions in 100 qualify.</li>
+</ul>
 
 <h2 id="next">What comes next</h2>
-<p>The largest remaining loss is on subjects outside the Bible. Holding the writer to chosen verses pulls such answers toward Scripture when the reader asked what something is. Against one product, those questions came out 4 ours, 8 tied and 11 theirs.</p>
-<p>So the judge gets a job that changes the plan: when it records a question as outside the Bible or general knowledge, the writer answers from what is known first, and is not held to chosen verses. Code still proves any verse it cites. That change is not live. It goes live only if it wins in testing.</p>
+<p>Scoring the whole product. The comparison above judges the answer's text. It leaves out the links, which is where this agent is furthest ahead, and it drew only 10 verse questions in 300 where a fifth of the library's questions name a verse. The next test scores the answer and its links together, by kind of question.</p>
+<p>Research questions. Where the agent holds the material, such as how early writers read a passage and where they disagree, it already wins most comparisons. The next step there is a set of exercises built from the graph, where code can check whether the needed sources were opened, so the gathering can be improved without a judge.</p>
 
 <h2>What we tested that did not work</h2>
 <ul>
 <li><b>Letting the judge choose among form skills.</b> The judge's picks look sensible, but on 300 questions a deliberately wrong skill did about as well: 14 better, 8 worse, 278 tied. The first version of this test was also flawed: the general rules were placed after the skill and overrode it. Fixing that, and rewriting the skills to differ, did not change the result.</li>
 <li><b>Rules for each kind of passage</b> (wisdom, parable, narrative, vision, song, law). On 40 fresh questions about a text, 36 tied with no rule and 39 tied with a wrong rule, and errors did not fall. Removed.</li>
 <li><b>Gathering differently by scope.</b> Only questions from outside the Bible showed a modest gain. A first gain on people and places in the Bible (11 better, 2 worse) was level on the rerun (8 and 8).</li>
+<li><b>Leaving the length to the writer.</b> "More when the question needs it" lengthened 93 answers in 100; no guide at all took the median from 192 to 304 words and raised verse errors from 12 to 21. Both lost more than they won on Scripture questions.</li>
+<li><b>A strict rule for names.</b> A name held nowhere in the corpus was first made to decide the plan. It denied things the agent did hold under another spelling or a title, so it now only influences the plan.</li>
 <li><b>More data by canonical id.</b> Answers about a person bound to a canonical id were no better than others (4 better, 5 worse).</li>
 <li><b>Skills for each faith journey.</b> Together, seven role skills came out 2 better and 13 worse than the one line of guidance they would replace. They mostly added length. Removed.</li>
 <li><b>Skills for a stated tradition.</b> One beat the previous path once and lost six times, because the writer dropped the comparison with other traditions. The existing lookup of confessional standards already does the useful part. Removed.</li>
@@ -2044,7 +2060,7 @@ const TEST_STEPS: Step[] = [
 
 const TEST_BODY = `
 <h2>Where this stands</h2>
-<p>As of 6 November 2026, a 40-question pilot and a 300-question run have finished, and the design they favoured is live. The run cost $54.40. It was not frozen: it read the live library, so a rerun would not match exactly.</p>
+<p>As of 6 November 2026, a 40-question pilot and a 300-question run have finished, and the design they favoured is live. The run cost $54.40. It was not frozen: it read the live library, so a rerun would not match exactly. Seven further runs of 100 fresh questions each, about $19 in all, tested the three changes that went live that evening; they are under <a href="#fresh">Fresh runs</a>.</p>
 
 <h2>Our approach</h2>
 <ul>
@@ -2068,6 +2084,21 @@ const TEST_BODY = `
 <tr><td>New design vs Product 1</td><td>58</td><td>207</td><td>35</td></tr>
 </tbody></table></div>
 <p>Most wins are marginal. Counting clear wins only, the new design is 14 to 16 against Product 2, and 12 to 16 against Product 1. So it has closed most of the gap to Product 2 and has not passed it. Against Product 1 it moved from behind to ahead, on marginal wins.</p>
+
+<h2 id="fresh">Fresh runs</h2>
+<p>Each run draws 100 questions nobody has looked at, answers them with the live design and with the change, and judges the pairs blind in both orders, with a separate accuracy check against the article. A rule written before the run says what passes. The seven runs cost about $2.70 each.</p>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Change tested</th><th>Better</th><th>Tie</th><th>Worse</th><th>Answers with an error, live to change</th><th>Outcome</th></tr></thead>
+<tbody>
+<tr><td>The intent names the sources, first version</td><td>7</td><td>92</td><td>1</td><td>21 to 9</td><td>Below the bar on net wins</td></tr>
+<tr><td>Same, with fixes from the first run</td><td>10</td><td>87</td><td>3</td><td>22 to 20</td><td>Below the bar</td></tr>
+<tr><td>Same, with the name rule softened</td><td>11</td><td>87</td><td>2</td><td>12 to 12</td><td>One question short of the bar</td></tr>
+<tr><td>Plus no guide on length</td><td>9</td><td>85</td><td>6</td><td>21 to 29</td><td>Worse: rejected</td></tr>
+<tr><td>Plus "more when the question needs it"</td><td>8</td><td>86</td><td>6</td><td>18 to 22</td><td>Worse: rejected</td></tr>
+<tr><td>Plus room decided by the question's shape</td><td>6</td><td>92</td><td>2</td><td>11 to 15</td><td>One answer over the error limit; shipped by the owner</td></tr>
+<tr><td>Plus notes on a named verse, on 100 verse questions</td><td>0</td><td>100</td><td>0</td><td>14 to 11</td><td>No worse: shipped. The verse's note under Read further went from 13 to 95 in 100</td></tr>
+</tbody></table></div>
+<p>Two lessons. First, the runs that held length at 190 words won 28 and lost 6 across all questions; the two that loosened it won 17 and lost 12. Second, about one pair in ten is decided by chance, so a run of 100 cannot tell a gain of four questions from nothing. Three of the first runs were spent chasing differences of that size, which was a mistake in how the testing was spent. A fresh run earns its cost when it can show a large difference, or when it checks that a change makes nothing worse before it goes live.</p>
 
 <h2>Links</h2>
 <div class="table-wrap"><table class="skills-table">
@@ -2097,7 +2128,8 @@ const TEST_BODY = `
 <li><b>Freeze a run.</b> Record what retrieval returned, so that two designs see the same material and a result can be replayed. Today the library can move during a run.</li>
 <li><b>Make the error log act.</b> A confirmed error in an article should remove that point from the key, and a confirmed error of ours should become a regression test. Today the log changes nothing.</li>
 <li><b>Use the key or stop building it.</b> Score answers against its points, which says whether they covered what matters, or drop that step and its cost.</li>
-<li><b>Keep a fresh, sealed set.</b> These 300 questions have now shaped the design. The next gate needs questions nobody has looked at.</li>
+<li><b>Score the whole product.</b> The headline judges the answer's text and leaves out the links, which is where this agent is furthest ahead. Score the answer and its links together, by kind of question.</li>
+<li><b>Represent verse questions.</b> A fifth of the library's questions name a verse, and the category draw reached 10 of them in 300. The verse draw used for the last run should be part of every set.</li>
 <li><b>Sample what readers really ask.</b> Add a private sample of production questions, because one publisher's questions are not ours.</li>
 <li><b>Test the checks harder.</b> Plant about 100 errors of several kinds rather than 26, run more noise pairs, and move the confirming step to a stronger model. It currently uses a small one, and that family's small model over-flags.</li>
 <li><b>Check the articles directly.</b> Errors in articles are found only when a head-to-head judge happens to claim one. Read each article against its verses instead.</li>
@@ -2234,7 +2266,8 @@ const LOGIC_BODY = `
 <h2>Advice for the questions</h2>
 <ol>
 <li><b>Choose the evidence first and hold the writer to it.</b> This is live, and it is the largest measured gain.</li>
-<li><b>Route by what must be gathered, not by how to write.</b> Scripture, general knowledge, or both. The remaining losses are questions that needed general knowledge and were pulled toward Scripture.</li>
+<li><b>Route by what must be gathered, not by how to write.</b> Scripture, general knowledge, or both. This is now live: on the questions it changes it won 15 and lost 2 over 200 fresh questions.</li>
+<li><b>Spend on a test only when it can settle the question.</b> A run of 100 cannot resolve a gain of four. Use it to catch a change that makes answers worse, or to cover a part of the product the tests had not reached.</li>
 <li><b>Treat a standpoint as a decision.</b> A confession's own statements are data. An answer given from that standpoint can be checked against them. The standpoint texts tried so far were prose, and prose is what the model ignores or over-applies.</li>
 <li><b>Hold what can be counted.</b> The reader setting that worked had a length that code enforced.</li>
 <li><b>Do not expect a mainstream answer key to reward a position.</b> Where the agent is meant to answer differently from the common view, only a check against the chosen position can show whether it did.</li>
@@ -2286,7 +2319,7 @@ export const POSTS: Post[] = [
     title: "How we test the Scripture Agent's answers",
     date: '2026-11-06',
     description:
-      'How answers are compared blind against two other products and checked against clear, opinionated articles, why answering, accuracy and links are measured apart, the results of 300 questions, what did not work, and how the test should improve.',
+      'How answers are compared blind against two other products and checked against clear, opinionated articles, why answering, accuracy and links are measured apart, the results of 300 questions and seven fresh runs, what did not work, and how the test should improve.',
     picture: {
       svg: '/architecture/ask-testing-flow.svg', png: '/architecture/ask-testing-flow.png', alt: TEST_ALT, width: 1460, height: 930,
       caption: 'Grey arrows are the questions and answers. Pink arrows are checks on the checks. The dashed arrow happens only when needed.',
@@ -2364,10 +2397,10 @@ export const POSTS: Post[] = [
     title: 'How the Scripture Agent answers a question',
     date: '2026-11-06',
     description:
-      'The answer-first design now live for the Scripture Agent: the verses chosen before writing, code proving every one, the writings beside the answer. Also the categories of skills, what 300 questions showed, what did not work, and what comes next.',
+      'The design now live for the Scripture Agent: the intent names what is gathered, the verses, notes or article are read before writing, code proves every verse, and the writings sit beside the answer. Also the categories of skills, what the tests showed, what did not work, and what comes next.',
     picture: {
       svg: '/architecture/scripture-intent-flow.svg', png: '/architecture/scripture-intent-flow.png', alt: ANSWER_ALT, width: 1460, height: 960,
-      caption: 'Live on faithnet as of 6 November 2026. Grey arrows are the question. Pink arrows are a skill on its way in. Grey tiles do not act on the answer.',
+      caption: 'Live on faithnet as of 6 November 2026. Grey arrows are the question. Pink arrows are a skill on its way in, and the dashed pink arrow is what the intent drives: the sources. Grey tiles do not act on the answer.',
     },
     steps: ANSWER_STEPS,
     body: SCRIPTURE_BODY,
