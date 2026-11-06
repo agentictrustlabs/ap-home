@@ -125,6 +125,13 @@ const faithImpact: WhiteLabelConfig = {
       'https://gamenight.faithnet.io/sso-logout',
       'https://bible.faithnet.io/sso-logout',
       'https://field.faithnet.io/sso-logout',
+      'https://church.faithnet.io/sso-logout',
+      'https://town.faithnet.io/sso-logout',
+      'https://names.faithnet.io/sso-logout',
+      'https://coach.faithnet.io/sso-logout',
+      'https://reader.faithnet.io/sso-logout',
+      'https://skills.faithnet.io/sso-logout',
+      'https://workbench.faithnet.io/sso-logout',
     ],
   },
   relyingApps: [
