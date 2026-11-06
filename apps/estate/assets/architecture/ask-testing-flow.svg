@@ -5,7 +5,7 @@
 <style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#eef1fb}.h{font-size:30px;font-weight:700}.n{font-size:16px;font-weight:650}.t{font-size:13px;font-weight:600}.k{font-size:12px;font-weight:700}.s{font-size:13px;fill:#9aa5c7}.b{font-size:12px;font-weight:700;letter-spacing:.09em;fill:#9aa5c7}</style></defs>
 <rect width="1460" height="930" rx="22" fill="#0b1020"/>
 <text x="40" y="52" class="h">How we test the Scripture Agent's answers</text>
-<text x="40" y="78" class="s" text-anchor="start">Blind, in both orders, under one neutral standard. A judge's claim of an error counts only once it is confirmed. The 300-question run is under way.</text>
+<text x="40" y="78" class="s" text-anchor="start">Blind, in both orders, under one neutral standard. A judge's claim of an error counts only once it is confirmed. A 300-question run has finished.</text>
 <path d="M112 400H144" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
 <path d="M228 400H260" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
 <path d="M344 400H376" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>

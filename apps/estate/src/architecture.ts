@@ -482,7 +482,7 @@ const ANSWER_STEPS: Step[] = [
 
 const SCRIPTURE_BODY = `
 <h2>Where this stands</h2>
-<p>As of 5 November 2026, the picture and steps above are the design we are testing. They are not yet what answers readers. A 300-question run on fresh questions is under way, and the design goes live only if it holds up.</p>
+<p>As of 5 November 2026, the picture and steps above are the design we are testing. They are not yet what answers readers. It held up on 300 questions it was not tuned on, and it has not yet been switched on.</p>
 
 <h2>What readers get today</h2>
 <p>Today's path reads what it holds first and writes from that. It has ten steps: admit, route, choose a plan, gather, gate, draft, prove, revise, enrich and receipt. A judge chooses one answer plan or none while the agent gathers. Writings are handed to the writer, and more are added to the answer after the proof.</p>
@@ -529,18 +529,19 @@ const SCRIPTURE_BODY = `
 <p>No skill in any category can switch off the proof or change the edition.</p>
 
 <h2>What testing has shown so far</h2>
-<p>From a 40-question pilot, as of 5 November 2026, with <a href="/architecture/testing-answers">a stricter test</a>. We tuned on these questions, and a 300-question run on fresh ones is under way, so read these as direction. Earlier results on this page came from weaker judging and are replaced here.</p>
+<p>From 300 questions drawn across the categories of a large question-and-answer library, none of them used in tuning, as of 5 November 2026. Each answer was checked alone against the article on its question and the text of the verses it cites.</p>
 <div class="table-wrap"><table class="skills-table">
-<thead><tr><th>Version</th><th>Median words</th><th>Answers with an error (of 40)</th><th>Errors on the main point</th><th>Off-topic verses</th><th>Against a short-answer product: wins, ties, losses</th></tr></thead>
+<thead><tr><th>Version</th><th>Median words</th><th>Answers with an error</th><th>Answers with a main-point error (rate)</th><th>Verses per answer</th><th>Verses graded central</th><th>Verses graded off-topic</th></tr></thead>
 <tbody>
-<tr><td>Today's path</td><td>410</td><td>16</td><td>4</td><td>51 of 462</td><td>2, 23, 15</td></tr>
-<tr><td><b>Answer first, verses chosen first</b></td><td>about 220</td><td>4</td><td>1</td><td>14 of 244</td><td>2, 31, 7</td></tr>
+<tr><td>Today's path</td><td>403</td><td>146 of 300 (49%)</td><td>67 errors (22%)</td><td>11</td><td>35%</td><td>15%</td></tr>
+<tr><td><b>Answer first, verses chosen first</b></td><td>189</td><td>64 of 300 (21%)</td><td>32 errors (11%)</td><td>6</td><td>49%</td><td>9%</td></tr>
 </tbody></table></div>
-<p><b>What worked.</b> The design, not any one skill: take the question in its plain meaning, answer first, choose the verses before writing and hold the writer to them, and keep writings beside the answer. The accuracy check names about two in three planted errors, so the true counts are higher.</p>
+<p><b>What worked.</b> The design, not any one skill: take the question in its plain meaning, answer first, choose the verses before writing and hold the writer to them, and keep writings beside the answer. In the same run, 93% of the writings chosen to read further were graded central or supporting. The accuracy check names about three in four planted errors, so the true counts are higher for every version; compare the versions, and do not read the counts as totals.</p>
+<p><b>What it has not fixed.</b> Answers on subjects outside the Bible are the weakest. Holding the writer to chosen verses pulls such answers toward Scripture when the reader asked what something is. That is the next change to test.</p>
 
 <h2>What we tested that did not work</h2>
 <ul>
-<li><b>Letting the judge choose among form skills, so far.</b> The judge's picks look sensible, but on the same questions a deliberately wrong skill did as well (39 of 40 tied). The first version of this test was also flawed: the general rules were placed after the skill and overrode it. Fixing that, and rewriting the skills to differ, did not change the result.</li>
+<li><b>Letting the judge choose among form skills, so far.</b> The judge's picks look sensible, but on 300 questions a deliberately wrong skill did about as well: 14 better, 8 worse, 278 tied, and against no skill 13 better, 10 worse, 277 tied. Errors were no lower. The first version of this test was also flawed: the general rules were placed after the skill and overrode it. Fixing that, and rewriting the skills to differ, did not change the result.</li>
 <li><b>Rules for each kind of passage</b> (wisdom, parable, narrative, vision, song, law). On 40 fresh questions about a text, 36 tied with no rule and 39 tied with a wrong rule, and errors did not fall.</li>
 <li><b>Gathering differently by scope.</b> Only questions from outside the Bible showed a modest gain. A first gain on people and places in the Bible (11 better, 2 worse) was level on the rerun (8 and 8).</li>
 <li><b>More data by canonical id.</b> Answers about a person bound to a canonical id were no better than others (4 better, 5 worse).</li>
@@ -2048,7 +2049,7 @@ const TEST_STEPS: Step[] = [
 
 const TEST_BODY = `
 <h2>Where this stands</h2>
-<p>As of 5 November 2026, a 40-question pilot has run and the 300-question run is under way. The questions below are the pilot's, and we tuned on them, so they are not yet the score to trust. Most head-to-head comparisons tie.</p>
+<p>As of 5 November 2026, a 40-question pilot and a 300-question run have finished. Results are on <a href="/architecture/scripture-ask">the Scripture post</a>. Most head-to-head comparisons tie, and the separate accuracy and links checks say the most.</p>
 
 <h2>What we tested that did not work</h2>
 <ul>
@@ -2080,7 +2081,7 @@ export const POSTS: Post[] = [
     title: "How we test the Scripture Agent's answers",
     date: '2026-11-05',
     description:
-      'How answers are compared blind against clear, opinionated articles and two other products, why answering, accuracy and links are measured apart, and what we tested that did not work. A 300-question run is under way.',
+      'How answers are compared blind against clear, opinionated articles and two other products, why answering, accuracy and links are measured apart, and what we tested that did not work. Results are in the Scripture post.',
     picture: {
       svg: '/architecture/ask-testing-flow.svg', png: '/architecture/ask-testing-flow.png', alt: TEST_ALT, width: 1460, height: 930,
       caption: 'Grey arrows are the questions and answers. Pink arrows are checks on the judge. Dashed arrows happen only when needed.',

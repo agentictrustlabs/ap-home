@@ -8,7 +8,7 @@ const { out, tile, arrow, note, finish } = picture(W, H);
 
 out.push(`<rect width="${W}" height="${H}" rx="22" fill="${C.bg}"/>`);
 out.push(`<text x="40" y="52" class="h">How we test the Scripture Agent's answers</text>`);
-out.push(`<text x="40" y="78" class="s" text-anchor="start">Blind, in both orders, under one neutral standard. A judge's claim of an error counts only once it is confirmed. The 300-question run is under way.</text>`);
+out.push(`<text x="40" y="78" class="s" text-anchor="start">Blind, in both orders, under one neutral standard. A judge's claim of an error counts only once it is confirmed. A 300-question run has finished.</text>`);
 
 const X = { lib: 72, draw: 188, aside: 304, key: 420, answer: 536, judge: 672, confirm: 788, score: 904, remember: 1030, card: 1146, learn: 1378 };
 const h = S / 2 + 8;
