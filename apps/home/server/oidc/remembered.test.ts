@@ -50,7 +50,9 @@ import { askAsMeCaveats, siteCaveats } from '../../src/lib/delegation';
 import type { RelyingApp } from '../../src/whitelabel/schema';
 
 const inDays = (d: number) => Math.floor(Date.now() / 1000) + d * 86_400;
-const wire = (delegate: string, until = inDays(300)) => ({
+// Fixed once: compared across calls, a time read at each call differs when two calls straddle a second.
+const FAR = inDays(300);
+const wire = (delegate: string, until = FAR) => ({
   delegator: PERSON, delegate, authority: '0x00', salt: '1', signature: '0x03',
   caveats: (delegate === ASK ? askAsMeCaveats(until) : siteCaveats(until)).map((c) => ({ enforcer: c.enforcer, terms: c.terms })),
 });

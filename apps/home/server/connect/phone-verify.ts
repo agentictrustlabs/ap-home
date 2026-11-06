@@ -10,7 +10,8 @@
 // SMS is a CONTACT-CONTROL signal (SIM-swap-prone) — the intended durable path is: bootstrap here, then the
 // client prompts a passkey (see PhoneAuthCard). This route does not itself gate high-trust authority.
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
-import { mintAgentSession, importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { mintAgentSession, importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { checkPhoneVerification, normalizeE164 } from '../_lib/sms-sender';
 import { readPhoneFacet, recordPhoneFacet, phoneHash, readRotation } from '../../src/lib/kv-indexer';
 import { withRecognition } from '../_lib/recognition';
@@ -39,7 +40,7 @@ async function sessionAgent(request: Request, env: FnContext['env']): Promise<Ca
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   return v.ok ? (v.session.sub as CanonicalAgentId) : null;
 }
 

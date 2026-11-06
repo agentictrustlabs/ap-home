@@ -52,6 +52,10 @@ export interface GrantRequestBody {
    *  read the vault record, and a tampered SPA must not be able to hand an address to an app that
    *  was never permitted one. */
   profile_email?: string;
+  /** Spec 445 §5 — the request came through a host ("through Claude"). The sheet said so, and that Allow is not
+   *  remembered for the app asking by itself. A page that leaves it out earns nothing: the skip rule refuses a
+   *  request through a host on its own. */
+  via_host?: string;
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -97,6 +101,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // constructing the delegation; /oidc/grant verifies the supplied delegation's
       // delegate equals this stored value.
       delegate: getClientDelegateFor(client, req.delegation_template),
+      ...(req.via_host ? { via_host: true } : {}),
       code_challenge: req.code_challenge,
       nonce: req.nonce ?? '',
       delegation_template: req.delegation_template,
@@ -154,5 +159,7 @@ export interface StoredEnrollmentGrant {
   code_challenge: string;
   nonce: string;
   delegation_template: string;
+  /** Spec 445 §5 — set when the sheet was shown for a request through a host. */
+  via_host?: true;
   exp_ms: number;
 }

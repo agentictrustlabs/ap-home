@@ -7,7 +7,8 @@
 // Gated twice, so it only indexes a REAL, owner-authorized custodian: (1) the Bearer session must control
 // `agent`; (2) `agent` must ACTUALLY hold the passkey on-chain (AgentAccountClient.hasPasskey). The facet
 // is asserted-grade evidence; the login path re-verifies hasPasskey + ERC-1271 PoP before issuing.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { toCanonicalAgentId } from '@agenticprimitives/identity-directory-adapters';
 import type { Address, Hex, CredentialPrincipal } from '@agenticprimitives/types';
@@ -36,7 +37,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // (1) The session must control the target agent.
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (!v.ok) return json({ error: 'invalid session' }, 401);
   if ((v.session.sub.split(':').pop() ?? '').toLowerCase() !== agent.toLowerCase()) {
     return json({ error: 'session does not control this agent' }, 403);

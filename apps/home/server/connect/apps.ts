@@ -14,7 +14,8 @@
 // registration bootstrapping registration. So the token that reaches here must be the person's
 // own Home session, and there is no fallback (ADR-0013).
 
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { CONNECT_DOMAIN } from '../../src/lib/domain';
@@ -51,7 +52,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, {
+  const v = await verifySession(token, {
     keys,
     expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso',
     expectedIss: ownIssuer(request, env),

@@ -5,7 +5,8 @@
 //   • no facet                → BOOTSTRAP (a new person home needs to be created; client onboards).
 // The OTP record is keyed by SHA-256(email); the code is checked with bounded attempts (anti-brute-force).
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
-import { mintAgentSession, importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { mintAgentSession, importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { readEmailFacet, recordEmailFacet, recordEmailOwner, emailHash, readRotation } from '../../src/lib/kv-indexer';
 import { withRecognition } from '../_lib/recognition';
 import { resolveKmsAgent } from '../_lib/kms-resolve';
@@ -35,7 +36,7 @@ async function sessionAgent(request: Request, env: FnContext['env']): Promise<Ca
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   return v.ok ? (v.session.sub as CanonicalAgentId) : null;
 }
 

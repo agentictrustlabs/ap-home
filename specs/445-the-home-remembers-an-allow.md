@@ -1,8 +1,8 @@
 # Spec 445 — The Home remembers an Allow, and proves who is asking with a cookie no script can read
 
 **Status:** written 2026-11-05. **W0–W5 live since 2026-11-05 (PR #99)**, with one item held back (`grant-cache.ts`, see W5).
-Seed Bible Reader is in `shadow`; **no app skips the sheet until W4's flag moves to `on`**, after a clean week (from
-2026-11-12). W6 waits on the owner's decision (§3.3). W7 is partly done: see W7. §12 lists where the build departs from the first
+**Seed Bible Reader is `on` since 2026-11-05: an allowed person skips the sheet there.** The owner turned it on ahead of the shadow week, with no
+operational users yet. **Global.Church Engage and Platform are `on` since 2026-11-05**, turned on by their owner. Other apps show the sheet until each is reviewed. W6 waits on the owner's decision (§3.3). W7 is partly done: see W7. §12 lists where the build departs from the first
 draft of this spec, and why. §13 answers a second agent's review, which changed the design in five places.
 **Asked by:** Paul's review of sign-in (2026-11), answered point by point at
 `https://faithnet.estate/architecture/sign-in#pauls-points`. This spec is the design that page says is missing.
@@ -479,5 +479,37 @@ a new signature, so there is no stored wire to hand back, and check 5 keeps the 
 - **The cookie is the proof,** as everywhere: a stolen token gets nothing. The audit entry names the leaf.
 - **Shadow first,** as in W3, with `session_key_requested` becoming `would: 'allow'`.
 
-**To decide before building.** Does Gather27 need a new key on every sign-in, or could it reuse one across a stored leaf's life? If it can
-reuse one, a stored leaf and no new signature is simpler than anything above, and the spec's rule that a skipped sheet signs nothing holds.
+**To check before building.** The owner's own Gather27 does not need a new key on every sign-in (2026-11-05). So a stored leaf and no new
+signature looks simpler than anything above, and keeps the rule that a skipped sheet signs nothing. The real Gather27 runs on a separate
+estate, and has not been read: confirm it there first. Its registration and this spec's rollout are that estate's to decide.
+
+## 16. A sign-out that reaches every app
+
+**The problem.** The Home's sign-out walked a default list of three apps by top-level navigation. Every other app stayed signed in on its own
+token and could renew it silently. Asked to reach all of them, the obvious change is wrong: adding an app to the walk navigates the person to
+it, and an app that does not send them back strands them there. Read in a real browser on 2026-11-05, loading each `/sso-logout` with a return:
+
+| | Apps |
+| --- | --- |
+| **Signs out and returns** | `heartcoach.faithnet.io`, `gamenight.faithnet.io`, `bible.faithnet.io`, and `faithnet.estate`, added here |
+| **Signs out, does not return** (lands on its own root) | `commons-production…workers.dev`, `field-web…workers.dev`. Both were in the default walk |
+| **No sign-out page** (serves its ordinary page, or redirects, or a 404) | `church`, `town`, `skills`, `workbench`, `coach`, `seed-reader`, `publishing`, `reader`, `names` (all `.faithnet.io`), demo-terms, engage-web, demo-web and demo-web-pro, skills-corpus, demo-corpus, uupg-tracker, campaign-studio, org-site, newcity-portal, openbook-tyndale |
+| **Behind their own gate, not read** | `engage.global.church`, `platform.global.church` |
+
+Not walked by design: `home-mcp` has no browser session. Not reachable: demo-org, demo-jp, demo-gs.
+
+**What reaches every app now, with no change to any app: renewal ends.** `POST /connect/logout` with `everywhere` deletes the
+`oidc-deleg:<digest>` binding of every wire on the person's rows, current and older. An app's next silent renewal at `/token` fails, so it must send
+the person to the Home, where they meet a credential. It takes the recognition cookie, or a real Home session: an id_token does not pass, so an app
+cannot sign a person out of the others. "Not you?" and a forced chooser end the cookie and leave the apps alone.
+
+**What it cannot do.** An id_token already issued stays valid to its own expiry, up to 7 days, for whichever app holds it. The Home cannot recall a
+token an app holds, and a wire on chain is untouched: signing out is not revoking. So an app with no sign-out page shows the person signed in until
+its token lapses or it next tries to renew.
+
+**The walk is now a verified list,** `whitelabel.frontChannelLogout`, by Home origin, replacing the env default and a hardcoded origin for that Home.
+`tests/e2e-sso/logout-chain.spec.ts` loads each entry the way the chain does. Another Home keeps the older walk until it has a list of its own.
+
+**The rest is each app's own change.** An app joins by serving `/sso-logout`: clear its own session, then redirect to `return` when that is on its Home's
+`/logout`. `apps/estate/assets/sso-logout.js` is the shortest example, including how a sign-out reaches a session in another tab. Commons and Field-web
+need only their return allowlist fixed. When an app returns, add it to the list.

@@ -116,6 +116,16 @@ const faithImpact: WhiteLabelConfig = {
     { id: 'treasury', label: 'Treasuries', blurb: 'Funds and giving you help manage.', status: 'live', verb: 'manage' },
     { id: 'data-source', label: 'Data sources', blurb: 'Records you help protect and share, with consent.', status: 'soon', verb: 'protect' },
   ],
+  // Spec 445 §16 — verified to send a person back to this Home, 2026-11-05. commons-app and field-web run their sign-out but do not
+  // return, and most other apps have no /sso-logout yet: both listed in the spec. Add an app here when it returns.
+  frontChannelLogout: {
+    'https://www.faithnet.me': [
+      'https://faithnet.estate/sso-logout',
+      'https://heartcoach.faithnet.io/sso-logout',
+      'https://gamenight.faithnet.io/sso-logout',
+      'https://bible.faithnet.io/sso-logout',
+    ],
+  },
   relyingApps: [
     // Church member portal (ap-church). The canonical church origin is first so a sign-in
     // or logout returns there. A site-login identifies the person; church record authority
@@ -782,8 +792,9 @@ const faithImpact: WhiteLabelConfig = {
       read_grant: { resources: ['vault:impact-profile'] },
       // People keep the reader open for days; a one-hour sign-in signed them out mid-read. Seven days, this app only.
       session_ttl_seconds: 7 * 24 * 60 * 60,
-      // Spec 445 W3 — decide and record, still showing the sheet. `'on'` (W4) follows a week of clean decisions.
-      remembered_consent: 'shadow',
+      // Spec 445 W4 — the first app that skips the sheet for a person who already allowed it. Turned on by the owner on 2026-11-05,
+      // ahead of the shadow week, with no operational users yet.
+      remembered_consent: 'on',
     },
     // specs 266/267 — "Bible Explorer" relying app: the Verifiable Content Substrate +
     // scripture vertical demo (demo-bible-ontology Worker). Connects via Global.Church
@@ -897,6 +908,9 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'profile', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // Spec 445 W4 — turned on by its owner, Global.Church, on 2026-11-05: a person who already allowed it is not asked again.
+      // Its sign-in is a full-page `site-login` with no prompt; `org-create` is not a remembered kind and always asks.
+      remembered_consent: 'on',
     },
     // Global.Church Platform (platform.global.church) — GC's church explorer, developer portal
     // (API keys) and admin. Same server-side sign-in as `gc-engage` above: /api/auth/start 307s here
@@ -916,6 +930,9 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'profile', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // Spec 445 W4 — turned on by its owner, Global.Church, on 2026-11-05: a person who already allowed it is not asked again.
+      // Its sign-in is a full-page `site-login` with no prompt; `org-create` is not a remembered kind and always asks.
+      remembered_consent: 'on',
     },
     // Engagement Campaign Studio (uupg apps/campaign) — org-scoped ask over demo-a2a needs a
     // session whose `aud` is THIS client_id. Borrowing `uupg-tracker` mints a valid token that

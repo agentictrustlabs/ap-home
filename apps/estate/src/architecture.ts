@@ -664,10 +664,10 @@ const SUBSTRATE_BODY = `
 const SIGNIN_ALT =
   'A flow diagram. An app asks the Home to sign a person in. The Home checks the app against its registry and looks for a Home session. ' +
   'Without a session the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation the ' +
-  'person signs, its check on chain, a record with a single-use code, and the code exchanged for an id_token. Three arcs run above the row. ' +
+  'person signs, its check on chain, a record with a single-use code, and the code exchanged for an id_token. Arcs run above the row. ' +
   'A new app for a person already signed in goes from Recognize to Allow. An app that still holds its delegation goes straight to Token. ' +
-  'A designed path, live in shadow, records its decision and will go from Recognize to Verify, with no sheet and no new signature. ' +
-  'A note says that in Chrome, FedCM signs nothing new: it hands back the wire from the last Allow, or goes to a popup with the sheet.';
+  'A fourth arc goes from Recognize to Verify, for an app the person already allowed: the server skips the sheet when the app asks for nothing more and the stored delegation still verifies on chain, an HttpOnly cookie proves who is asking, and nothing is signed. It is on for Seed Bible Reader, and each other app joins after review. ' +
+  'Notes say that in Chrome the same rule applies for a key the Home holds, and that signing out ends the Home session and every app\'s silent renewal, then walks the apps with a sign-out page of their own.';
 
 const HOME_PAGES = "The Home's pages, in the person's browser. The Home is a Next.js app (<code>apps/home</code>) at <code>www.faithnet.me</code>.";
 const HOME_SERVER = "The Home's server (<code>apps/home/server</code>). Tickets, codes and rows are kept in its key-value store, <code>AUTH_CODES</code>.";
@@ -716,7 +716,7 @@ const SIGNIN_STEPS: Step[] = [
       "The token is tried by reading the person's profile with it. It must name an account that is deployed. If the request pinned a name, the session must be that name.",
       'With a session, the person goes straight to Allow. A passkey only works on the host it was made for, so a passkey person is first moved to their own subdomain of the Home, with the request carried along.',
       'Without a session, the person goes to Prove.',
-      'The page now asks the server whether the person allowed this app before, and the server records its answer. No app acts on that answer yet, so the sheet still shows. See the next design, below.',
+      'The page asks the server whether the person allowed this app before. For an app that is on, a yes goes to Verify with no sheet. See The Home remembers an Allow, below.',
     ],
     where: [HOME_PAGES, 'Source: <code>EntryExperience.tsx</code> (the routing), <code>RecognizedEnroll.tsx</code> (the recognized path), <code>src/lib/sso-cookie.ts</code>, <code>src/context/session.tsx</code>.'],
     by: 'Code only.',
@@ -861,7 +861,7 @@ const SIGNIN_BODY = `
 <h2>Two things come back, not one</h2>
 <p>A sign-in at the Home returns an <b>id_token</b> and a <b>delegation</b>. The id_token is identity: the Home's signed statement of who this person is, for this app, for a few days. The delegation is authority: the person's own signed statement of what this app's key may do as them, until a date, revocable on chain. The Home issues the first. Only the person can issue the second.</p>
 <p>The row in the picture is the first sign-in, every step. The three arcs above it are the other visits. Each one skips what it does not need.</p>
-<p class="callout"><b>From review.</b> Paul's points on remembered consent are quoted and answered one by one at the bottom of this page: <a href="#pauls-points">Paul's points, answered</a>. <a href="#next-design">The next design</a>, which answers them, comes just before.</p>
+<p class="callout"><b>From review.</b> Paul's points on remembered consent are quoted and answered one by one at the bottom of this page: <a href="#pauls-points">Paul's points, answered</a>. <a href="#next-design">The Home remembers an Allow</a>, which answers them, comes just before.</p>
 
 <h2>First time in</h2>
 <p>A person who has never used the estate presses Sign in at an app.</p>
@@ -919,8 +919,18 @@ const SIGNIN_BODY = `
 </ul>
 <p>What an app does with the delegation once it is signed in is the next picture: <a href="/architecture/agent-harness">How an ask runs at an agent</a>.</p>
 
-<h2 id="next-design">The next design: the Home remembers an Allow</h2>
-<p>Spec 445 is the design for the dashed amber arc. The code went live on 5 November 2026 in shadow: Seed Bible Reader decides and records, and still shows the sheet, so no app skips it yet. Everything above this section describes what a person meets today.</p>
+<h2 id="signing-out">Signing out</h2>
+<p>Each app keeps its own sign-in, so leaving the Home does not by itself end them. A sign-out at <code>/logout</code> does three things.</p>
+<ol>
+<li><b>It ends the Home session.</b> The session token, the <code>ap_sso</code> cookie, and the recognition cookie, whose record is deleted on the server. The next app to ask meets a credential.</li>
+<li><b>It ends every app's silent renewal.</b> The server deletes the binding of every delegation on the person's records, current and older. This reaches every app with no change to it: its next renewal fails, and it has to send the person to the Home. Delegations stay on chain, because signing out is not revoking. Revoke is in Connected.</li>
+<li><b>It walks the apps that can take part.</b> The Home sends the browser to each app's <code>/sso-logout</code>, and each clears its own session and sends the person back. Today that is faithnet.estate, Heart Coach, Game Night and the Bible reader. An app is added only once it has been seen to return, because one that does not would strand the person on a page they were not using.</li>
+</ol>
+<p><b>What this does not do yet.</b> A token an app already holds stays valid until it expires, up to seven days, and the Home cannot recall it. So an app with no sign-out page of its own can still show the person as signed in until that token lapses or it next tries to renew. Most apps have no such page yet, and Commons and Field run theirs but do not send the person back. Each is a small change in that app.</p>
+<p>"Not you?" is different. It ends the Home session so the person can choose who to be, and leaves their apps alone.</p>
+
+<h2 id="next-design">The Home remembers an Allow</h2>
+<p>This is spec 445, the amber arc in the picture. It went live on 5 November 2026 and is on for Seed Bible Reader. Each other app shows the sheet until it has been reviewed and turned on. Sections above this one that say the sheet is always shown describe those apps.</p>
 <p>A person who allowed an app is not asked again, as long as the app asks for nothing more and what they signed still holds. Nothing is signed on that visit. The app is handed the wires it already had, each checked on chain first.</p>
 
 <h3>Who is asking: a cookie script cannot read</h3>
@@ -957,11 +967,7 @@ const SIGNIN_BODY = `
 <p>Connected Apps, under Apps you signed into, lists what each app may do, when it last signed in, and every live wire, each with Revoke. <b>Revoke</b> is on chain, and the next sign-in shows the sheet. <b>Forget this app</b> drops what was agreed and keeps the wires listed. <b>Ask me every time</b> keeps the sheet for that app. Activity lists each sign-in that passed: "Signed in to <i>App</i>. No new permission."</p>
 
 <h3>How it goes live</h3>
-<ol>
-<li><b>Shadow.</b> Seed Bible Reader decides and records, and still shows the sheet.</li>
-<li><b>One app.</b> After a clean week, the reader is switched on, and tested live: no sheet and no transaction on a return, the sheet after a revoke, and a refusal for a session token replayed from elsewhere.</li>
-<li><b>The rest,</b> one at a time. The browser's reuse cache goes when the last app using it is on.</li>
-</ol>
+<p>One app at a time, each a reviewed change in the registry. Seed Bible Reader is on. The others show the sheet, and the server counts what it would have decided for them. The browser's reuse cache goes when the last app using it is on.</p>
 
 <h3>What a second review changed</h3>
 <p>Another agent, working on the same problem, reviewed this page. Each point was read against the code.</p>
@@ -981,11 +987,12 @@ const SIGNIN_BODY = `
 <ul>
 <li><b>A forwarded link.</b> An invitation link or a <code>#session=</code> link can still open a session in someone else's browser. It sets no cookie, so no sheet is skipped, and the sheet names whose session it is.</li>
 <li><b>How long recognition lasts.</b> One hour, decided for now, and looked at again once the shadow numbers are in. Thirty days would mean no prompt at all on return, and a browser left signed in could enter allowed apps for a month.</li>
+<li><b>Apps with no sign-out page.</b> See <a href="#signing-out">Signing out</a>.</li>
 <li><b>Apps with a session key,</b> Gather27 among them. There is a draft design in spec 445: the right to ask for a leaf becomes part of the Allow. Not built.</li>
 </ul>
 
 <h2 id="pauls-points">Paul's points, answered</h2>
-<p>Paul reviewed the sign-in and wrote up what he found and what he would do about it. His words are quoted below, a point at a time, each with a direct answer from the code as it stood at his review. Spec 445, <a href="#next-design">above</a>, has since changed that code, and it is live in shadow. File names are under <code>apps/home</code>.</p>
+<p>Paul reviewed the sign-in and wrote up what he found and what he would do about it. His words are quoted below, a point at a time, each with a direct answer from the code as it stood at his review. Spec 445, <a href="#next-design">above</a>, has since changed that code, and it is on for Seed Bible Reader. File names are under <code>apps/home</code>.</p>
 
 <h3>1. Is consent remembered?</h3>
 <blockquote><p>"The Home never checks whether a person has already allowed an app."</p></blockquote>
@@ -1036,16 +1043,16 @@ const SIGNIN_BODY = `
 
 <h3>8. Is any of it built?</h3>
 <blockquote><p>"You already have a note about this but it has not been done yet."</p></blockquote>
-<p><b>Correct.</b> There are two notes and no code. <code>src/lib/sso-cookie.ts</code> carries a hardening note that a server-set HttpOnly cookie should replace the script-managed one. <code>EntryExperience.tsx</code> notes at <code>prompt=none</code> that there is no remembered-consent store yet. Nothing for either is live. In the picture this is the dashed amber arc.</p>
-<p>That is now moving: the design is <a href="#next-design">written up above</a> as spec 445, and the code is live in shadow.</p>
+<p><b>Correct.</b> There are two notes and no code. <code>src/lib/sso-cookie.ts</code> carries a hardening note that a server-set HttpOnly cookie should replace the script-managed one. <code>EntryExperience.tsx</code> notes at <code>prompt=none</code> that there is no remembered-consent store yet. Neither was live at the time.</p>
+<p>That has since been done: see <a href="#next-design">The Home remembers an Allow</a>, above.</p>
 
 <h3>In short</h3>
 <ul>
 <li>Points 1, 2, 4 and 8 are right as written.</li>
 <li>Point 3 is right for the reader and for any app that takes an ask wire. A bare site sign-in reuses its delegation in the same browser.</li>
 <li>Points 5 to 7 are the right fix. The order is the cookie first, then the stored terms, then the server step that skips.</li>
-<li>Once it is live, <code>prompt=none</code> can return a code, but only for the person the app names. Today it cannot.</li>
-<li><a href="#next-design">The next design</a> does all of this, with what a second review added.</li>
+<li><code>prompt=none</code> can now return a code, but only for the person the app names, for an app that is on.</li>
+<li><a href="#next-design">The Home remembers an Allow</a> does all of this, with what a second review added.</li>
 </ul>`;
 
 // ───────────────────────────────────────────────────────────────── the translation harness
@@ -2066,7 +2073,7 @@ export const POSTS: Post[] = [
       'The path from pressing Sign in at an app to the app holding a delegation: what the Home checks, what the person signs, what is remembered, and what a second app or a return visit skips.',
     picture: {
       svg: '/architecture/sign-in-flow.svg', png: '/architecture/sign-in-flow.png', alt: SIGNIN_ALT, width: 1460, height: 1020,
-      caption: 'Grey arrows are a first sign-in. Green is a new app for a person already signed in. Blue is an app coming back. Dashed amber is the next design, live in shadow: it decides and records, and the sheet is still shown.',
+      caption: 'Grey arrows are a first sign-in. Green is a new app for a person already signed in. Blue is an app coming back. Amber is an app the person already allowed: no sheet, and nothing signed.',
     },
     steps: SIGNIN_STEPS,
     byHeading: 'Who acts',

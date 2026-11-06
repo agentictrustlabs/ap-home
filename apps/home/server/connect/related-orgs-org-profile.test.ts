@@ -23,7 +23,7 @@ vi.mock('../_lib/server-broker', () => ({
 }));
 vi.mock('@agenticprimitives/connect', () => ({
   importJwks: async () => [],
-  verifyAgentSession: async () => ({ ok: true, session: { sub: `eip155:1:${PERSON}` } }),
+  verifyAgentSession: async () => ({ ok: true, session: { sub: `eip155:1:${PERSON}`, principal: { kind: 'passkey' } } }),
 }));
 
 import { onRequestGet, onRequestPost } from './related-orgs';

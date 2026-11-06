@@ -9,7 +9,8 @@
 // NOTE: the OIDC subject is keyed on (iss, sub) — never email (CN-3). The agent
 // is RESOLVED via the directory; it is not derived from the email.
 import { completeLogin, oidcFacetId } from '@agenticprimitives/connect-auth/google';
-import { newAuthCode, validateRedirectUri, importJwks, verifyAgentSession, mintAgentSession } from '@agenticprimitives/connect';
+import { newAuthCode, validateRedirectUri, importJwks, mintAgentSession } from '@agenticprimitives/connect';
+import { verifySession } from '../../_lib/home-session';
 import type { CanonicalAgentId, CredentialPrincipal } from '@agenticprimitives/types';
 import { recordOidcFacet, readOidcFacet, readRotation, recordEmailOwner } from '../../../src/lib/kv-indexer';
 import { resolveKmsAgent } from '../../_lib/kms-resolve';
@@ -145,7 +146,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       return new Response(null, { status: 302, headers: { location: dest.toString() } });
     };
     const keys = await importJwks(jwks);
-    const v = await verifyAgentSession(stash.linkToken, { keys, expectedIss: iss, expectedAud: stash.aud });
+    const v = await verifySession(stash.linkToken, { keys, expectedIss: iss, expectedAud: stash.aud });
     if (!v.ok) return back('link_failed', { reason: 'invalid session' });
     if (v.session.assurance !== 'onchain-confirmed') {
       return back('link_failed', { reason: 'a custody-grade session is required to link Google' });

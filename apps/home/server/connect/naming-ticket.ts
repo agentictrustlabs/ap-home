@@ -15,7 +15,8 @@ import { demoPersonaFor, demoCustodianAddress } from '../_lib/demo-custody';
 import { createPublicClient, http } from 'viem';
 import { DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response => new Response(JSON.stringify(b), { status: s, headers: { 'content-type': 'application/json', ...cors } });
@@ -79,7 +80,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) return json({ error: 'unauthorized' }, 401);
   const { jwks } = await getServer(env);
-  const v = await verifyAgentSession(token, { keys: await importJwks(jwks), expectedAud: e.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys: await importJwks(jwks), expectedAud: e.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (!v.ok) return json({ error: 'unauthorized' }, 401);
   const person = (v.session.sub as string).split(':').pop()!.toLowerCase() as Address;
 

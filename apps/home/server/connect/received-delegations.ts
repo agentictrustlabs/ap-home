@@ -8,7 +8,8 @@
 // established by the person↔org link in the vault, so no per-org ERC-1271
 // challenge is needed. No person identity of the grantors is exposed (ADR-0025) —
 // only org↔org grants.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 
@@ -36,7 +37,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const homeAud = env.DEMO_SSO_AUD ?? 'demo-sso';
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: clientId ?? homeAud, expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: clientId ?? homeAud, expectedIss: ownIssuer(request, env) });
   if (!v.ok) return jsonCors({ error: `invalid session token: ${v.reason}` }, request, 401);
 
   const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();

@@ -19,7 +19,8 @@
 //      allow-list. This is the one that matters: without it this endpoint would be a way to park a
 //      full-vault self-delegation and have the Home hand it back on request.
 // A stored grant is returned only while its own timestamp caveat still covers now.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { decodeTimestampTerms, decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import type { Hex } from 'viem';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
@@ -45,7 +46,7 @@ async function personOf(request: Request, env: FnContext['env']): Promise<string
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, {
+  const v = await verifySession(token, {
     keys,
     expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso',
     expectedIss: ownIssuer(request, env),

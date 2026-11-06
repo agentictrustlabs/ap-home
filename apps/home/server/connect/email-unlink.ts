@@ -4,7 +4,8 @@
 // nothing on chain. The facet is TOMBSTONED, never deleted (SEC-009: the index stays append-only and auditable);
 // the Home records the unlink in the person's vault (`security.channels`) after this returns.
 // The agent is the SESSION's subject — a client never names which agent to unlink from.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import type { CanonicalAgentId } from '@agenticprimitives/types';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { unlinkEmailFacet } from '../../src/lib/kv-indexer';
@@ -21,7 +22,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!token) return json({ error: 'session required' }, 401);
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (!v.ok) return json({ error: 'invalid session' }, 401);
   const agent = v.session.sub as CanonicalAgentId;
 

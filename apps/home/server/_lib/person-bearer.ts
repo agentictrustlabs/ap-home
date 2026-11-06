@@ -1,7 +1,8 @@
 // THE PERSON BEHIND A BEARER — a Home session, or an id_token this Home minted for a registered relying app (the
 // app's sign-in: the reader holds one, never a Home session). Either names the person's smart agent; what that
 // person may then do is still each endpoint's (and the agent's) to decide.
-import { importJwks, verifyAgentSession, verifyIdToken } from '@agenticprimitives/connect';
+import { importJwks, verifyIdToken } from '@agenticprimitives/connect';
+import { verifySession } from './home-session';
 import { getServer, ownIssuer, type FnContext } from './server-broker';
 // Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
 import { resolveClient } from './oidc-registry';
@@ -21,7 +22,7 @@ export async function personFromBearer(request: Request, env: FnContext['env']):
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (v.ok) {
     const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
     return person ? { person, token, via: 'session' } : null;

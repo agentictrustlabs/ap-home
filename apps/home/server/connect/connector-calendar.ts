@@ -10,7 +10,8 @@
 // never keyed by (iss,sub). The callback (`/oidc/google/callback`, `purpose: 'connector'`) hands the tokens to the
 // agent runtime over the custody bridge, which envelope-encrypts them under her SA per provider; the Home keeps nothing.
 import { beginLogin } from '@agenticprimitives/connect-auth/google';
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { getServer, ownIssuer, json, type FnContext } from '../_lib/server-broker';
 import { signBridgeCall } from '../_lib/bridge-hmac';
 
@@ -33,7 +34,7 @@ async function personFromSession(env: FnContext['env'], request: Request): Promi
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (!v.ok) return null;
   const person = v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase() ?? null;
   return person ? { person, token } : null;

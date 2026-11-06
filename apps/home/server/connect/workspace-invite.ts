@@ -12,7 +12,8 @@
 // The stash carries NO authority of its own: the delegation inside it is custodian-signed and
 // verified where it is used (the vault), and the roster in the workspace vault still gates every
 // call the relying app makes. Losing this KV loses pending invitations, nothing else.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks } from '@agenticprimitives/connect';
+import { verifySession } from '../_lib/home-session';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 
@@ -41,7 +42,7 @@ async function sessionPersonOf(request: Request, env: FnContext['env']): Promise
   const homeAud = env.DEMO_SSO_AUD ?? 'demo-sso';
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(bearer, { keys, expectedAud: homeAud, expectedIss: ownIssuer(request, env) });
+  const v = await verifySession(bearer, { keys, expectedAud: homeAud, expectedIss: ownIssuer(request, env) });
   if (!v.ok) return null;
   return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
 }
