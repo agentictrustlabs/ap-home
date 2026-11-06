@@ -14,6 +14,7 @@ import { getClient } from '../../src/lib/oidc-clients';
 import { CONTRACTS } from '../../src/lib/chain';
 import { wireValidUntil } from '../../src/lib/consent-terms';
 import { wireRef, type AppGrantRow } from '../oidc/app-grant-row';
+import { refsOf } from './logout';
 import { readRecognition } from '../_lib/recognition';
 
 const json = (b: unknown, s = 200): Response => new Response(JSON.stringify(b), { status: s, headers: { 'content-type': 'application/json' } });
@@ -70,6 +71,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // Spec 445 §7 — the person's own controls over remembered consent.
   // FORGET drops what the Allow agreed to, so the next sign-in shows the sheet. The row stays: its wires are still live on
   // chain, and a forgotten row that vanished would take the only place to revoke them with it.
+  // BOTH ALSO END THE APP'S SILENT RENEWAL, as signing out everywhere does. Without this the app keeps renewing on the wire
+  // it holds and never comes back to the Home, so the person who asked to be asked is not asked. The wires stay on chain:
+  // this is not a revoke. The app's next renewal fails and it sends the person to the Home, where the sheet shows.
+  const endRenewals = async (): Promise<void> => {
+    const row = rows.find((r) => r.clientId === body.clientId);
+    for (const ref of row ? refsOf(row) : []) await env.AUTH_CODES.delete(`oidc-deleg:${ref}`);
+  };
+  if (body.forget === true || body.askEveryTime === true) await endRenewals();
   if (body.forget === true) return save(({ terms: _t, termsDigest: _d, origins: _o, ...r }) => r);
   // TURNING "ASK ME EVERY TIME" OFF LOOSENS A CONTROL, so it needs the proof the skip itself needs: the recognition cookie
   // of this person, which script cannot read. The bearer alone is the script-readable session; a copy of it must not be
