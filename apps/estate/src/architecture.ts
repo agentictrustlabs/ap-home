@@ -1513,7 +1513,7 @@ const TSKILL_BODY = `
 <tr><td>Quotation marks</td><td>open where a speech begins, close where it ends</td><td>Numbers 29 starts inside a speech; four runs punctuated it four ways</td></tr>
 </tbody>
 </table></div>
-<p>These are in the edition's brief, which is what the drafter is told on every passage, and the blind judge is told them too. On the six passages they came from, one run after the change: Numbers 6 reads "they" 39 times and "he" twice, Psalm 119 reads "answer me, LORD", and Numbers 9 says "shall" throughout. Quotation marks are not solved by an instruction. A drafter cannot know that a speech was already open before its first verse, so that fact has to be printed for it by code.</p>
+<p>These are in the edition's brief, which is what the drafter is told on every passage, and the blind judge is told them too. On the six passages they came from, one run after the change: Numbers 6 reads "they" 39 times and "he" twice, Psalm 119 reads "answer me, LORD", and Numbers 9 says "shall" throughout. Quotation marks are not solved by an instruction. A drafter cannot know that a speech was already open before its first verse, so that fact has to be printed for it by code. That is now built, and described below.</p>
 <p>The second step was a set of false alarms. Each one sent a correct verse back for revision, and a revision rewrites every verse of the passage.</p>
 <ul>
 <li><b>"They" for one person.</b> The agreement check failed every verse that said "they" of the Nazirite, which is exactly what the edition now asks for. It accepts it.</li>
@@ -1522,9 +1522,28 @@ const TSKILL_BODY = `
 <li><b>An indirect question.</b> "Let me hear what the LORD commands" is not a question. The check wanted a question mark, and one run added "Is it?" to satisfy it.</li>
 </ul>
 <p>Measured at no cost: all 781 planted errors are still caught, and 14 false alarms are gone from 1,115 replayed verses.</p>
+<h2>Quotation marks: a fact the drafter cannot see</h2>
+<p>A passage is drafted on its own. Numbers 29:1 to 6 is the middle of a speech that opens in chapter 28 and closes at the end of chapter 29. The drafter sees six verses of someone speaking and puts a pair of quotation marks around them. No instruction fixes this, because the missing fact is about the book and not about the passage.</p>
+<p>The source's story already records, verse by verse, who is speaking. Code now reads that and does two things.</p>
+<ul>
+<li><b>It tells the drafter.</b> One line for each speech that crosses a verse or the edge of the passage: "already under way before verse 1: no opening mark at the start of verse 1." It says where a mark may not go and nothing about wording. It stays silent for a psalm or a letter, where nobody opened a quotation.</li>
+<li><b>It checks the result.</b> Three rules, by position only: a verse in the middle of a speech does not open a quotation at its first word; it does not close one at its last word while the speech runs on; a passage does not end with a quotation open where the speech ends. A speech printed with no marks at all passes.</li>
+</ul>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Measure</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>Planted errors still caught</td><td>781 of 839, the same as before</td></tr>
+<tr><td>Stored drafts, replayed</td><td>6 new failures, all 6 real when read; 1 false alarm gone</td></tr>
+<tr><td>Six passages drafted with the line, one run</td><td>All four passages with speech marked correctly. Two runs without it got 3 and 1 wrong</td></tr>
+<tr><td>The published edition, every chapter</td><td>1,090 of 31,085 verses have a quotation-mark fault. In a hand sample of 18, 17 were real</td></tr>
+</tbody>
+</table></div>
+<p>The last row is the finding. About one verse in thirty of the published edition opens a quotation twice, closes it early, never closes it, or drops it part way through a speech. Jeremiah, Ezekiel, Numbers, Luke and Job have the most. Nothing has been changed in the published text.</p>
+<p>The line for the drafter is built and switched off. Six passages and one run show it can work, not how often, and the standing rule is that nothing new reaches the drafter until a locked comparison has earned it. The story it reads was built by a model and has not been reviewed, which is where the one false alarm in eighteen came from.</p>
 <h2>What comes next</h2>
 <ul>
-<li><b>Print what the drafter cannot know.</b> Whether a speech is open at the first verse and runs past the last.</li>
+<li><b>Repair the published marks by code.</b> Two of the four faults are mechanical: delete a mark that re-opens a speech, delete one that closes it early. That is 526 verses, with every change recorded. It edits published text, so it waits for a decision.</li>
+<li><b>Test the drafter's line on locked passages</b> that start or end inside a speech, against two plain runs. About $2.50.</li>
 <li><b>Decide about thirty terms</b> for offerings, rites and sacred times that drift between runs.</li>
 <li><b>The room was measured, free.</b> On a thousand verses already drafted, names are carried 97 to 100% of the time and no case word was found dropped, so the list and ruling categories have nothing to gain there. Only the line breaks of verse have room: 64 to 70% of main pauses are marked in the English.</li>
 <li><b>Then one test with a better ruler</b>, described in <a href="/architecture/testing-translations">How we test the quality of a translation</a>.</li>
