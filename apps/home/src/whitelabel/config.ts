@@ -44,6 +44,25 @@ const GATHER_SURFACE_LABELS = ['ops', 'find'] as const;
  * Whichever surface is configured, the same three come out — the bare host is recovered first, so
  * setting the ops URL by mistake still registers all three in the right order.
  */
+// The ways in are an estate decision, not a code one. A Home whose members all sign in by email hides
+// Google without a deploy; a Home that opens YouVersion says so here. The value is the display order.
+// An entry that is not a method is DROPPED with a warning rather than opening a door by typo, and if
+// nothing valid remains the default stands — a misspelt variable must never produce a Home with no
+// way in. This governs what a NEW person is offered; the returning-member lane ignores it on purpose
+// (lib/named-home-door.ts), so hiding a method here never locks out a home made with it.
+export type CredentialMethod = 'passkey' | 'wallet' | 'google' | 'youversion' | 'email' | 'phone';
+const CREDENTIAL_METHODS: readonly CredentialMethod[] = ['passkey', 'wallet', 'google', 'youversion', 'email', 'phone'];
+export function credentialMethodsFromEnv(raw: string | undefined, fallback: readonly CredentialMethod[]): CredentialMethod[] {
+  const picked = (raw ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (picked.length === 0) return [...fallback];
+  const valid: CredentialMethod[] = [];
+  for (const p of picked) {
+    if ((CREDENTIAL_METHODS as readonly string[]).includes(p)) { if (!valid.includes(p as CredentialMethod)) valid.push(p as CredentialMethod); }
+    else console.warn(`NEXT_PUBLIC_CREDENTIAL_METHODS: "${p}" is not a method (one of ${CREDENTIAL_METHODS.join(', ')}); ignored`);
+  }
+  return valid.length > 0 ? valid : [...fallback];
+}
+
 export function gatherSurfaceOrigins(plural: string | undefined, singular: string | undefined): string[] {
   const out: string[] = [];
   const add = (u: string) => { if (!out.includes(u)) out.push(u); };
@@ -104,9 +123,11 @@ const faithImpact: WhiteLabelConfig = {
     ]),
   },
   onboarding: {
-    // The ways in, in the order the front door offers them (2026-09-13: Google · email; wallet, passkey, phone
-    // and YouVersion are OFF — a passkey cannot sign on faithchain, and the door stays two doors, both nameless).
-    credentialMethods: ['google', 'email'],
+    // The ways in, in the order the front door offers them. Default (2026-09-13): Google · email; wallet,
+    // passkey, phone and YouVersion are OFF — a passkey cannot sign on faithchain, and the door stays two
+    // doors, both nameless. An estate overrides the set with NEXT_PUBLIC_CREDENTIAL_METHODS (see
+    // credentialMethodsFromEnv above): the default is Faithnet's door, and no estate has to fork to change it.
+    credentialMethods: credentialMethodsFromEnv(process.env.NEXT_PUBLIC_CREDENTIAL_METHODS, ['google', 'email']),
   },
   services: { devices: true, connectedApps: true },
   // The stewardship hub: what the member helps oversee / manage / protect from their home.
