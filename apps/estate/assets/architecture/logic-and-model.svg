@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1460 930" width="1460" height="930" role="img" aria-labelledby="t d">
+<title id="t">Logic, ontology and the model: who decides what</title>
+<desc id="d">A diagram in two parts. Above, one run: before the model writes, data and the ontology fix the facts of the text, our decisions and what the model may see; the model reads the whole passage and writes it once; after it writes, code checks what code can decide, a judge from another model family is tested with planted errors, and the run is recorded. What the model remembers from training feeds both the model and the judge. Three ways it goes wrong are marked: it recites (36% of published verses are close to an existing Bible), it writes to pass the check (verses patched until a check passed had 40 times the error rate), and the judge prefers the familiar (its winner is closer to an existing Bible two times in three). Below, five kinds of statement and who should hold each: what the text is, held as data; what we decided, held in the ontology; how to read and write, left to the model; whether it was done, decided by code; and whether it is good, held well by no one yet. Under each is what happens as models grow: the first and fourth do not change, the second matters more, rules for the third expire, and the fifth is the weakest part.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#8b95b5"/></marker><marker id="b" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#8b95b5"/></marker><marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#f472b6"/></marker><marker id="bs" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#f472b6"/></marker><marker id="m0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#f59e0b"/></marker><marker id="m0s" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#f59e0b"/></marker><marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#ef4444"/></marker><marker id="m1s" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#ef4444"/></marker>
+<style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#eef1fb}.h{font-size:30px;font-weight:700}.n{font-size:16px;font-weight:650}.t{font-size:13px;font-weight:600}.k{font-size:12px;font-weight:700}.s{font-size:13px;fill:#9aa5c7}.b{font-size:12px;font-weight:700;letter-spacing:.09em;fill:#9aa5c7}</style></defs>
+<rect width="1460" height="930" rx="22" fill="#0b1020"/>
+<text x="40" y="52" class="h">Logic, ontology and the model: who decides what</text>
+<text x="40" y="78" class="s" text-anchor="start">Two projects on one harness: translating the Bible, and answering questions about it. Divide the work by the kind of statement, not by the step.</text>
+<rect x="40" y="266" width="545" height="196" rx="18" fill="#111933" stroke="#3a4670" stroke-width="1.5"/>
+<text x="58" y="292" class="b" text-anchor="start" style="fill:#3b82f6">BEFORE IT WRITES: DATA AND ONTOLOGY</text>
+<g>
+<rect x="93" y="318" width="64" height="64" rx="18" fill="#3b82f6"/>
+<g transform="translate(108.36,333.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.3"/><circle cx="18" cy="7" r="2.3"/><circle cx="12" cy="18" r="2.3"/><path d="M8.2 6.4l7.5.400M7.2 8l3.7 8M16.8 9l-3.7 7"/></g>
+<text x="125" y="406" text-anchor="middle" class="n">Facts of the text</text>
+<text x="125" y="425" text-anchor="middle" class="s">who speaks, who is</text>
+<text x="125" y="441" text-anchor="middle" class="s">meant, every word</text>
+</g>
+<g>
+<rect x="273" y="318" width="64" height="64" rx="18" fill="#3b82f6"/>
+<g transform="translate(288.36,333.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="10" r="6"/><path d="M9.3 10l2 2 3.4-3.8"/><path d="M8.5 15l-1.5 5.5 5-2.5 5 2.5-1.5-5.5"/></g>
+<text x="305" y="406" text-anchor="middle" class="n">Our decisions</text>
+<text x="305" y="425" text-anchor="middle" class="s">terms, conventions,</text>
+<text x="305" y="441" text-anchor="middle" class="s">the standpoint</text>
+</g>
+<g>
+<rect x="453" y="318" width="64" height="64" rx="18" fill="#3b82f6"/>
+<g transform="translate(468.36,333.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M17.5 12v3.5M20.5 12v2.5"/></g>
+<text x="485" y="406" text-anchor="middle" class="n">What it may see</text>
+<text x="485" y="425" text-anchor="middle" class="s">no existing Bible,</text>
+<text x="485" y="441" text-anchor="middle" class="s">nothing after its time</text>
+</g>
+<path d="M585 350H671" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<g>
+<rect x="679" y="304" width="92" height="92" rx="18" fill="#f59e0b"/>
+<g transform="translate(701.08,326.08) scale(1.9933333333333334)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l1.9 5.6 5.6 1.9-5.6 1.9L12 18.5l-1.9-5.6L4.5 11l5.6-1.9z"/><path d="M18.5 16.5v3M17 18h3"/></g>
+<text x="725" y="420" text-anchor="middle" class="n">The model</text>
+<text x="725" y="439" text-anchor="middle" class="s">reads the whole passage</text>
+<text x="725" y="455" text-anchor="middle" class="s">and writes it once</text>
+</g>
+<g>
+<rect x="697" y="122" width="56" height="56" rx="16" fill="#111933" stroke="#f59e0b" stroke-width="2.2"/>
+<g transform="translate(710.44,135.44) scale(1.2133333333333334)" fill="none" stroke="#f59e0b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 4.5h4v15h-4zM8.5 4.5h4v15h-4z"/><path d="M14.2 6l3.6-1 3 13.5-3.6 1z"/></g>
+<text x="725" y="202" text-anchor="middle" class="n"></text>
+</g>
+<text x="683" y="146" text-anchor="end" class="n">What the model remembers</text>
+<text x="683" y="165" text-anchor="end" class="s">its training is its skill, and its bias</text>
+<path d="M725 182V296" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#m0)"/>
+<circle cx="529" cy="216" r="11" fill="#0b1020" stroke="#ef4444" stroke-width="2"/><text x="529" y="220" text-anchor="middle" class="k">1</text>
+<text x="549" y="221" text-anchor="start" class="t">It recites</text>
+<text x="711" y="240" text-anchor="end" class="s" style="fill:#ef4444">36% of published verses are close to an existing Bible</text>
+<rect x="880" y="266" width="540" height="196" rx="18" fill="#111933" stroke="#3a4670" stroke-width="1.5"/>
+<text x="898" y="292" class="b" text-anchor="start" style="fill:#3b82f6">AFTER IT WRITES</text>
+<g>
+<rect x="938" y="318" width="64" height="64" rx="18" fill="#3b82f6"/>
+<g transform="translate(953.36,333.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 7.8-7.5 9.5-4.3-1.7-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></g>
+<text x="970" y="406" text-anchor="middle" class="n">Checks by code</text>
+<text x="970" y="425" text-anchor="middle" class="s">what code can decide</text>
+</g>
+<g>
+<rect x="1118" y="318" width="64" height="64" rx="18" fill="#f59e0b"/>
+<g transform="translate(1133.36,333.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M7 20h10M5 7h14"/><path d="M5 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/><path d="M19 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/></g>
+<text x="1150" y="406" text-anchor="middle" class="n">A judge</text>
+<text x="1150" y="425" text-anchor="middle" class="s">another model family,</text>
+<text x="1150" y="441" text-anchor="middle" class="s">tested with planted errors</text>
+</g>
+<g>
+<rect x="1298" y="318" width="64" height="64" rx="18" fill="#3b82f6"/>
+<g transform="translate(1313.36,333.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h12v17l-2.4-1.6-2.4 1.6-2.4-1.6-2.4 1.6L6 20.5z"/><path d="M9 8.5h6M9 12h6M9 15.5h3.5"/></g>
+<text x="1330" y="406" text-anchor="middle" class="n">Record</text>
+<text x="1330" y="425" text-anchor="middle" class="s">what was decided,</text>
+<text x="1330" y="441" text-anchor="middle" class="s">and by what</text>
+</g>
+<path d="M1010 350H1106" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M1190 350H1286" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M775 337H876" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M876 365H779" fill="none" stroke="#ef4444" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#m1)"/>
+<circle cx="826" cy="365" r="11" fill="#0b1020" stroke="#ef4444" stroke-width="2"/><text x="826" y="369" text-anchor="middle" class="k">2</text>
+<circle cx="742" cy="492" r="11" fill="#0b1020" stroke="#ef4444" stroke-width="2"/><text x="742" y="496" text-anchor="middle" class="k">2</text>
+<text x="762" y="497" text-anchor="start" class="t">It writes to pass the check</text>
+<text x="730" y="516" text-anchor="start" class="s" style="fill:#ef4444">verses patched until a check passed had 40 times the error rate</text>
+<path d="M757 150H1150V292" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#m0)"/>
+<circle cx="1174" cy="176" r="11" fill="#0b1020" stroke="#ef4444" stroke-width="2"/><text x="1174" y="180" text-anchor="middle" class="k">3</text>
+<text x="1194" y="181" text-anchor="start" class="t">The judge prefers the familiar</text>
+<text x="1164" y="200" text-anchor="start" class="s" style="fill:#ef4444">its winner is closer to an existing</text>
+<text x="1164" y="216" text-anchor="start" class="s" style="fill:#ef4444">Bible two times in three</text>
+<text x="40" y="578" class="b" text-anchor="start">FIVE KINDS OF STATEMENT, AND WHO SHOULD HOLD EACH</text>
+<rect x="40" y="600" width="264" height="176" rx="14" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="172" y="634" text-anchor="middle" class="n">What the text is</text>
+<text x="172" y="658" text-anchor="middle" class="t" style="fill:#3b82f6">Held as data</text>
+<text x="172" y="686" text-anchor="middle" class="s">source words, speakers,</text>
+<text x="172" y="703" text-anchor="middle" class="s">people, places, dates</text>
+<path d="M64 722H280" stroke="#3a4670" stroke-width="1"/>
+<text x="172" y="744" text-anchor="middle" class="s">as models grow</text>
+<text x="172" y="762" text-anchor="middle" class="t">does not change</text>
+<rect x="319" y="600" width="264" height="176" rx="14" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="451" y="634" text-anchor="middle" class="n">What we decided</text>
+<text x="451" y="658" text-anchor="middle" class="t" style="fill:#3b82f6">Held in the ontology</text>
+<text x="451" y="686" text-anchor="middle" class="s">terms, conventions, canon,</text>
+<text x="451" y="703" text-anchor="middle" class="s">whose standpoint answers</text>
+<path d="M343 722H559" stroke="#3a4670" stroke-width="1"/>
+<text x="451" y="744" text-anchor="middle" class="s">as models grow</text>
+<text x="451" y="762" text-anchor="middle" class="t">matters more</text>
+<rect x="598" y="600" width="264" height="176" rx="14" fill="#111933" stroke="#f59e0b" stroke-width="2"/>
+<text x="730" y="634" text-anchor="middle" class="n">How to read and write</text>
+<text x="730" y="658" text-anchor="middle" class="t" style="fill:#f59e0b">Left to the model</text>
+<text x="730" y="686" text-anchor="middle" class="s">grammar, sense, flow,</text>
+<text x="730" y="703" text-anchor="middle" class="s">the shape of an answer</text>
+<path d="M622 722H838" stroke="#3a4670" stroke-width="1"/>
+<text x="730" y="744" text-anchor="middle" class="s">as models grow</text>
+<text x="730" y="762" text-anchor="middle" class="t">rules for it expire</text>
+<rect x="877" y="600" width="264" height="176" rx="14" fill="#111933" stroke="#3b82f6" stroke-width="2"/>
+<text x="1009" y="634" text-anchor="middle" class="n">Was it done?</text>
+<text x="1009" y="658" text-anchor="middle" class="t" style="fill:#3b82f6">Decided by code</text>
+<text x="1009" y="686" text-anchor="middle" class="s">cited, aligned, in range,</text>
+<text x="1009" y="703" text-anchor="middle" class="s">a quotation mark closed</text>
+<path d="M901 722H1117" stroke="#3a4670" stroke-width="1"/>
+<text x="1009" y="744" text-anchor="middle" class="s">as models grow</text>
+<text x="1009" y="762" text-anchor="middle" class="t">does not change</text>
+<rect x="1156" y="600" width="264" height="176" rx="14" fill="#111933" stroke="#ef4444" stroke-width="2"/>
+<text x="1288" y="634" text-anchor="middle" class="n">Is it good?</text>
+<text x="1288" y="658" text-anchor="middle" class="t" style="fill:#ef4444">Held well by no one yet</text>
+<text x="1288" y="686" text-anchor="middle" class="s">a model's taste, tested;</text>
+<text x="1288" y="703" text-anchor="middle" class="s">a person, for a sample</text>
+<path d="M1180 722H1396" stroke="#3a4670" stroke-width="1"/>
+<text x="1288" y="744" text-anchor="middle" class="s">as models grow</text>
+<text x="1288" y="762" text-anchor="middle" class="t">the weakest part</text>
+<rect x="40" y="809" width="22" height="14" rx="4" fill="#3b82f6"/><text x="72" y="821" class="s" text-anchor="start">held outside the model</text>
+<rect x="270" y="809" width="22" height="14" rx="4" fill="#f59e0b"/><text x="302" y="821" class="s" text-anchor="start">a model</text>
+<path d="M400 816h44" stroke="#ef4444" stroke-width="2" stroke-dasharray="6 6"/><text x="456" y="821" class="s" text-anchor="start">a way it goes wrong, as measured here</text>
+<text x="40" y="860" text-anchor="start" class="s">A rule that teaches the model its craft expires with the next model. A rule that states a fact, a decision or a permission does not.</text>
+<text x="1420" y="904" class="s" text-anchor="end">faithnet.estate/architecture</text>
+</svg>

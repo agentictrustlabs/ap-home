@@ -2113,7 +2113,174 @@ const TEST_BODY = `
 <li>A model's preference is not a reader's. Nothing here measures whether a person was helped.</li>
 </ul>`;
 
+// ───────────────────────────────────────────────────────────────── logic, ontology and the model (an article)
+
+const LOGIC_ALT =
+  'A diagram in two parts. Above, one run: before the model writes, data and the ontology fix the facts of the text, our decisions and what the model may see. ' +
+  'The model reads the whole passage and writes it once. After it writes, code checks what code can decide, a judge from another model family is tested with planted errors, and the run is recorded. ' +
+  'What the model remembers from training feeds both the model and the judge. Three ways it goes wrong are marked: it recites, it writes to pass the check, and the judge prefers the familiar. ' +
+  'Below, five kinds of statement and who should hold each: what the text is, held as data; what we decided, held in the ontology; how to read and write, left to the model; ' +
+  'whether it was done, decided by code; and whether it is good, held well by no one yet.';
+
+const LOGIC_BODY = `
+<p>We run two projects on one harness. One translates the Bible from Hebrew, Aramaic and Greek into a new English edition. The other answers questions about Scripture. At the core they are the same machine, and they face the same design question: which parts should be fixed logic and an ontology, and which parts should be left to a large model?</p>
+<p>There is a second question under the first. A large model has read the existing English Bibles and a great deal of commentary. That reading is where its skill comes from. It is also a pull toward what has already been written. So where do rails belong, which rails do harm, and what changes as models get larger?</p>
+
+<h2>Why the usual answer should not be trusted yet</h2>
+<p>Until now the advice on these pages has been: let the model read and write in one piece, keep logic around it, and expect little from written skills. That advice came from models. This article was drafted by one as well. The owner's suspicion is that a model asked how far to rely on models will lean toward itself.</p>
+<p>A model cannot clear itself of that by looking inward. What it can do is say how the lean would get in with no motive at all:</p>
+<ul>
+<li><b>It proposes what it can make.</b> Asked to improve a harness, a model offers prose advice and one more model call. It rarely offers a table that a person has to decide.</li>
+<li><b>It grades with models.</b> Almost every comparison here was judged by a model. A judge trained on the same books as the writer shares the writer's taste.</li>
+<li><b>It reads a tie as proof.</b> When a skill and no skill tie, the easy reading is that the skill is useless. A blunt ruler also gives ties.</li>
+</ul>
+<p>So this article follows one rule. Every finding says who judged it: code, a person, or a model. A finding that rests only on a model's verdict is a lead and not a result.</p>
+
+<h2>What has been measured, and who judged it</h2>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th></th><th>Finding</th><th>Judged by</th><th>What it says</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>A written skill handed to the answer writer. The chosen skill against no skill: 13 better, 277 tied, 10 worse. Against a deliberately wrong skill: 14, 278, 8. The same path run twice differed on 3 of 40.</td><td>Models of two families</td><td>These skills did nothing.</td></tr>
+<tr><td>2</td><td>Advice paragraphs handed to the translation drafter. A first test favoured them 18 to 10. Two repeats read 22 to 11 and 20 to 25. Two identical runs read 18 to 16.</td><td>A model</td><td>No gain that repeats.</td></tr>
+<tr><td>3</td><td>The model alone against an evidence-first harness, on 80 questions: 0.52 against 0.22. On a second set, three faults in the judge's own rules were then fixed. Both arms rose from about 0.55 to 0.86 (alone) and 0.92 (harness).</td><td>A model, against published notes and catechisms</td><td>The first number favoured the model alone. The second says the ruler moved more than either arm.</td></tr>
+<tr><td>4</td><td>More material handed to the writer. Facts from the knowledge graph: 4 better, 5 worse. Seven texts describing the reader: 2 better, 27 tied, 13 worse than a single line. A pass that binds every name before drafting: no change, at 2.8 times the cost.</td><td>A model, and code for the last</td><td>More material did not help.</td></tr>
+<tr><td>5</td><td>The story layer (who is speaking, who is present) given to the English drafter on Jonah, Ruth and part of John.</td><td>Code</td><td>Almost no change in English.</td></tr>
+<tr><td>6</td><td>Verses chosen before the answer is written, their text handed to the writer, any other citation refused by code. Errors fell from 21 to 4 across 40 answers.</td><td>A model that named 19 of 26 planted errors</td><td>A rail that worked.</td></tr>
+<tr><td>7</td><td>Answers written from memory, with no chosen verses. Errors about what a verse says rose from 6 to 11 in 40. One answer had Jesus drink the wine at Cana.</td><td>A model, then read by hand</td><td>Memory alone is not safe.</td></tr>
+<tr><td>8</td><td>The published translation. By our measure 36% of verses are close to an existing English Bible, and about 1,600 are nearly identical.</td><td>Code</td><td>The model recites.</td></tr>
+<tr><td>9</td><td>A model drafting rules for our own knowledge base quoted whole verses from memory in 30 of 127 rules. Text written for the story layer rested on later interpretation in 231 sentences.</td><td>Code</td><td>It recites even when it writes about the text.</td></tr>
+<tr><td>10</td><td>Checks written in code, tested on errors planted by code: 781 of 839 caught. Checks chosen by the category of a passage: 33 of 37 and 26 of 27.</td><td>Code</td><td>Rails that work.</td></tr>
+<tr><td>11</td><td>A model used as the checker. The small one named 50 of 120 planted errors. A stronger one named 117, and made 22 false claims.</td><td>Code</td><td>A model is a weak judge of errors.</td></tr>
+<tr><td>12</td><td>When the judge chose the more faithful of two versions, its choice was the one closer to an existing English Bible 167 times to 86.</td><td>Code, over a model's verdicts</td><td>The judge prefers the familiar.</td></tr>
+<tr><td>13</td><td>The owner read the answers a judge had called wrong. Most were not wrong.</td><td>A person</td><td>The same.</td></tr>
+<tr><td>14</td><td>The revise step, told that source words were missing, added words after a finished sentence until the check passed. Verses changed this way had 40 times the confirmed error rate, and passed every check.</td><td>Code and a confirmed audit</td><td>A rail that caused the worst errors.</td></tr>
+<tr><td>15</td><td>A rule against wording that matched an existing Bible pushed the reviser into paraphrase. The first set of checker rules blocked 67% of the passages of a published human translation.</td><td>Code</td><td>Rails written from a few examples misfire.</td></tr>
+</tbody></table></div>
+<p>Read the table by its third column. The rows that say structure adds little are rows 1 to 5. Four of the five rest on a model's verdict. Row 5 was measured by code, and it concerns English, where a model can work out who is speaking from the text in front of it.</p>
+<p>The rows measured by code or read by a person say other things. The model recites (8, 9). Some rails work (10). Some rails do harm (14, 15). The judge is weak (11, 12, 13).</p>
+<p>So the claim that skills and structure make no difference is not established. What is established is narrower: <b>telling a model what it can already work out makes no difference</b>. Both rulers agree on that.</p>
+
+<h2>Three ways it goes wrong</h2>
+<p>All three have been measured here. A design has to hold against all three at once, and the fix for one tends to feed another.</p>
+<h3>The model recites</h3>
+<p>Asked to translate, a model partly remembers. Asked to answer, it writes what is usually written. It does this while working on tasks around the text as well: writing a rendering rule, describing a scene. The wording of existing Bibles and the readings of later centuries arrive unasked. A model cannot tell you which of its sentences it worked out and which it recalled.</p>
+<h3>The model writes to the rule</h3>
+<p>A check that sends a draft back does not only catch errors. It teaches the model what passes. The worst errors in a published edition came from this: a revision step satisfied a check about missing words by adding words. Each verse then passed. A rule against likeness to existing Bibles produced unlikeness for its own sake. A rail is a target, and a model is very good at hitting targets.</p>
+<h3>The judge agrees with what it knows</h3>
+<p>With no person reviewing, "better" is decided by a model. That model has read the same Bibles. Its winner is the more familiar wording two times in three. Outside research finds the same pattern: model judges favour text like their own (<a href="https://arxiv.org/abs/2404.13076">Panickssery and others, 2024</a>). A judge from another model family helps with the first problem and not the second, because every family was trained on the same books.</p>
+<p>This matters most for a project that means to differ. If the edition departs from existing Bibles only where there is a reason, and the judge rewards closeness to them, then the judge counts each reasoned departure as a loss. A test scored against mainstream answers cannot show the value of a rail whose purpose is to hold a position the mainstream does not take.</p>
+
+<h2>Why the written skills made no difference</h2>
+<p>There are three explanations, and they lead to different designs.</p>
+<ol>
+<li><b>The model already knows.</b> A skill that explains how to handle a genealogy or a "what does this word mean" question states what a large model learned from thousands of books.</li>
+<li><b>The skills said nothing new.</b> They were drafted by a model, in general terms. A model writing advice writes what a model already believes. Handing it back is a circle. This is the owner's hypothesis: the skills were never opinionated enough to matter.</li>
+<li><b>The ruler could not see it.</b> 277 ties in 300, about one pair in ten decided by chance, and a judge that prefers the familiar.</li>
+</ol>
+<p>The tests so far cannot tell the first from the second. A model reading the results chose the first and advised retiring written skills. The evidence does not go that far. It shows that these skills did nothing. It does not show that a skill cannot.</p>
+<p>The few cases that did work point at the second explanation. Each carried something the model would not have done by itself, and each was held by code:</p>
+<ul>
+<li>The verses for an answer, chosen first, with every other citation refused.</li>
+<li>An answer for a child, with its length held by a check: preferred 8 times of 8, on a small sample.</li>
+<li>Five English conventions decided in the translation brief (for example, how a people is referred to, and where a quotation mark may go), with the checks changed to agree with them.</li>
+</ul>
+<p>That suggests a rule of thumb. A skill has effect in proportion to two things: how far it departs from what the model would do anyway, and whether anything holds the model to it.</p>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th></th><th>Nothing enforces it</th><th>Code enforces it</th></tr></thead>
+<tbody>
+<tr><td><b>Says what the model would do anyway</b></td><td>No effect. The form skills and the advice paragraphs.</td><td>Cost and false alarms. Checks that fail correct verses.</td></tr>
+<tr><td><b>Says what the model would not do</b></td><td>Followed sometimes, and it drifts. One standpoint text made the writer drop a comparison it should have kept.</td><td>Effect. The three cases above.</td></tr>
+</tbody></table></div>
+<p>The bottom-right cell is the only one that pays, and it is the hardest to fill. It needs someone with an opinion: a person, or a named standard. A model asked to supply the opinion supplies the common one.</p>
+
+<h2>Divide by the kind of statement, not by the step</h2>
+<p>The usual way to split the work is by step: retrieval is logic, writing is neural, checking is logic. Our results fit a different split better. Ask what kind of statement is being made.</p>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Kind</th><th>Examples</th><th>Who should hold it</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td><b>What the text is</b></td><td>The source words. Who is speaking. Which John is meant. Which verse a citation names.</td><td>Data, with an identity for each thing</td><td>It must be the same for every run, every language and every model. A model can propose it. It should not be re-guessed each time.</td></tr>
+<tr><td><b>What we decided</b></td><td>How a term is rendered. English conventions. Which books are the canon. Whose standpoint an answer takes. What a drafter may not see.</td><td>The ontology</td><td>A decision is not knowledge. No model can know it, and the common choice is often the opposite one.</td></tr>
+<tr><td><b>How to read and write</b></td><td>Grammar, sense, the flow of a sentence, the shape of a good answer.</td><td>The model</td><td>It is better at this than any rule we wrote, and rules for it made no measurable difference.</td></tr>
+<tr><td><b>Was it done?</b></td><td>Every source word accounted for. The cited verse exists and says this. A quotation is closed.</td><td>Code</td><td>It can be decided, so it should not be an opinion.</td></tr>
+<tr><td><b>Is it good?</b></td><td>More faithful. Clearer. Answers the question.</td><td>No one holds this well yet</td><td>Code cannot decide it, a model's taste is the model's memory, and no person reads here.</td></tr>
+</tbody></table></div>
+<p>The line that matters most is between the second row and the third: knowledge and decision. A larger model will know more Hebrew. It will not know that this edition keeps a people as "they", or that an answer is to be given from one named confession, because those are choices.</p>
+<p>This also speaks to the hypothesis that discrete logic and a neural model are at odds. Our evidence says they are at odds in one place: inside a single act of judgment. Cutting the reading of a passage into per-verse facts made the drafter drop more of the source. Forcing an answer to be built from retrieved pieces made it worse. Patching a sentence to satisfy one rule broke the sentence.</p>
+<p>They are not at odds when logic states what is true and what was decided before the model starts, and checks what can be checked after it stops. A graph of steps is the right frame for a run: what is fetched, what is fixed, what is checked, what is recorded. It is the wrong frame for the thinking inside one step.</p>
+<p>One caution on that conclusion. It is the one a model would be expected to reach, since it keeps the model's judgment whole. The evidence on the translation side is rows 14 and 15 and one coverage measurement, all by code. On the question side it was judged by a model. So it stands for now. It should be retested like anything else.</p>
+
+<h2>What changes as models get larger</h2>
+<p>The strongest argument against rails is historical. For decades, knowledge built in by hand has lost to general methods with more computation (Sutton, <a href="http://www.incompleteideas.net/IncIdeas/BitterLesson.html">The Bitter Lesson</a>, 2019). That argument is about capability, and on capability it is probably right again. Rules that make up for a weak model will stop earning their place: reminders to account for every word, repair of broken sentences, advice on how to handle a kind of passage, a fixed order of reasoning.</p>
+<p>The argument does not reach the other kinds of statement, for five reasons.</p>
+<ol>
+<li><b>Memory grows with the model.</b> Larger models reproduce more of their training text, not less (<a href="https://arxiv.org/abs/2202.07646">Carlini and others, 2022</a>). A stronger model knows the existing Bibles and the standard answers better, and writes them more fluently.</li>
+<li><b>Errors get harder to see.</b> A weak model's error is a broken sentence. A strong model's error is a good sentence that carries a reading from another century. The worst errors we found had passed every check.</li>
+<li><b>The judge problem gets worse.</b> A stronger writer needs a stronger judge, and the strongest judge available is the same kind of model, with the same memory.</li>
+<li><b>An edition cannot move with a vendor.</b> If the decisions live in the model, a new model release changes them. If they live in data, the same decisions carry to the next model and to the next language.</li>
+<li><b>Everyone has the same model.</b> Whatever a system holds outside the model is the only part of it that differs from every other system built on that model.</li>
+</ol>
+<p>So the two kinds of rail age in opposite directions. A rail that teaches craft loses value with each model. A rail that states a fact, a decision or a permission keeps its value, and gains some, because the thing it guards against gets stronger.</p>
+<p>That gives a working practice. Every rail says which kind it is. A craft rail carries an off switch and is retested with each new model, and it comes out when turning it off costs nothing. A rail of the other kinds is never removed for the reason that the model got better.</p>
+
+<h2>Advice for the translation</h2>
+<ol>
+<li><b>Grow the decisions, not the advice.</b> The brief, the term renderings and the names are the part that worked. New decisions should come from evidence: places where two identical runs disagree, and errors an audit confirmed. They should not come from a model's general view of how to translate.</li>
+<li><b>Let a passage's category choose facts, checks and limits.</b> That part is measured to work. Keep an instruction to the drafter only when it states a decision the model would not make, and test it against a deliberately wrong one.</li>
+<li><b>Test every rule that sends a draft back for what it causes.</b> A check that fails a published human translation is wrong. A revise rule needs a counter-check on the sentence it produces.</li>
+<li><b>Never score likeness to an existing Bible, in either direction.</b> Report it beside every comparison so a "win" that is only familiarity can be seen.</li>
+<li><b>Give the model facts it cannot see.</b> Where a speech began three verses earlier is a fact outside the passage. The story layer earns more in a language that must choose gender, or where the model has less to go on, than it did in English.</li>
+</ol>
+
+<h2>Advice for the questions</h2>
+<ol>
+<li><b>Choose the evidence first and hold the writer to it.</b> This is live, and it is the largest measured gain.</li>
+<li><b>Route by what must be gathered, not by how to write.</b> Scripture, general knowledge, or both. The remaining losses are questions that needed general knowledge and were pulled toward Scripture.</li>
+<li><b>Treat a standpoint as a decision.</b> A confession's own statements are data. An answer given from that standpoint can be checked against them. The standpoint texts tried so far were prose, and prose is what the model ignores or over-applies.</li>
+<li><b>Hold what can be counted.</b> The reader setting that worked had a length that code enforced.</li>
+<li><b>Do not expect a mainstream answer key to reward a position.</b> Where the agent is meant to answer differently from the common view, only a check against the chosen position can show whether it did.</li>
+</ol>
+
+<h2>The same question elsewhere</h2>
+<p>None of this is special to the Bible. Take a travel planner.</p>
+<ul>
+<li><b>What is:</b> opening hours, prices, visa rules, the traveller's dates. Data.</li>
+<li><b>What was decided:</b> this traveller will not fly overnight, needs step-free access, and wants one quiet day in three. Held as the traveller's own record.</li>
+<li><b>How to plan and write:</b> what makes a good day in a city. The model.</li>
+<li><b>Was it done:</b> the booking exists, the total is inside the budget, the connection is long enough. Code.</li>
+<li><b>Is it good:</b> only the traveller knows.</li>
+</ul>
+<p>The three failures appear too. The model recites the places most written about. It meets the budget by dropping the thing the traveller came for. A model judge prefers the itinerary that looks like every other itinerary. The split holds wherever a system is supposed to serve one party's commitments and not the average of what has been written.</p>
+
+<h2>What would settle the open questions</h2>
+<ol>
+<li><b>An opinionated skill.</b> For one category, a person or a named standard writes about ten decisions the model would not make. Run four arms: the decisions stated and enforced, not stated, a wrong set, and the unchanged plan twice. Grade by code against the decisions, not by a judge's taste. This separates "the model already knows" from "the skills said nothing new". About $10 on the small model.</li>
+<li><b>One hour of a person's reading.</b> Fifty verdicts, to see how often the judge is right. Every tie in this article depends on a ruler no person has checked, apart from row 13. This is not a review of the edition. It is a check of the ruler.</li>
+<li><b>Two model sizes.</b> The same rails on and off, on a small and a large model, to see which rails lose value with size. Until this is run, the section on larger models is argument and not measurement.</li>
+<li><b>Likeness beside every result.</b> A column for closeness to existing Bibles in each comparison, at no cost.</li>
+</ol>
+
+<h2>Where this article may still lean</h2>
+<ul>
+<li>It keeps the model at the centre of the writing. Two other designs were not tested: filling slots in a structure the ontology builds, which may suit lists and genealogies, and training a model on our own decisions so that they sit inside it. For a language the large models do not know, where four of them produced none of 60 common words, a small model trained on the translators' own text did better than the large model with a lexicon built by code.</li>
+<li>Most samples are small: 40 to 300 items, with about one comparison in ten decided by chance.</li>
+<li>The findings about larger models rest on outside research and on reasoning. We have not measured them.</li>
+<li>It was drafted by a model. The table of who judged what is there so that a reader does not have to take the model's word.</li>
+</ul>
+<p>Related pages: <a href="/architecture/translation-harness">how the translation agent translates</a>, <a href="/architecture/translation-skills">how a passage's category chooses its skill</a>, <a href="/architecture/testing-translations">how a translation is tested</a>, <a href="/architecture/scripture-ask">how a question is answered</a>, and <a href="/architecture/testing-answers">how answers are tested</a>.</p>`;
+
 export const POSTS: Post[] = [
+  {
+    slug: 'logic-and-the-model',
+    title: 'Logic, ontology and the model: who decides what',
+    date: '2026-11-06',
+    description:
+      'Two projects share one harness: translating the Bible and answering questions about it. Where fixed logic and an ontology should decide, where a large model should, which rails help and which do harm, what changes as models grow, and how far the evidence can be trusted when models did most of the judging.',
+    picture: {
+      svg: '/architecture/logic-and-model.svg', png: '/architecture/logic-and-model.png', alt: LOGIC_ALT, width: 1460, height: 930,
+      caption: 'Blue is held outside the model. Amber is a model. Red marks the three ways it goes wrong, each with a number measured here.',
+    },
+    body: LOGIC_BODY,
+  },
   {
     slug: 'testing-answers',
     title: "How we test the Scripture Agent's answers",
