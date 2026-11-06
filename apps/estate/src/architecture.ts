@@ -1283,6 +1283,49 @@ const TRANSLATION_BODY = `
 <p><a href="/architecture/testing-translations">How we test the quality of a translation</a> has the whole method and the number of verses in each set. In brief: the harness carries its own tests. Experiments run arms side by side over locked sets of passages, including a floor (the tables' word-by-word glosses) and a ceiling (a published human translation), so a score means something. Errors are planted to measure the checker. A change is accepted by a blind judge on a frozen set of hard passages, because this project's own checks have rewarded changes that a blind reader preferred less.</p>
 <h2>Where it stands</h2>
 <p>The edition is RBS, a draft model-made translation from the Hebrew, Aramaic and Greek under CC BY 4.0. The current release, <code>2026-11-05-v4.0.2</code>, has 31,085 verses, of which 26,445 are ready and 4,640 are published as open, each saying what is open. <b>No person has reviewed it.</b> The status on a verse says what the machine checked and nothing more.</p>
+<h2>Keeping existing English Bibles out of the translation</h2>
+<p>The models that draft and judge have read every English Bible. That cannot be undone. An existing translation can get into ours four ways: through what the drafter is shown, through what our own helper material says, through whatever decides that one wording is better than another, and through the model's own memory. The first three have rails. The fourth can only be watched.</p>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Where it could get in</th><th>The rail</th><th>How we know it holds</th></tr></thead>
+<tbody>
+<tr><td><b>What the drafter is shown</b></td><td>The Hebrew, Aramaic or Greek words, their grammar, a dictionary sense for each, and the decided rendering of names. Never a verse of an English Bible. The verses are relabelled v1, v2, so the book and chapter are not there to prompt a memory.</td><td>A test fails the build if the wording of a held Bible appears in the drafter's prompt. The tool that serves held Bibles is marked for evaluation only.</td></tr>
+<tr><td><b>The knowledge base</b></td><td>A rule may name a decided term. It may never quote how a verse is rendered.</td><td>A check refuses it. It was added after 30 of 127 model-drafted rules were found to carry a seven-word run from an existing Bible.</td></tr>
+<tr><td><b>The story of each book</b>, and the reader notes</td><td>Built from the source and from writings of the book's own time. Every sentence a model writes is compared with four English Bibles; one that shares five words in a row is rewritten or cut.</td><td>Before the rule, 14 of 133 sentences in the first story leaked. A repository check now holds every story to none.</td></tr>
+<tr><td><b>The draft itself</b></td><td>Each verse is compared with the English Bibles the store holds. A verse that matches one word for word, where those Bibles differ among themselves, is sent back. A word that no source word accounts for is blocked.</td><td>The second rule caught Matthew 10:4 arriving with Luke's wording of the name.</td></tr>
+<tr><td><b>What decides "better"</b></td><td>No step that chooses between wordings is shown an existing Bible: not the revision loop, not the choice between drafts, not the judge. Likeness to an existing Bible is reported and is never a reason to prefer or reject a wording.</td><td>The judge reads the source words and two of our own versions. In replacing a published verse it can only say no.</td></tr>
+<tr><td><b>A second model reviewing the draft</b></td><td>Switched off.</td><td>When it was tried, its revisions moved the wording measurably toward one existing Bible.</td></tr>
+<tr><td><b>Tools that learn from data</b></td><td>Anything trained, such as a word aligner, learns from the source and our own drafts only.</td><td>A standing rule; there is no check for it yet.</td></tr>
+</tbody>
+</table></div>
+<p>The rule that sits over all of these: our translation should differ from an existing Bible only where there is a reason that can be stated, and it is never rewarded for being different. An early version of the likeness check pushed the reviser to write "trusts" where the source says "believes", just to get away from familiar wording. That is the same failure from the other side.</p>
+<h3>What the published edition looks like today</h3>
+<p>Every published verse carries its likeness to the nearest held Bible. In release 4.0.2:</p>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>Reading</th><th>Verses</th><th>Share</th></tr></thead>
+<tbody>
+<tr><td>Closer to one existing Bible than existing Bibles are to each other</td><td>11,113</td><td>36%</td></tr>
+<tr><td>Close</td><td>10,364</td><td>33%</td></tr>
+<tr><td>Independent</td><td>9,608</td><td>31%</td></tr>
+</tbody>
+</table></div>
+<p>The first row is not a count of copied verses. A plain sentence in Hebrew has few faithful English renderings, so careful translations converge: "In the beginning God created the heavens and the earth" is in that row. When the same measure was run on a published human translation, it flagged 62% of its verses, and it flagged 57% of a deliberately edited copy of another Bible. It cannot tell the two apart, which is why it reports and does not decide.</p>
+<p>About 1,600 verses read the same as an existing Bible or nearly so. Most are short, with a middle length of 13 words. 231 of them are twenty words or longer, and those have not been read one by one.</p>
+<h3>The risks that remain</h3>
+<ul>
+<li><b>Memory cannot be removed.</b> The rails stop the drafter being shown a Bible and catch word-for-word copying. They do not catch a familiar phrase reworded, or an old interpretive choice the model simply assumes.</li>
+<li><b>We can only compare with Bibles we hold.</b> The held editions are public domain or openly licensed. If the drafter recites a modern copyrighted translation, nothing here can see it.</li>
+<li><b>The judge leans toward the familiar.</b> Measured on 3,049 stored comparisons: when the judge picks a winner between two of our versions, the winner is the one closer to an existing Bible two times in three. Much of that is innocent, because a draft with a real error is both wrong and unlike the existing Bibles. Where no error was involved the lean was 26 to 17 on faithfulness, too few to call, and even on English style. So no strong pull is shown, and none is ruled out.</li>
+<li><b>A change to the harness could win by drifting.</b> The comparison that decides whether a change is kept does not yet report how close each side is to the held Bibles.</li>
+<li><b>Ideas can leak without words.</b> The story and the notes are checked for shared wording, and for sources later than the book. A traditional reading stated in fresh words passes both.</li>
+<li><b>The dictionary is English.</b> Each source word comes with English senses written by lexicographers who worked in the same tradition as the translations. This is a channel by design, and a narrow one.</li>
+<li><b>Outside notes are used to sort passages.</b> Study notes and headings may help decide what kind of passage this is. They are kept to that one step and never shown to the drafter, but a category can still carry a tradition's view of a text.</li>
+</ul>
+<h3>What is next</h3>
+<ul>
+<li>Report likeness to the held Bibles for both sides of every comparison, and hold any change that wins while moving closer.</li>
+<li>Test the judge directly, with pairs built so that the less familiar version is the more faithful one.</li>
+<li>Read the 231 long verses that match an existing Bible against their source words.</li>
+</ul>
 `;
 
 // ───────────────────────────────────────────────────────────────── categories and skills in the translation harness
