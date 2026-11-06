@@ -56,7 +56,13 @@ export interface RelyingApp {
    *  means everything, which is exactly what every client gets today; a client may only turn a leg
    *  OFF, never widen one. `communityMessaging: false` skips the community-messaging wire (and the
    *  related-orgs read that only feeds it) for an app that registers no messaging capability. */
-  provisioning?: { communityMessaging?: false };
+  provisioning?: {
+    communityMessaging?: false;
+    /** `false` charters the organizations THIS client's people create with NO public name (2026-10-28, Rich): the
+     *  org is complete — vault, stewardship, grants, its declared type — and goes by the name its creator typed,
+     *  kept in its own `org.profile`. Claiming a public name is a separate act, later, from its Naming page. */
+    orgPublicName?: false;
+  };
   /** OPTIONAL — `'with-self-vault'` lets the plain sign-in REUSE its standing grant even though the
    *  client declares a self_vault_grant. Both approved digests (site + self-vault) are fixed for a
    *  given client, so the on-chain approval userOp is identical every time; reusing skips it. Absent

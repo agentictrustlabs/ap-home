@@ -1271,7 +1271,9 @@ export interface CreateChildOpts {
   grantOrg?: Address;
   /** Home session, for the demo-custody wallet branch (keys live at the Home, not the browser). */
   sessionToken?: string;
-  /** ap-town spec 431 — the org root is PRICED on this chain: deploy nameless, the caller buys the name next. */
+  /** Deploy the organization NAMELESS (its type still declared, its grants the same). Two callers: ap-town spec 431 —
+   *  the org root is PRICED on this chain, so the caller buys the name next — and NAME LATER (2026-10-28), the
+   *  creator's choice to charter it with no public name and claim one later, if ever, from its Naming page. */
   nameLater?: boolean;
 }
 
@@ -1561,6 +1563,8 @@ export interface CreateManagedAgentResult {
   /** The child→parent oversight grant (spec 246) — returned so create-time seeding (org:profile,
    *  spec 321 item-1) can write the child's vault without re-fetching the link. */
   stewardshipDelegation?: DelegationWire;
+  /** A governed workspace created without one of its governance grants (`workspace-governor.ts` GovernanceGrant). */
+  governanceMissing?: string[];
 }
 
 /** Public demo roster names the custodian EOA. Used only after isDemoCustodyHome. */
@@ -1592,9 +1596,11 @@ export async function createManagedAgent(
      */
     steward?: Address;
     /**
-     * The caller buys the name right after (ap-town spec 431: a priced ending registers nothing without a ticket
-     * and a fee, so `home/charter-name.ts` deploys nameless and purchases next). Lifts the org-must-be-named rule
-     * for that one caller; the org is still named before the ceremony returns.
+     * Deploy the organization nameless. Two callers: the one that buys the name right after (ap-town spec 431: a
+     * priced ending registers nothing without a ticket and a fee, so `home/charter-name.ts` deploys nameless and
+     * purchases next), and NAME LATER (2026-10-28) — the creator's choice to charter it with no public name, its
+     * display name kept in its own `org.profile`, a public name claimed later from its Naming page. Either way it is
+     * said explicitly: a missing label alone is still refused.
      */
     nameLater?: boolean;
   },
@@ -1678,6 +1684,10 @@ export async function createManagedAgent(
     if (!claim.ok) return { ok: false, error: claim.error };
     claimCalls = claim.calls;
     name = claim.name;
+  } else if (input.kind === 'org' && input.nameLater) {
+    // NAMELESS IS NOT TYPELESS — a name-later organization declares its type in the same genesis.
+    const t = typedTldForKind('org');
+    if (t) claimCalls = await declareTypeCalls(child, t.tld, t.serviceRole);
   }
 
   // Stewardship grant child → its steward (the parent, unless the caller split the two — see `steward`) so
@@ -1824,7 +1834,7 @@ async function resolveExactName(label: string, tld?: string): Promise<{ ok: true
 /** SOCIAL create (Google / YouVersion): the worker derives C_sub + deploys the child SA (named or
  *  nameless) + approves the stewardship grant in one sponsored userOp; we record the vault link. */
 async function createManagedAgentSocial(
-  input: { kind: AgentKind; label?: string; parent: Address; person: Address; via: string; steward?: Address },
+  input: { kind: AgentKind; label?: string; parent: Address; person: Address; via: string; steward?: Address; nameLater?: boolean },
   sessionToken: string,
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
@@ -1850,7 +1860,7 @@ async function createManagedAgentSocial(
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
     // The worker's `parent` is the STEWARDSHIP delegate (it pre-approves child → parent in the deploy batch and
     // uses it for nothing else), so a split steward goes there; the tree's parent is written on the link below.
-    body: JSON.stringify({ session: sessionToken, kind: input.kind, parent: input.steward ?? input.parent, label, node, tld: typed?.tld, serviceRole: typed?.serviceRole }),
+    body: JSON.stringify({ session: sessionToken, kind: input.kind, parent: input.steward ?? input.parent, label, node, tld: typed?.tld, serviceRole: typed?.serviceRole, ...(input.kind === 'org' && input.nameLater ? { nameLater: true } : {}) }),
   });
   const b = (await res.json().catch(() => ({}))) as {
     ok?: boolean; agent?: Address; name?: string; stewardshipDelegation?: DelegationWire; custodyDescriptor?: unknown; error?: string; detail?: string;
@@ -2130,14 +2140,16 @@ export async function createOrganizationWithGoogle(
   _via: string = 'google',
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; result: CreatedAgent } | { ok: false; error: string }> {
-  // Resolve a free org name (label + node), like secureHomeWithGoogle does.
-  onStep?.('Finding a unique name…');
   // spec 346 — an organization claims the ORG root where this deployment offers it.
   const typed = typedTldForKind('org');
-  const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}${typed?.tld ? `&tld=${encodeURIComponent(typed.tld)}` : ''}`)).json()) as {
-    label?: string; name?: string; node?: Hex; error?: string;
-  };
-  if (!picked.label || !picked.name || !picked.node) return { ok: false, error: picked.error ?? 'no free name' };
+  // Resolve a free org name (label + node), like secureHomeWithGoogle does — unless it is named later (2026-10-28):
+  // then no name is looked up or claimed, and the runtime deploys it nameless with its type declared.
+  let picked: { label?: string; name?: string; node?: Hex; error?: string } = {};
+  if (!cOpts.nameLater) {
+    onStep?.('Finding a unique name…');
+    picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}${typed?.tld ? `&tld=${encodeURIComponent(typed.tld)}` : ''}`)).json()) as typeof picked;
+    if (!picked.label || !picked.name || !picked.node) return { ok: false, error: picked.error ?? 'no free name' };
+  }
 
   // ap-town spec 431 — on a PRICED ending the name is bought, not registered: the runtime deploys the org nameless
   // (`nameLater`) and this Home buys the name next — a ticket from its naming gate, the fee from the person's
@@ -2150,8 +2162,8 @@ export async function createOrganizationWithGoogle(
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify(bought
-      ? { session: sessionToken, delegate, grantOrg: cOpts.grantOrg, tld: typed.tld, nameLater: true }
+    body: JSON.stringify(bought || cOpts.nameLater
+      ? { session: sessionToken, delegate, grantOrg: cOpts.grantOrg, tld: typed?.tld, nameLater: true }
       : { session: sessionToken, label: picked.label, node: picked.node, delegate, grantOrg: cOpts.grantOrg, tld: typed?.tld }),
   });
   const b = (await res.json().catch(() => ({}))) as {
@@ -2165,20 +2177,23 @@ export async function createOrganizationWithGoogle(
 
   const childAgent = b.org;
   const personAgent = b.person;
-  let childName = b.name || picked.name;
-  if (bought && typed) {
+  let childName = cOpts.nameLater ? '' : (b.name || picked.name || '');
+  if (!cOpts.nameLater && bought && typed) {
     onStep?.('Buying its name…');
-    const buy = await buyNameWithGoogle({ sessionToken, person: personAgent, owner: childAgent, label: picked.label, tld: typed.tld, onStep });
+    const buy = await buyNameWithGoogle({ sessionToken, person: personAgent, owner: childAgent, label: picked.label!, tld: typed.tld, onStep });
     if (!buy.ok) return { ok: false, error: `${childAgent} exists, unnamed — its name was not bought: ${buy.error}. Name it from its Naming page.` };
     childName = buy.name;
   }
-  try {
-    const signHash = googleSignHash(childAgent, sessionToken);
-    const writes = buildNameRecordCalls(picked.node, childAgent, childDiscoveryRecords(base, cOpts));
-    const wr = await executeCalls(childAgent, signHash, writes);
-    if (!wr.ok) console.warn('[org-create] public naming metadata write failed:', wr.error);
-  } catch (e) {
-    console.warn('[org-create] public naming metadata write failed:', e);
+  // Named later: there is no name node to write records under yet.
+  if (!cOpts.nameLater && picked.node) {
+    try {
+      const signHash = googleSignHash(childAgent, sessionToken);
+      const writes = buildNameRecordCalls(picked.node, childAgent, childDiscoveryRecords(base, cOpts));
+      const wr = await executeCalls(childAgent, signHash, writes);
+      if (!wr.ok) console.warn('[org-create] public naming metadata write failed:', wr.error);
+    } catch (e) {
+      console.warn('[org-create] public naming metadata write failed:', e);
+    }
   }
   const relationshipType = RELATIONSHIP_TYPE.HAS_GOVERNANCE_OVER as RelationshipType;
   const edgeId = computeEdgeId(personAgent, childAgent, relationshipType);
