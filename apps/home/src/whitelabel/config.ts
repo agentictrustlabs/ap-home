@@ -132,6 +132,8 @@ const faithImpact: WhiteLabelConfig = {
       'https://reader.faithnet.io/sso-logout',
       'https://skills.faithnet.io/sso-logout',
       'https://workbench.faithnet.io/sso-logout',
+      'https://seed-reader.faithnet.io/sso-logout',
+      'https://publishing.faithnet.io/sso-logout',
     ],
   },
   relyingApps: [

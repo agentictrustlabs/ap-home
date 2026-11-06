@@ -514,8 +514,7 @@ its token lapses or it next tries to renew.
 `/logout`. `apps/estate/assets/sso-logout.js` is the shortest example, including how a sign-out reaches a session in another tab. Commons needs only
 its return allowlist fixed. When an app returns, add it to the list.
 
-**Where each app stands, 2026-11-06.** In the walk, deployed and seen to return: estate, Heart Coach, Game Night, Bible reader, Field, Church, Town, Names, Coach,
-OpenBook Reader, Skills, Workbench. Merged but NOT deployed: Publishing (verifiable-content-demo #71). Its live site was deployed from a branch and holds features `master` lacks,
-so a deploy from `master` would remove them. Field's stricter return check (engage #2) is also merged and undeployed, because its live site holds text `master` lacks; it returns already.
-Open: Seed Reader (seed-bible-global-church #14). No faithnet build: Engage web. No DNS from here: Gather27. Not found: Commons. Sign-out is per origin, so a second hostname needs its own entry.
+**Where each app stands, 2026-11-06.** In the walk, deployed and seen to return: estate, Heart Coach, Game Night, Bible reader, Field, Church, Town, Names, Coach, OpenBook Reader,
+Skills, Workbench, Seed Reader, Publishing. No faithnet build: Engage web. No DNS from here: Gather27. Not found: Commons. Behind their own gate, not read: Global.Church Engage and Platform.
+Sign-out is per origin, so a second hostname needs its own entry.
 **Before deploying any app by hand,** build `master` and compare it with what is live: several were last deployed from branches.
