@@ -11,8 +11,8 @@ trap 'git -C "$ROOT" checkout -- "$CONFIG"; git -C "$ROOT" diff --quiet -- "$CON
 python3 - "$CONFIG" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p, encoding='utf-8').read()
-assert s.count("remembered_consent: 'on',") == 3  # the reader, gc-engage and gc-platform, as committed
-a = "client_id: 'skills-app',"; assert s.count(a) == 1; s = s.replace(a, a + " remembered_consent: 'shadow',")
+a = "client_id: 'skills-app',\n      remembered_consent: 'on',"; assert s.count(a) == 1; s = s.replace(a, "client_id: 'skills-app',\n      remembered_consent: 'shadow',")
+a = "client_id: 'town-app',\n      remembered_consent: 'on',"; assert s.count(a) == 1; s = s.replace(a, "client_id: 'town-app',")
 open(p, 'w', encoding='utf-8').write(s)
 PY
 mkdir -p tests/e2e-local/artifacts

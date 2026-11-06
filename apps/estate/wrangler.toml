@@ -1,3 +1,4 @@
+# DEPLOYS FROM MASTER, by .github/workflows/estate-deploy.yml. Do not `wrangler deploy` from a branch: it replaces the live site with that branch.
 # The estate's own site: faithnet.estate. One Worker, static assets, no key, no Durable Object. It reads the
 # estate's heartbeat and relays a steward's signed-in calls to the estate's runtime; it is deployed by THIS
 # repository (DEPLOYER.md). Secret: ESTATE_HEARTBEAT_TOKEN (the runtime's TOWN_HEARTBEAT_TOKEN).

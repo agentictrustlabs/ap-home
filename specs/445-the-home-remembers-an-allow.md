@@ -1,8 +1,8 @@
 # Spec 445 — The Home remembers an Allow, and proves who is asking with a cookie no script can read
 
 **Status:** written 2026-11-05. **W0–W5 live since 2026-11-05 (PR #99)**, with one item held back (`grant-cache.ts`, see W5).
-**Seed Bible Reader is `on` since 2026-11-05: an allowed person skips the sheet there.** The owner turned it on ahead of the shadow week, with no
-operational users yet. **Global.Church Engage and Platform are `on` since 2026-11-05**, turned on by their owner. Other apps show the sheet until each is reviewed. W6 waits on the owner's decision (§3.3). W7 is partly done: see W7. §12 lists where the build departs from the first
+**On for every eligible curated app since 2026-11-05: an allowed person skips the sheet.** The owner's decision, ahead of the shadow week, with no
+operational users yet. Off by rule: `home-mcp`, `home-mcp-act` (no `site-login`), `pokernight`, `bible-explorer` (payments), and member-registered apps. W6 waits on the owner's decision (§3.3). W7 is partly done: see W7. §12 lists where the build departs from the first
 draft of this spec, and why. §13 answers a second agent's review, which changed the design in five places.
 **Asked by:** Paul's review of sign-in (2026-11), answered point by point at
 `https://faithnet.estate/architecture/sign-in#pauls-points`. This spec is the design that page says is missing.

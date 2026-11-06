@@ -8,7 +8,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "dev": "wrangler dev",
-    "deploy:faithnet": "wrangler deploy --env faithnet"
+    "deploy:faithnet": "node scripts/guard-deploy.mjs && wrangler deploy --env faithnet"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260605.1",

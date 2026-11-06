@@ -666,7 +666,7 @@ const SIGNIN_ALT =
   'Without a session the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation the ' +
   'person signs, its check on chain, a record with a single-use code, and the code exchanged for an id_token. Arcs run above the row. ' +
   'A new app for a person already signed in goes from Recognize to Allow. An app that still holds its delegation goes straight to Token. ' +
-  'A fourth arc goes from Recognize to Verify, for an app the person already allowed: the server skips the sheet when the app asks for nothing more and the stored delegation still verifies on chain, an HttpOnly cookie proves who is asking, and nothing is signed. It is on for Seed Bible Reader, and each other app joins after review. ' +
+  'A fourth arc goes from Recognize to Verify, for an app the person already allowed: the server skips the sheet when the app asks for nothing more and the stored delegation still verifies on chain, an HttpOnly cookie proves who is asking, and nothing is signed. The sheet still shows for a first Allow, an app with payments, a new session key, a request through a host, an app a member registered, and an app asking for more. ' +
   'Notes say that in Chrome the same rule applies for a key the Home holds, and that signing out ends the Home session and every app\'s silent renewal, then walks the apps with a sign-out page of their own.';
 
 const HOME_PAGES = "The Home's pages, in the person's browser. The Home is a Next.js app (<code>apps/home</code>) at <code>www.faithnet.me</code>.";
@@ -930,7 +930,7 @@ const SIGNIN_BODY = `
 <p>"Not you?" is different. It ends the Home session so the person can choose who to be, and leaves their apps alone.</p>
 
 <h2 id="next-design">The Home remembers an Allow</h2>
-<p>This is spec 445, the amber arc in the picture. It went live on 5 November 2026 and is on for Seed Bible Reader. Each other app shows the sheet until it has been reviewed and turned on. Sections above this one that say the sheet is always shown describe those apps.</p>
+<p>This is spec 445, the amber arc in the picture. It went live on 5 November 2026, and it is on for every app in the registry that can use it. Sections above this one that say the sheet is always shown describe how it was before.</p>
 <p>A person who allowed an app is not asked again, as long as the app asks for nothing more and what they signed still holds. Nothing is signed on that visit. The app is handed the wires it already had, each checked on chain first.</p>
 
 <h3>Who is asking: a cookie script cannot read</h3>
@@ -967,7 +967,7 @@ const SIGNIN_BODY = `
 <p>Connected Apps, under Apps you signed into, lists what each app may do, when it last signed in, and every live wire, each with Revoke. <b>Revoke</b> is on chain, and the next sign-in shows the sheet. <b>Forget this app</b> drops what was agreed and keeps the wires listed. <b>Ask me every time</b> keeps the sheet for that app. Activity lists each sign-in that passed: "Signed in to <i>App</i>. No new permission."</p>
 
 <h3>How it goes live</h3>
-<p>One app at a time, each a reviewed change in the registry. Seed Bible Reader is on. The others show the sheet, and the server counts what it would have decided for them. The browser's reuse cache goes when the last app using it is on.</p>
+<p>It is on for every curated app that signs in with <code>site-login</code> and mints no payment. Two apps with payments and the two Home MCP clients are not. A new app has to be decided on: a test fails until it is. The browser's reuse cache stays for apps members register, which always ask.</p>
 
 <h3>What a second review changed</h3>
 <p>Another agent, working on the same problem, reviewed this page. Each point was read against the code.</p>
@@ -992,7 +992,7 @@ const SIGNIN_BODY = `
 </ul>
 
 <h2 id="pauls-points">Paul's points, answered</h2>
-<p>Paul reviewed the sign-in and wrote up what he found and what he would do about it. His words are quoted below, a point at a time, each with a direct answer from the code as it stood at his review. Spec 445, <a href="#next-design">above</a>, has since changed that code, and it is on for Seed Bible Reader. File names are under <code>apps/home</code>.</p>
+<p>Paul reviewed the sign-in and wrote up what he found and what he would do about it. His words are quoted below, a point at a time, each with a direct answer from the code as it stood at his review. Spec 445, <a href="#next-design">above</a>, has since changed that code, and it is live. File names are under <code>apps/home</code>.</p>
 
 <h3>1. Is consent remembered?</h3>
 <blockquote><p>"The Home never checks whether a person has already allowed an app."</p></blockquote>
