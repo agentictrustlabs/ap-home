@@ -1795,6 +1795,43 @@ const TEVAL_BODY = `
 <li><b>Good does not mean familiar.</b> A verse is never scored by how close it is to an existing Bible, and never rewarded for being different either. Sounding like a translation people know is not evidence that it is right.</li>
 </ul>
 <p>What a reader of the edition sees is the outcome of the three questions: a verse marked <b>ready</b> has passed all of them, and a verse marked <b>open</b> says which one it has not.</p>
+
+<h2>How one version is judged better, and when the new one is taken</h2>
+<p>The starting position is that the version we already have stays. A new version has to earn its place, and when the evidence is mixed the old one is kept.</p>
+<p>The comparison is the same each time. It has four parts.</p>
+<ol>
+<li><b>Code checks both versions against the source.</b> A version with a failed check that the other does not have starts behind.</li>
+<li><b>A model from another family reads the two side by side.</b> GPT-5.6 Luna sees the source and two versions labelled A and B. It is never told which is the old one. For each verse it says which is more faithful to the source, which is better English, and what errors each one has.</li>
+<li><b>It is asked again with A and B swapped.</b> A verse counts as a win only when both readings pick the same version. If they disagree, the verse is a tie.</li>
+<li><b>A reader model sees our English only</b> and says whether each version can be followed.</li>
+</ol>
+<p>Faithfulness decides. Better English never makes up for a meaning that is less faithful.</p>
+<p>What it takes to win depends on how much is at stake.</p>
+<div class="table-wrap"><table class="skills-table">
+<thead><tr><th>What is being decided</th><th>The new version is taken when</th><th>A tie goes to</th></tr></thead>
+<tbody>
+<tr><td><b>A draft inside one run</b>, after a revision round</td><td>It has fewer failed checks of the kind that hold a verse back, then fewer failed checks of any kind. No model is asked.</td><td>The earlier draft</td></tr>
+<tr><td><b>A verse that is already published</b></td><td>All five rules below hold.</td><td>The published verse</td></tr>
+<tr><td><b>A change to the harness</b>, such as a new instruction, check or step</td><td>On passages locked before the test, it wins more verses than it loses, by more than two identical runs of the old plan differ from each other. It misses no planted error that the old plan caught. The pass mark was written before any draft was made.</td><td>The harness as it is</td></tr>
+</tbody>
+</table></div>
+<p>The five rules for replacing a published verse:</p>
+<ol>
+<li>The verse changed, and the fault that was found is gone by its own check.</li>
+<li>The new verse fails no serious check that the published verse passed.</li>
+<li>A model reading the new verse against the source finds no error of meaning in it.</li>
+<li>The blind judge does not prefer the published verse on faithfulness in either order, and reports no dropped, added or mistaken word in the new one.</li>
+<li>The reader does not find the new verse harder to follow than the published one.</li>
+</ol>
+<p>If any rule fails, the published verse stays. It is marked open with the reason, and the failed attempt is kept on record. In release 4.0.1, 134 verses had a confirmed fault. 85 new versions passed the first four rules, the reader held back 12 of those, and 73 verses were replaced. The other 61 were published as open.</p>
+<p>A change to the harness is held to the same standard. Seven changes to how the drafter works have been tested this way, and none was taken: none did better than its pass mark, or than the difference between two identical runs. A change to the checks can be measured without a model: it is taken when it still catches the planted errors and raises fewer false alarms on stored drafts. The latest one kept 781 of 839 planted errors and removed 14 false alarms.</p>
+<p>These rules lower the risk of a bad replacement. They do not remove it.</p>
+<ul>
+<li><b>Four of the 73 replaced verses read worse than the verses they replaced</b>, and all four passed every rule. They were found later by reading each replacement against its source words. They are still published, and taking them back is on the list of open decisions.</li>
+<li><b>Rule 3 is weak.</b> The model that applies it found 50 of 120 errors planted on purpose. The stronger model found 117, but also called 22 of 120 correct verses wrong. A rule for using the two together is designed and not built.</li>
+<li><b>The second half of rule 4 was applied by hand</b> on the last pass. It is not yet in the script.</li>
+<li><b>The test sets are small.</b> A comparison reads 180 to 320 verses, so a small real gain cannot be told from chance, and such a change is not taken.</li>
+</ul>
 `;
 
 const TEST_ALT =
