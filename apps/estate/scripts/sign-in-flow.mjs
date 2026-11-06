@@ -48,7 +48,7 @@ arc(X.app, X.token, 130, { color: BACK });
 said((X.app + X.token) / 2, 152, 'COMING BACK TO AN APP', ['the app presents the delegation it holds, and the Home answers with a fresh id_token: no page and no prompt'], BACK);
 // an app you already allowed: Paul's fix, live for the first app. The server decides, proved by a cookie script cannot read, and nothing is signed.
 arc(X.rec - 14, X.verify, 236, { color: ALLOWED });
-said((X.rec + X.verify) / 2, 258, 'AN APP YOU ALREADY ALLOWED: NO SHEET', ['the server skips the sheet when the app asks for nothing more than you agreed to and', 'the stored delegation still verifies on chain. An HttpOnly cookie proves who is asking.', 'Nothing is signed. On for Seed Bible Reader, and each other app after review.'], ALLOWED);
+said((X.rec + X.verify) / 2, 258, 'AN APP YOU ALREADY ALLOWED: NO SHEET', ['the server skips the sheet when the app asks for nothing more than you agreed to and', 'the stored delegation still verifies on chain. An HttpOnly cookie proves who is asking.', 'Nothing is signed.'], ALLOWED);
 // a new app, already signed in: the session stands in for the credential
 arc(X.rec + 14, X.allow, 356, { color: SSO });
 said(X.rec + 32, 378, 'A NEW APP, ALREADY SIGNED IN', ['the Home session is found:', 'no credential, no new account'], SSO, 'start');
@@ -62,8 +62,8 @@ out.push(`<text x="40" y="852" text-anchor="start" class="b">SIGNING OUT</text>`
 note(40, 872, ['Ends the Home session and every', "app's silent renewal, then walks", 'the apps with a sign-out page.', 'A token an app already holds', 'lasts until it expires.'], { anchor: 'start' });
 
 // what happens today, said where the eye lands first
-out.push(`<text x="104" y="282" text-anchor="start" class="b">OTHER APPS, FOR NOW</text>`);
-note(104, 302, ['Each trip to the Home ends at', 'the Allow sheet, until that app', 'has been reviewed and turned on.'], { anchor: 'start' });
+out.push(`<text x="104" y="282" text-anchor="start" class="b">STILL AT THE SHEET</text>`);
+note(104, 302, ['A first Allow. An app with payments.', 'A new session key, or a request', 'through a host. An app a member', 'registered. An app asking for more.'], { anchor: 'start' });
 
 // ── below the row: what each step reads and leaves
 const LOW = ROW + 198, D = ROW + 94;
@@ -101,4 +101,4 @@ out.push(`<text x="${W - 40}" y="${H - 26}" class="s" text-anchor="end">faithnet
 
 finish(process.argv[2],
   'How sign-in works at a faithnet Home: the first time, a new app while signed in, and coming back',
-  'An app asks the Home to sign a person in. The Home checks the app against its registry and looks for a Home session. Without one the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation signed by the person, its check on chain, a record and a single-use code, and the code exchanged for an id_token. A new app for a person already signed in skips the credential and the new account. An app that still holds its delegation goes straight to the token step. An app the person already allowed goes from Recognize to Verify: the server skips the sheet when it asks for nothing more and the stored delegation still verifies on chain, an HttpOnly cookie proves who is asking, and nothing is signed. This is on for Seed Bible Reader, and each other app joins after review. In Chrome the same rule applies for a key the Home holds. Signing out ends the Home session and every app\'s silent renewal, then walks the apps with a sign-out page.');
+  'An app asks the Home to sign a person in. The Home checks the app against its registry and looks for a Home session. Without one the person proves a credential and, the first time, a Home is made for them. Then the Allow sheet, a delegation signed by the person, its check on chain, a record and a single-use code, and the code exchanged for an id_token. A new app for a person already signed in skips the credential and the new account. An app that still holds its delegation goes straight to the token step. An app the person already allowed goes from Recognize to Verify: the server skips the sheet when it asks for nothing more and the stored delegation still verifies on chain, an HttpOnly cookie proves who is asking, and nothing is signed. The sheet still shows for a first Allow, an app with payments, a new session key, a request through a host, an app a member registered, and an app asking for more. In Chrome the same rule applies for a key the Home holds. Signing out ends the Home session and every app\'s silent renewal, then walks the apps with a sign-out page.');

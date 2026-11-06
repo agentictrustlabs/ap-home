@@ -132,6 +132,7 @@ const faithImpact: WhiteLabelConfig = {
     // is still checked by the church agent and vault, never inferred from this registration.
     {
       client_id: 'ap-church',
+      remembered_consent: 'on',
       name: 'Church',
       redirect_uris: [
         'https://church.faithnet.io/',
@@ -207,6 +208,7 @@ const faithImpact: WhiteLabelConfig = {
       // change that. `site-login` is the ONLY template it may request, which is the template that asserts
       // who someone is and carries no authority to act for them.
       client_id: 'town-app',
+      remembered_consent: 'on',
       name: 'The town',
       // EXACT MATCH (CN-1). The town's own host first; the workers.dev host is what a preview deploy serves.
       redirect_uris: [
@@ -224,6 +226,7 @@ const faithImpact: WhiteLabelConfig = {
       // ONLY (who someone is, no authority to act), the token kept in the browser tab, and every call it relays
       // decided by the runtime from the session it is given. A signature is still made at the Home, with the passkey.
       client_id: 'estate-app',
+      remembered_consent: 'on',
       name: 'The estate',
       redirect_uris: [
         'https://faithnet.estate/connected',
@@ -240,6 +243,7 @@ const faithImpact: WhiteLabelConfig = {
       // site-login with `session_key=`; a self-vault grant on the person's OWN acceptance family. No
       // email, no org, no messaging. The only template it may request asserts who someone is.
       client_id: 'demo-terms',
+      remembered_consent: 'on',
       name: 'Terms demo',
       // EXACT MATCH (CN-1). The Worker's hostname is read from the deploy output, never guessed; the
       // Vite dev origin is the second entry. Both end in `/` because the client's redirectUri is `${origin}/`.
@@ -264,6 +268,7 @@ const faithImpact: WhiteLabelConfig = {
     },
     {
       client_id: 'skills-app',
+      remembered_consent: 'on',
       name: 'Skills',
       // EXACT MATCH (CN-1) — a redirect_uri that is not listed here is refused, so the app's own
       // custom domain has to be registered before anyone can sign in from it. FIRST on purpose: the
@@ -322,6 +327,7 @@ const faithImpact: WhiteLabelConfig = {
     // origin at /developer instead of editing this file.
     {
       client_id: 'commons-app',
+      remembered_consent: 'on',
       name: 'Commons',
       // The deployed starter, plus `wrangler dev` on 8799. Exact match (CN-1), so the trailing
       // slash is load-bearing — and note the `-production` suffix: `wrangler deploy --env
@@ -346,6 +352,7 @@ const faithImpact: WhiteLabelConfig = {
     // app cannot mint it, which is the point.
     {
       client_id: 'engage-app',
+      remembered_consent: 'on',
       name: 'Engage',
       // A redirect_uri is exact-match (CN-1) and is where this broker HANDS OVER an authorization
       // code, so it must name a domain we CONTROL — never a guessed one. An earlier revision of this
@@ -393,6 +400,7 @@ const faithImpact: WhiteLabelConfig = {
     // shared `delegate` below.
     {
       client_id: 'field-app',
+      remembered_consent: 'on',
       name: 'Field',
       redirect_uris: [
         // faithnet universe (chain 34348) — only present when the deploy sets it (field.faithnet.io);
@@ -460,6 +468,7 @@ const faithImpact: WhiteLabelConfig = {
     // custodied by the Gather org's custodian, who runs the ceremony from Home against a2aBase.
     {
       client_id: 'gather-app',
+      remembered_consent: 'on',
       // Gather's own brand is two words, and the enroll screen shows this verbatim as
       // "Continue to <name>".
       name: 'Gather 27',
@@ -530,6 +539,7 @@ const faithImpact: WhiteLabelConfig = {
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
     {
       client_id: 'skills-corpus',
+      remembered_consent: 'on',
       name: 'Skills Corpus (admin)',
       redirect_uris: ['https://skills-corpus.richardpedersen3.workers.dev/', 'http://localhost:8996/'],
       allowed_scopes: ['openid', 'agent'],
@@ -543,6 +553,7 @@ const faithImpact: WhiteLabelConfig = {
     // relying apps (which stay login-grade + onboard via the Personal Home).
     {
       client_id: 'demo-web',
+      remembered_consent: 'on',
       name: 'agenticprimitives demo',
       redirect_uris: ['https://agenticprimitives-demo.pages.dev/', 'http://localhost:5173/'],
       allowed_scopes: ['openid', 'agent'],
@@ -556,6 +567,7 @@ const faithImpact: WhiteLabelConfig = {
       // from the Home. The site delegation is unused (web-pro signs userOps + custody typed-data
       // directly via the persona's custodian), but a registered client_id is required by /connect/demo-signin.
       client_id: 'demo-web-pro',
+      remembered_consent: 'on',
       name: 'agenticprimitives treasury demo',
       redirect_uris: ['https://agenticprimitives-demo-pro.pages.dev/', 'http://localhost:5273/'],
       allowed_scopes: ['openid', 'agent'],
@@ -726,6 +738,7 @@ const faithImpact: WhiteLabelConfig = {
     },
     {
       client_id: 'demo-org',
+      remembered_consent: 'on',
       name: 'Impact',
       redirect_uris: ['https://agenticprimitives-demo-org.pages.dev/', 'http://localhost:5473/'],
       allowed_scopes: ['openid', 'agent'],
@@ -742,6 +755,7 @@ const faithImpact: WhiteLabelConfig = {
     // the real underlying organization is NOT used on the live site (demo disclaimer).
     {
       client_id: 'demo-jp',
+      remembered_consent: 'on',
       name: 'JP Adopt',
       redirect_uris: ['https://agenticprimitives-demo-jp.pages.dev/', 'http://localhost:5573/'],
       allowed_scopes: ['openid', 'agent'],
@@ -757,6 +771,7 @@ const faithImpact: WhiteLabelConfig = {
     // arrival the Switchboard pilot describes. demo-gs holds no PII; site-login + org-create only.
     {
       client_id: 'demo-gs',
+      remembered_consent: 'on',
       name: 'Global Switchboard',
       redirect_uris: ['https://agenticprimitives-demo-gs.pages.dev/', 'http://localhost:5673/'],
       allowed_scopes: ['openid', 'agent'],
@@ -845,6 +860,7 @@ const faithImpact: WhiteLabelConfig = {
     // exact-match redirect_uri (CN-1) by `src/lib/oidc-clients.ts`.
     {
       client_id: 'demo-corpus',
+      remembered_consent: 'on',
       name: 'Demo Corpus',
       redirect_uris: [
         // faithnet universe — corpus.faithnet.io, env-gated like the explorer above; first on purpose.
@@ -871,6 +887,7 @@ const faithImpact: WhiteLabelConfig = {
     // exact-match redirect_uri (CN-1) by `src/lib/oidc-clients.ts`.
     {
       client_id: 'uupg-tracker',
+      remembered_consent: 'on',
       name: 'UUPG+ Tracker',
       redirect_uris: [
         'https://uupg.richardpedersen3.workers.dev/',
@@ -939,6 +956,7 @@ const faithImpact: WhiteLabelConfig = {
     // demo-a2a then refuses as aud mismatch. Same demo delegate as the other uupg apps.
     {
       client_id: 'campaign-studio',
+      remembered_consent: 'on',
       name: 'Engagement Campaign Studio',
       redirect_uris: [
         'https://campaign-studio.richardpedersen3.workers.dev/',
@@ -957,6 +975,7 @@ const faithImpact: WhiteLabelConfig = {
     // needs a deliberate wildcard-host extension for this client before subdomain routing goes live.
     {
       client_id: 'org-site',
+      remembered_consent: 'on',
       name: 'Organization Site',
       redirect_uris: ['https://uupg-org.richardpedersen3.workers.dev/', 'https://org.richardpedersen3.workers.dev/', 'http://127.0.0.1:8798/', 'http://localhost:8798/'],
       allowed_scopes: ['openid', 'agent'],
@@ -970,6 +989,7 @@ const faithImpact: WhiteLabelConfig = {
     // for now; replace when the portal mints its own service SA.
     {
       client_id: 'newcity-portal',
+      remembered_consent: 'on',
       name: 'New City AI Portal',
       redirect_uris: [
         'https://newcity-portal.richardpedersen3.workers.dev/',
@@ -985,6 +1005,7 @@ const faithImpact: WhiteLabelConfig = {
     // the code lands at /api/home/callback, exchanged server-side). site-login only; no PII at the broker.
     {
       client_id: 'openbook-tyndale',
+      remembered_consent: 'on',
       name: 'OpenBook × Tyndale',
       redirect_uris: [
         'https://openbook-tyndale.vercel.app/api/home/callback',
@@ -1002,6 +1023,7 @@ const faithImpact: WhiteLabelConfig = {
     // FIRST on purpose: the front-channel sign-out takes the first https URI per client.
     {
       client_id: 'source-publishing',
+      remembered_consent: 'on',
       name: 'Source Publishing',
       redirect_uris: [
         'https://publishing.faithnet.io/',
@@ -1036,6 +1058,7 @@ const faithImpact: WhiteLabelConfig = {
     // site-login only for now; no PII at the broker beyond the name on the token (`profile`). FIRST https URI on purpose.
     {
       client_id: 'openbook-reader',
+      remembered_consent: 'on',
       name: 'OpenBook Reader',
       redirect_uris: [
         'https://reader.faithnet.io/',
@@ -1057,6 +1080,7 @@ const faithImpact: WhiteLabelConfig = {
     // this Home to sign. Login-grade; it reads as the person and signs nothing.
     {
       client_id: 'naming-app',
+      remembered_consent: 'on',
       name: 'Names',
       redirect_uris: [
         'https://names.faithnet.io/',
