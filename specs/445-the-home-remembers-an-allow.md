@@ -491,8 +491,8 @@ it, and an app that does not send them back strands them there. Read in a real b
 
 | | Apps |
 | --- | --- |
-| **Signs out and returns** | `heartcoach.faithnet.io`, `gamenight.faithnet.io`, `bible.faithnet.io`, and `faithnet.estate`, added here |
-| **Signs out, does not return** (lands on its own root) | `commons-production…workers.dev`, `field-web…workers.dev`. Both were in the default walk |
+| **Signs out and returns** | `heartcoach.faithnet.io`, `gamenight.faithnet.io`, `bible.faithnet.io`, `field.faithnet.io`, and `faithnet.estate`, added here |
+| **Signs out, does not return** (lands on its own root) | `commons-production…workers.dev`. `field-web…workers.dev` too, but that is a build whose Home is the other estate's, and the first draft of this table read it by mistake |
 | **No sign-out page** (serves its ordinary page, or redirects, or a 404) | `church`, `town`, `skills`, `workbench`, `coach`, `seed-reader`, `publishing`, `reader`, `names` (all `.faithnet.io`), demo-terms, engage-web, demo-web and demo-web-pro, skills-corpus, demo-corpus, uupg-tracker, campaign-studio, org-site, newcity-portal, openbook-tyndale |
 | **Behind their own gate, not read** | `engage.global.church`, `platform.global.church` |
 
@@ -511,5 +511,9 @@ its token lapses or it next tries to renew.
 `tests/e2e-sso/logout-chain.spec.ts` loads each entry the way the chain does. Another Home keeps the older walk until it has a list of its own.
 
 **The rest is each app's own change.** An app joins by serving `/sso-logout`: clear its own session, then redirect to `return` when that is on its Home's
-`/logout`. `apps/estate/assets/sso-logout.js` is the shortest example, including how a sign-out reaches a session in another tab. Commons and Field-web
-need only their return allowlist fixed. When an app returns, add it to the list.
+`/logout`. `apps/estate/assets/sso-logout.js` is the shortest example, including how a sign-out reaches a session in another tab. Commons needs only
+its return allowlist fixed. When an app returns, add it to the list.
+
+**PRs open, 2026-11-05, none merged or deployed:** engage #2 (Coach, Engage, Gather27, and a stricter Field), skills #49 (Skills, Workbench), ap-town #12 (Town, Names),
+ap-church #14 (Church), verifiable-content-demo #71 (Publishing, OpenBook Reader), seed-bible-global-church #14 (Seed Reader). An app joins the walk after its PR is deployed
+and it has been seen to return. Sign-out is per origin, so a second hostname needs its own entry.

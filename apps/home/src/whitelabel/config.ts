@@ -116,14 +116,15 @@ const faithImpact: WhiteLabelConfig = {
     { id: 'treasury', label: 'Treasuries', blurb: 'Funds and giving you help manage.', status: 'live', verb: 'manage' },
     { id: 'data-source', label: 'Data sources', blurb: 'Records you help protect and share, with consent.', status: 'soon', verb: 'protect' },
   ],
-  // Spec 445 §16 — verified to send a person back to this Home, 2026-11-05. commons-app and field-web run their sign-out but do not
-  // return, and most other apps have no /sso-logout yet: both listed in the spec. Add an app here when it returns.
+  // Spec 445 §16 — verified to send a person back to this Home, 2026-11-05. commons-app runs its sign-out but does not
+  // return, and most other apps have no /sso-logout live yet: both listed in the spec. Add an app here when it returns.
   frontChannelLogout: {
     'https://www.faithnet.me': [
       'https://faithnet.estate/sso-logout',
       'https://heartcoach.faithnet.io/sso-logout',
       'https://gamenight.faithnet.io/sso-logout',
       'https://bible.faithnet.io/sso-logout',
+      'https://field.faithnet.io/sso-logout',
     ],
   },
   relyingApps: [
