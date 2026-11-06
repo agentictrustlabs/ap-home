@@ -26,6 +26,9 @@ import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { RequiredNameGate } from './RequiredNameGate';
+import { askRemembered } from './remembered';
+import { isRememberedTemplate } from '../../lib/consent-terms';
+import { ensurePlaybook } from '../../home/ensure-playbook';
 import { NewMemberSetup } from './NewMemberSetup';
 import { coinMandateLeg, grantsCoinAtConnect, newMemberPlan, planIsEmpty, withCurrencyConsent, withEmailClaimConsent, withProfileNameConsent } from '../../lib/new-member';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
@@ -111,6 +114,7 @@ export function GoogleEnrollResume() {
         const requested = nameLabel(pending.enroll.name);
         if (requested && nameLabel(agentName ?? '') !== requested) setPhase('mismatch');
         else if (requiresNamedAgent && !agentName) setPhase('name');
+        else if (await signInRemembered(agentAddress)) return;
         else setPhase('consent');
         return;
       }
@@ -124,6 +128,38 @@ export function GoogleEnrollResume() {
       setPhase(requiresNamedAgent ? 'name' : afterHome());
     })();
   }, [pending, token, agentName, agentAddress, requiresNamedAgent]);
+
+  // Spec 445 §6 — ALLOWED BEFORE? The same question RecognizedEnroll asks, asked here too: a returning person who signs
+  // in with Google or YouVersion lands on THIS component after the provider's redirect, never on the recognized path, so
+  // without it they met the sheet at every sign-in whatever they had allowed (found 2026-11-05 on Global.Church Engage).
+  // The server decides, from the recognition cookie the callback just set, and refuses a `prompt`, a session key or a
+  // host itself. A yes signs nothing. Anything but a code carries on to the sheet exactly as before.
+  async function signInRemembered(person: `0x${string}`): Promise<boolean> {
+    if (!enroll || !isRememberedTemplate(enroll.template || 'site-login')) return false;
+    const asked = await askRemembered(enroll, person);
+    if (asked.kind !== 'code') return false;
+    // The same healing a sheet sign-in runs for an app that asks the person's agent as them. It grants nothing.
+    if (relyingApp?.ask_with_login) {
+      await Promise.race([ensurePlaybook(person, token), new Promise<void>((r) => setTimeout(r, 12_000))]).catch((e: unknown) => console.warn('[google-resume] playbook heal skipped:', e));
+    }
+    setSsoCookie(token, 'Google');
+    setFedcmLoginStatus('logged-in');
+    // This device's list of apps it has signed into: a sign-in with no sheet is still a sign-in.
+    const tpl = whitelabel.delegationTemplates[enroll.template];
+    recordConnectedApp(person, {
+      clientId: enroll.aud,
+      appName,
+      appDomain: appHost,
+      logo: relyingApp?.logo,
+      canDo: tpl?.canDo ?? [],
+      cannotDo: tpl?.cannotDo ?? [],
+      grantedAt: Date.now(),
+      expiresAt: tpl?.expiryDays ? Date.now() + tpl.expiryDays * 86_400_000 : undefined,
+    });
+    clearStash();
+    deliverEnrollCode(enroll, pending!.popupMode, asked.code);
+    return true;
+  }
 
   async function onAuthorize() {
     if (!enroll || !home) return;
