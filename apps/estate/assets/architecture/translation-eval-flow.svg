@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1460 1040" width="1460" height="1040" role="img" aria-labelledby="t d">
+<title id="t">How we test the quality of a translation</title>
+<desc id="d">One change to the harness goes through eight steps: the passages are locked before the test; a floor and a ceiling give a score its meaning; errors are planted by code to test the checks; the old plan and the new plan each draft the passages; code checks every verse; another model family judges the two blind, in both orders; a claimed error is verified against the source; and the change passes or fails against criteria written first. Three guards feed the test: a second identical run as the measure of noise, a judge from another model family, and criteria written before any draft. The whole edition has its own row: every verse is audited, a finding is confirmed against the source, each fix is read token by token, and release gates mark every verse ready or open with the reason. A confirmed error becomes a planted kind and a check. A strip gives the number of verses in each set: 327 development, 510 held out, 180 in the hard set, 568 in the skill tests, 839 planted errors, 1,115 stored drafts replayed, and 31,085 in the whole edition.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#8b95b5"/></marker><marker id="b" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#8b95b5"/></marker><marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#f472b6"/></marker><marker id="bs" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#f472b6"/></marker><marker id="m0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#0ea5e9"/></marker><marker id="m0s" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#0ea5e9"/></marker>
+<style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#eef1fb}.h{font-size:30px;font-weight:700}.n{font-size:16px;font-weight:650}.t{font-size:13px;font-weight:600}.k{font-size:12px;font-weight:700}.s{font-size:13px;fill:#9aa5c7}.b{font-size:12px;font-weight:700;letter-spacing:.09em;fill:#9aa5c7}</style></defs>
+<rect width="1460" height="1040" rx="22" fill="#0b1020"/>
+<text x="40" y="52" class="h">How we test the quality of a translation</text>
+<text x="40" y="78" class="s" text-anchor="start">No person reviews RBS, so every change to the harness has to prove itself on locked passages, against a second run of the unchanged plan, read blind by another model family.</text>
+<text x="40" y="112" class="b" text-anchor="start" style="fill:#f472b6">WHAT KEEPS THE TEST HONEST</text>
+<rect x="538" y="128" width="224" height="48" rx="12" fill="#111933" stroke="#f472b6" stroke-width="2"/>
+<text x="650" y="148" text-anchor="middle" class="t">A second identical run</text><text x="650" y="165" text-anchor="middle" class="s">the noise, beside every result</text>
+<path d="M650 176V256" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
+<rect x="898" y="128" width="224" height="48" rx="12" fill="#111933" stroke="#f472b6" stroke-width="2"/>
+<text x="1010" y="148" text-anchor="middle" class="t">Another model family</text><text x="1010" y="165" text-anchor="middle" class="s">blind, in both orders</text>
+<path d="M1010 176V256" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
+<rect x="1196" y="128" width="224" height="48" rx="12" fill="#111933" stroke="#f472b6" stroke-width="2"/>
+<text x="1308" y="148" text-anchor="middle" class="t">Criteria written first</text><text x="1308" y="165" text-anchor="middle" class="s">before any draft is made</text>
+<path d="M1370 176V256" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
+<text x="40" y="236" class="b" text-anchor="start">ONE CHANGE TO THE HARNESS</text>
+<path d="M150 300H246" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M330 300H426" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M510 300H606" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M690 300H786" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M870 300H966" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M1050 300H1146" fill="none" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/>
+<path d="M1230 300H1326" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<g>
+<rect x="78" y="268" width="64" height="64" rx="18" fill="#8b5cf6"/>
+<g transform="translate(93.36,283.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="14" rx="2"/><circle cx="12" cy="11.5" r="3"/><path d="M12 8.5v-1M7 18.5v2M17 18.5v2"/></g>
+<circle cx="81" cy="271" r="11" fill="#0b1020" stroke="#8b5cf6" stroke-width="2"/><text x="81" y="275" text-anchor="middle" class="k">1</text>
+<text x="110" y="356" text-anchor="middle" class="n">Lock passages</text>
+<text x="110" y="375" text-anchor="middle" class="s">before the test</text>
+</g>
+<g>
+<rect x="258" y="268" width="64" height="64" rx="18" fill="#3b82f6"/>
+<g transform="translate(273.36,283.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M7 20h10M5 7h14"/><path d="M5 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/><path d="M19 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/></g>
+<circle cx="261" cy="271" r="11" fill="#0b1020" stroke="#3b82f6" stroke-width="2"/><text x="261" y="275" text-anchor="middle" class="k">2</text>
+<text x="290" y="356" text-anchor="middle" class="n">Floor and ceiling</text>
+<text x="290" y="375" text-anchor="middle" class="s">what a score means</text>
+</g>
+<g>
+<rect x="438" y="268" width="64" height="64" rx="18" fill="#14b8a6"/>
+<g transform="translate(453.36,283.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.6"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></g>
+<circle cx="441" cy="271" r="11" fill="#0b1020" stroke="#14b8a6" stroke-width="2"/><text x="441" y="275" text-anchor="middle" class="k">3</text>
+<text x="470" y="356" text-anchor="middle" class="n">Plant errors</text>
+<text x="470" y="375" text-anchor="middle" class="s">to test the checks</text>
+</g>
+<g>
+<rect x="618" y="268" width="64" height="64" rx="18" fill="#f59e0b"/>
+<g transform="translate(633.36,283.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5l1-4.5L16 4.5 19.5 8 9 18.5z"/><path d="M13.5 7l3.5 3.5"/></g>
+<circle cx="621" cy="271" r="11" fill="#0b1020" stroke="#f59e0b" stroke-width="2"/><text x="621" y="275" text-anchor="middle" class="k">4</text>
+<text x="650" y="356" text-anchor="middle" class="n">Draft the arms</text>
+<text x="650" y="375" text-anchor="middle" class="s">old plan, new plan</text>
+</g>
+<g>
+<rect x="798" y="268" width="64" height="64" rx="18" fill="#22c55e"/>
+<g transform="translate(813.36,283.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 7.8-7.5 9.5-4.3-1.7-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></g>
+<circle cx="801" cy="271" r="11" fill="#0b1020" stroke="#22c55e" stroke-width="2"/><text x="801" y="275" text-anchor="middle" class="k">5</text>
+<text x="830" y="356" text-anchor="middle" class="n">Check by code</text>
+<text x="830" y="375" text-anchor="middle" class="s">every verse</text>
+</g>
+<g>
+<rect x="978" y="268" width="64" height="64" rx="18" fill="#ec4899"/>
+<g transform="translate(993.36,283.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></g>
+<circle cx="981" cy="271" r="11" fill="#0b1020" stroke="#ec4899" stroke-width="2"/><text x="981" y="275" text-anchor="middle" class="k">6</text>
+<text x="1010" y="356" text-anchor="middle" class="n">Judge blind</text>
+<text x="1010" y="375" text-anchor="middle" class="s">faithful? readable?</text>
+</g>
+<g>
+<rect x="1158" y="268" width="64" height="64" rx="18" fill="#0ea5e9"/>
+<g transform="translate(1173.36,283.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 11v5.5"/><path d="M8.5 16V11a3.5 3.5 0 0 1 7 0v5"/><path d="M5.5 14.5V11a6.5 6.5 0 0 1 13 0v3.5"/></g>
+<circle cx="1161" cy="271" r="11" fill="#0b1020" stroke="#0ea5e9" stroke-width="2"/><text x="1161" y="275" text-anchor="middle" class="k">7</text>
+<text x="1190" y="356" text-anchor="middle" class="n">Verify</text>
+<text x="1190" y="375" text-anchor="middle" class="s">is the error real?</text>
+</g>
+<g>
+<rect x="1338" y="268" width="64" height="64" rx="18" fill="#ef4444"/>
+<g transform="translate(1353.36,283.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="10" r="6"/><path d="M9.3 10l2 2 3.4-3.8"/><path d="M8.5 15l-1.5 5.5 5-2.5 5 2.5-1.5-5.5"/></g>
+<circle cx="1341" cy="271" r="11" fill="#0b1020" stroke="#ef4444" stroke-width="2"/><text x="1341" y="275" text-anchor="middle" class="k">8</text>
+<text x="1370" y="356" text-anchor="middle" class="n">Decide</text>
+<text x="1370" y="375" text-anchor="middle" class="s">pass or fail, recorded</text>
+</g>
+<text x="40" y="516" class="b" text-anchor="start">THE WHOLE EDITION</text>
+<path d="M150 580H246" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M330 580H426" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M510 580H606" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M690 580H786" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M870 580H966" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<g>
+<rect x="78" y="548" width="64" height="64" rx="16" fill="#111933" stroke="#64748b" stroke-width="2.2"/>
+<g transform="translate(93.36,563.36) scale(1.3866666666666667)" fill="none" stroke="#64748b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h10.5a2.5 2.5 0 0 1 2.5 2.5v12.5H7.5A2.5 2.5 0 0 1 5 17z"/><path d="M5 17a2.5 2.5 0 0 1 2.5-2.5H18"/><path d="M9 8.5h5.5"/></g>
+<text x="110" y="636" text-anchor="middle" class="n">Published edition</text>
+<text x="110" y="655" text-anchor="middle" class="s">31,085 verses</text>
+</g>
+<g>
+<rect x="258" y="548" width="64" height="64" rx="18" fill="#a855f7"/>
+<g transform="translate(273.36,563.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></g>
+<circle cx="261" cy="551" r="11" fill="#0b1020" stroke="#a855f7" stroke-width="2"/><text x="261" y="555" text-anchor="middle" class="k">9</text>
+<text x="290" y="636" text-anchor="middle" class="n">Audit</text>
+<text x="290" y="655" text-anchor="middle" class="s">every verse is read</text>
+</g>
+<g>
+<rect x="438" y="548" width="64" height="64" rx="18" fill="#0ea5e9"/>
+<g transform="translate(453.36,563.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 11v5.5"/><path d="M8.5 16V11a3.5 3.5 0 0 1 7 0v5"/><path d="M5.5 14.5V11a6.5 6.5 0 0 1 13 0v3.5"/></g>
+<circle cx="441" cy="551" r="11" fill="#0b1020" stroke="#0ea5e9" stroke-width="2"/><text x="441" y="555" text-anchor="middle" class="k">10</text>
+<text x="470" y="636" text-anchor="middle" class="n">Confirm</text>
+<text x="470" y="655" text-anchor="middle" class="s">against the source</text>
+</g>
+<g>
+<rect x="618" y="548" width="64" height="64" rx="18" fill="#6366f1"/>
+<g transform="translate(633.36,563.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h10.5a2.5 2.5 0 0 1 2.5 2.5v12.5H7.5A2.5 2.5 0 0 1 5 17z"/><path d="M5 17a2.5 2.5 0 0 1 2.5-2.5H18"/><path d="M9 8.5h5.5"/></g>
+<circle cx="621" cy="551" r="11" fill="#0b1020" stroke="#6366f1" stroke-width="2"/><text x="621" y="555" text-anchor="middle" class="k">11</text>
+<text x="650" y="636" text-anchor="middle" class="n">Read the fixes</text>
+<text x="650" y="655" text-anchor="middle" class="s">token by token</text>
+</g>
+<g>
+<rect x="798" y="548" width="64" height="64" rx="18" fill="#10b981"/>
+<g transform="translate(813.36,563.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16l-6 7.5v6l-4 1.5v-7.5z"/></g>
+<circle cx="801" cy="551" r="11" fill="#0b1020" stroke="#10b981" stroke-width="2"/><text x="801" y="555" text-anchor="middle" class="k">12</text>
+<text x="830" y="636" text-anchor="middle" class="n">Release gates</text>
+<text x="830" y="655" text-anchor="middle" class="s">ready, or open and why</text>
+</g>
+<g>
+<rect x="978" y="548" width="64" height="64" rx="16" fill="#111933" stroke="#64748b" stroke-width="2.2"/>
+<g transform="translate(993.36,563.36) scale(1.3866666666666667)" fill="none" stroke="#64748b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20c.8-4 3.8-6 7.5-6s6.7 2 7.5 6"/></g>
+<text x="1010" y="636" text-anchor="middle" class="n">Reader</text>
+<text x="1010" y="655" text-anchor="middle" class="s">each verse says</text>
+<text x="1010" y="671" text-anchor="middle" class="s">what it has passed</text>
+</g>
+<path d="M470 540V388" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#m0)"/>
+<text x="484" y="518" text-anchor="start" class="s" style="fill:#0ea5e9">a confirmed error becomes</text>
+<text x="484" y="534" text-anchor="start" class="s" style="fill:#0ea5e9">a planted kind and a check</text>
+<text x="40" y="748" class="b" text-anchor="start">HOW MANY VERSES</text>
+<rect x="40" y="770" width="184" height="104" rx="14" fill="#111933" stroke="#3a4670" stroke-width="1.5"/>
+<text x="132" y="810" text-anchor="middle" class="h">327</text>
+<text x="132" y="834" text-anchor="middle" class="t">development</text>
+<text x="132" y="854" text-anchor="middle" class="s">55 passages, read freely</text>
+<rect x="239.6" y="770" width="184" height="104" rx="14" fill="#111933" stroke="#3a4670" stroke-width="1.5"/>
+<text x="331.6" y="810" text-anchor="middle" class="h">510</text>
+<text x="331.6" y="834" text-anchor="middle" class="t">held out</text>
+<text x="331.6" y="854" text-anchor="middle" class="s">73 passages, locked</text>
+<rect x="439.2" y="770" width="184" height="104" rx="14" fill="#111933" stroke="#3a4670" stroke-width="1.5"/>
+<text x="531.2" y="810" text-anchor="middle" class="h">180</text>
+<text x="531.2" y="834" text-anchor="middle" class="t">hard set</text>
+<text x="531.2" y="854" text-anchor="middle" class="s">120 open, 60 sealed</text>
+<rect x="638.8" y="770" width="184" height="104" rx="14" fill="#111933" stroke="#3a4670" stroke-width="1.5"/>
+<text x="730.8" y="810" text-anchor="middle" class="h">568</text>
+<text x="730.8" y="834" text-anchor="middle" class="t">skill tests</text>
+<text x="730.8" y="854" text-anchor="middle" class="s">60 passages, two sets</text>
+<rect x="838.4" y="770" width="184" height="104" rx="14" fill="#111933" stroke="#3a4670" stroke-width="1.5"/>
+<text x="930.4" y="810" text-anchor="middle" class="h">839</text>
+<text x="930.4" y="834" text-anchor="middle" class="t">planted errors</text>
+<text x="930.4" y="854" text-anchor="middle" class="s">nine kinds, by code</text>
+<rect x="1038" y="770" width="184" height="104" rx="14" fill="#111933" stroke="#3a4670" stroke-width="1.5"/>
+<text x="1130" y="810" text-anchor="middle" class="h">1,115</text>
+<text x="1130" y="834" text-anchor="middle" class="t">stored drafts</text>
+<text x="1130" y="854" text-anchor="middle" class="s">replayed for false alarms</text>
+<rect x="1237.6" y="770" width="184" height="104" rx="14" fill="#111933" stroke="#3a4670" stroke-width="1.5"/>
+<text x="1329.6" y="810" text-anchor="middle" class="h">31,085</text>
+<text x="1329.6" y="834" text-anchor="middle" class="t">whole edition</text>
+<text x="1329.6" y="854" text-anchor="middle" class="s">audit and release gates</text>
+<path d="M40 930h44" stroke="#8b95b5" stroke-width="2" marker-end="url(#a)"/><text x="98" y="934" class="s" text-anchor="start">the test</text>
+<path d="M230 930h44" stroke="#f472b6" stroke-width="2" marker-end="url(#as)"/><text x="288" y="934" class="s" text-anchor="start">a guard on the test itself</text>
+<path d="M540 930h44" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/><text x="598" y="934" class="s" text-anchor="start">only when needed</text>
+<text x="40" y="970" text-anchor="start" class="s">A typical comparison reads 180 to 320 verses. That is small, and it is why a gain must be clear of the difference between two identical runs before it counts.</text>
+<text x="1420" y="1014" class="s" text-anchor="end">faithnet.estate/architecture</text>
+</svg>
