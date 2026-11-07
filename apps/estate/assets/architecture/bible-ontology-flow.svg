@@ -212,7 +212,7 @@
 <text x="1250" y="1076" text-anchor="middle" class="s">writes, code refuses</text>
 </g>
 <rect x="130.10000000000002" y="1084" width="169.79999999999998" height="24" rx="12" fill="#22c55e" fill-opacity="0.16" stroke="#22c55e"/><text x="215" y="1100" text-anchor="middle" class="s" style="fill:#22c55e;font-size:12px">pattern live in step 11</text>
-<rect x="452" y="1084" width="216" height="24" rx="12" fill="#f59e0b" fill-opacity="0.16" stroke="#f59e0b"/><text x="560" y="1100" text-anchor="middle" class="s" style="fill:#f59e0b;font-size:12px">card live; validator not built</text>
+<rect x="452" y="1084" width="216" height="24" rx="12" fill="#f59e0b" fill-opacity="0.16" stroke="#f59e0b"/><text x="560" y="1100" text-anchor="middle" class="s" style="fill:#f59e0b;font-size:12px">validator live; gain not shown</text>
 <rect x="783.8" y="1084" width="242.39999999999998" height="24" rx="12" fill="#f59e0b" fill-opacity="0.16" stroke="#f59e0b"/><text x="905" y="1100" text-anchor="middle" class="s" style="fill:#f59e0b;font-size:12px">exercises live; training not built</text>
 <rect x="1145.3" y="1084" width="209.39999999999998" height="24" rx="12" fill="#f59e0b" fill-opacity="0.16" stroke="#f59e0b"/><text x="1250" y="1100" text-anchor="middle" class="s" style="fill:#f59e0b;font-size:12px">tested on altered verses only</text>
 <path d="M430 608V638H220Q215 638 215 643V938" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#m2)"/>
@@ -220,5 +220,5 @@
 <text x="387.5" y="974" text-anchor="middle" class="s" style="fill:#f59e0b">both improve step 11</text>
 <path d="M855 984H606" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#m2)"/>
 <text x="732.5" y="974" text-anchor="middle" class="s" style="fill:#f59e0b">the score finds the misses</text>
-<text x="730" y="1140" text-anchor="middle" class="s" style="fill:#f59e0b">Measured by code on 28 story questions: the agent passed 25% without graph research and 93% with it.</text>
+<text x="730" y="1140" text-anchor="middle" class="s" style="fill:#f59e0b">On 28 story questions, scored by code: 25% without graph research, 86 to 93% with it. On 100 real questions, mostly "Who was...": 2 better, 3 worse, 95 the same.</text>
 </svg>

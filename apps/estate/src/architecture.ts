@@ -2018,7 +2018,7 @@ const ONTOLOGY_ALT =
   "A diagram in four bands. Band one, made before anyone asks: source words in Hebrew, Aramaic and Greek, canonical ids, the Bible's story, who said what, " +
   'the writings and their retellings, and recorded readings of a verse, joined by one thread of ids. Band two, stored: one graph with two doors, a GraphDB repository and fast ' +
   'tables, and skill artifacts in a registry. Band three, the live Ask harness: judge the question, gather by id, graph research, write and prove. Band four, harness ideas with ' +
-  'their status: ASTER, whose pattern is live; SPARQL-LLM, whose schema card is live and whose validator is not built; GTA-RAG, whose exercises are live and whose training is not built; and decide and refuse, tested on altered verses only.';
+  'their status: ASTER, whose pattern is live; SPARQL-LLM, whose schema card and validator are live; GTA-RAG, whose exercises are live and whose training is not built; and decide and refuse, tested on altered verses only.';
 
 const BUILD = 'Built ahead of time from the <code>skills</code> repository (<code>ontology/</code>, <code>scripts/</code>), never at ask time.';
 const STORE = 'GraphDB repository <code>scripture-kb</code>, read by a read-only delegate user that can read nothing else and write nothing.';
@@ -2108,7 +2108,7 @@ const ONTOLOGY_STEPS: Step[] = [
     summary: 'What each reader said about a verse, with the exact quote and a check on it.',
     why: 'Asked how a verse has been read, a model will happily attribute a view to Rashi or Calvin from memory. A reading is only useful if it comes with the words it rests on, so each record keeps its quote and that quote gets checked.',
     what: [
-      '9,146 open-licence readings across 425 verses, 283 of them New Testament, plus a share-alike set in its own graph. The verses are chiefly the ones people actually ask about, drawn from a study of 300 questions.',
+      '9,472 open-licence readings across 437 verses, 295 of them New Testament, plus a share-alike set in its own graph. The verses are chiefly the ones people actually ask about, drawn from a study of 300 questions.',
       'A model proposes each claim with a verbatim quote. Code checks that the quote is really in the source, that the vocabulary is the ontology\'s, and that the date is the work\'s and not the model\'s.',
       'A second, independent call reads only the quote and the claim and says whether one supports the other: entailed, cannot tell, or not entailed.',
       'New Testament readings come from commentaries in our own collection, and only from notes filed exactly at the verse. A catechism that cites a verse as a proof text does not count as a reading of it.',
@@ -2231,15 +2231,15 @@ const ONTOLOGY_STEPS: Step[] = [
     why: 'SPARQL-LLM, from the SIB Swiss Institute of Bioinformatics, generates queries using metadata about the graph and human-written example queries, and validates each query against the schema before it runs. A wrong query is cheaper to catch before it reaches the graph than after.',
     what: [
       '<b>Live, in our own form:</b> a schema card stating only shapes we have verified, real example queries, and a machine-readable description of every graph (VoID) in the repository.',
-      '<b>Not built: validating before running.</b> Today a bad query is caught when the graph refuses it or returns nothing. Checking each triple pattern against the ontology first would catch a wrong predicate or a reversed relationship, and tell the model what is wrong, with no load on the graph.',
+      '<b>Live, since 7 November: validating before running.</b> A snapshot read from the graph says what each named graph holds. A query that cannot return anything, because of a problem in a part it requires, is refused with the reason and what the graph does hold, using none of the server\'s two query slots. A dead branch of a UNION or an OPTIONAL passes. Replayed on 236 queries the agent had written, it wrongly refused none and caught 8 of 32 failures, though it took three attempts on that same history. In 28 exercises and 100 fresh questions it fired once, so whether it improves answers is not yet shown.',
       '<b>Not built: choosing examples by question.</b> The agent reads the whole card every time. Retrieving only the examples close to the question would keep it short as the ontology grows.',
       '<b>Not built: a card from the data.</b> Ours is written by hand and has gone stale twice. Generating its counts and shapes from the graph\'s own description would stop that.',
     ],
     where: ['Live: <code>apps/demo-bible-mcp/src/sparql.ts</code> (the card and the door) and <code>scripts/build_scripture_kb.py</code> (the VoID description).', 'Reference: <a href="https://arxiv.org/abs/2512.14277">SPARQL-LLM</a>. Its reported results are on other graphs, not on Scripture, and the paper is listed as under review.'],
-    by: 'Today, a model writes and the graph refuses. Proposed: code validates against the ontology first.',
+    by: 'A model writes the query; code validates it against a snapshot of the graph; the graph has the last word.',
     reads: ['The ontology\'s classes and properties.', 'The graph\'s VoID description and the example queries.'],
-    leaves: ['Proposed: the reason a query was refused, on the record, before it ran.'],
-    stops: ['Today: two tries. A validator would refuse a query that does not fit the schema, and the model rewrites.'],
+    leaves: ['The reason a query was refused, on the record, before it ran.'],
+    stops: ['Two tries. A refused query goes back to the model with the reason, and the answer goes on without the graph if the rewrite fails too.', 'What the snapshot does not cover passes, and the snapshot has to be regenerated when a graph changes.'],
   },
   {
     id: 'gta', name: 'GTA-RAG', color: '#f59e0b', at: [905, 984],
@@ -2248,7 +2248,7 @@ const ONTOLOGY_STEPS: Step[] = [
     what: [
       '<b>Live, as a measure:</b> 138 exercises drawn from the graph, such as a person\'s kin, an author on a person, a speech between two people, the readings of a verse and an episode\'s retellings. Each names the verses or units an answer must have opened.',
       'Marking is code: a set intersection over what the run fetched, handed on and cited. It costs nothing to rescore and has no judge noise.',
-      '<b>What it already found:</b> on 28 story exercises, the agent passed 25% without graph research and 93% with it. It also exposed that only 3% of the writings\' story data had been loaded.',
+      '<b>What it already found:</b> on 28 story exercises, the agent passed 25% without graph research and 86% to 93% with it, across repeated runs. It also exposed that only 3% of the writings\' story data had been loaded.',
       '<b>Not built:</b> training on these exercises. The next step is GEPA, which improves prompts and skill text against this score. Training a model comes last, and only if that leaves a gap worth the cost.',
     ],
     where: ['Exercises: <code>apps/demo-bible-a2a/scripts/research-exercises.mts</code>. Scoring: <code>scripts/research-baseline.mts</code>.', 'Reference: <a href="https://arxiv.org/abs/2608.22479">GTA-RAG</a>.'],
@@ -2288,9 +2288,9 @@ const ONTOLOGY_BODY = `<h2>The short version</h2>
 <h2>What this does not do yet</h2>
 <ul>
 <li>Most stories and readings were made by models and have not been reviewed by a person. The records say so.</li>
-<li>Readings cover 425 verses, not the whole Bible. About one claim in four failed its quote check; those stay in the graph, and code stops Ask reading them. Others were inconclusive and are still used.</li>
+<li>Readings cover 437 verses, not the whole Bible. About one claim in four failed its quote check; those stay in the graph, and code stops Ask reading them. Others were inconclusive and are still used.</li>
 <li>Labels and descriptions are in English, even where they were derived from Hebrew and Greek. The writings' stories are built from translations.</li>
-<li>Graph research helps where a question has its shape. On 100 ordinary questions it changed 9: 3 better, 6 the same, none worse.</li>
+<li>Graph research helps where a question has its shape, and those questions are rarer than we expected. On 100 ordinary questions it changed 9: 3 better, 6 the same, none worse. On 100 real questions drawn to suit it, 75 of them "Who was...", it failed its own test: 2 better, 3 worse, 95 the same. Two of the losses were about people outside the Bible, where it added material the reader had not asked for.</li>
 <li>The ideas in the fourth band are at different stages, and each step says exactly where. Measured gains on exercises do not show the same gain on every real question.</li>
 </ul>
 <p>The harness around all this: <a href="/architecture/scripture-ask">How the Scripture Agent answers a question</a>. How answers are tested: <a href="/architecture/testing-answers">How we test the Scripture Agent's answers</a>.</p>`;
