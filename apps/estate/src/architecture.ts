@@ -2018,7 +2018,7 @@ const ONTOLOGY_ALT =
   "A diagram in four bands. Band one, made before anyone asks: source words in Hebrew, Aramaic and Greek, canonical ids, the Bible's story, who said what, " +
   'the writings and their retellings, and recorded readings of a verse, joined by one thread of ids. Band two, stored: one graph with two doors, a GraphDB repository and fast ' +
   'tables, and skill artifacts in a registry. Band three, the live Ask harness: judge the question, gather by id, graph research, write and prove. Band four, harness ideas with ' +
-  'their status: ASTER, whose pattern is live; SPARQL-LLM, whose schema card and validator are live; GTA-RAG, whose exercises are live and whose training is not built; and decide and refuse, tested on altered verses only.';
+  'their status: ASTER, whose pattern is live; SPARQL-LLM, whose schema card is live and whose validator only logs; GTA-RAG, whose exercises are live and whose training is not built; and decide and refuse, tested on altered verses only.';
 
 const BUILD = 'Built ahead of time from the <code>skills</code> repository (<code>ontology/</code>, <code>scripts/</code>), never at ask time.';
 const STORE = 'GraphDB repository <code>scripture-kb</code>, read by a read-only delegate user that can read nothing else and write nothing.';
@@ -2156,7 +2156,7 @@ const ONTOLOGY_STEPS: Step[] = [
     what: [
       'One small model call sees the intent cards and gives a probability for each. A rule in code accepts a choice only with enough confidence and margin.',
       'A chosen intent names its sources (Scripture, general knowledge or both) and can bring a scope and a form with it.',
-      'When no scope acts, graph research may still run, with a list of the question shapes only the graph can serve. A test showed the judge abstained on most questions like "What did Matthew Henry say about Priscilla?", which is the graph\'s best shape.',
+      'The intent decides what is gathered from the library. Whether the graph is read at all is now decided by the question\'s own shape (step 11).',
     ],
     where: [ASK, 'Source: <code>src/harness/draft-prove.ts</code>, the intent stage, and <code>src/harness/intent-vocab.ts</code>.'],
     by: 'A small model, then a rule in code.',
@@ -2181,10 +2181,11 @@ const ONTOLOGY_STEPS: Step[] = [
   },
   {
     id: 'research', name: 'Graph research', color: '#8b5cf6', at: [880, 750],
-    summary: 'The model writes its own graph query; code runs it, or refuses it.',
+    summary: 'On how readers took a passage, the model writes a graph query; code runs it, or refuses it.',
     why: 'Fixed tools answer fixed shapes. "What did Naomi say to Ruth, and where?" and "Which writings retell Genesis 3?" are joins across layers that no one wrote a tool for. Here the ontology becomes something the agent investigates.',
     what: [
-      'The model reads the schema card and the question\'s names as bound in step 10, then decides whether a query is needed at all. "What does Romans 8:28 promise?" needs none.',
+      '<b>It now runs only on how readers have taken a passage.</b> On 100 questions written for these layers, those were the one shape it never lost on: 4 better, 0 worse, 21 the same. Who said what was 2 better, 4 worse; stories 2 and 3; retellings 4 and 8, where the writer tended to discuss its evidence rather than answer.',
+      'The model reads the schema card and the question\'s names as bound in step 10, then decides whether a query is needed at all.',
       'It writes a SPARQL query. The door runs it. On a refusal or an empty result it may rewrite once.',
       'Unit ids in the results are fetched from the store as text, and verses are resolved against the signed edition. Other rows go to the writer named as the graph\'s records, never as Scripture.',
       'Code refuses any query on the recorded readings that does not exclude claims whose quote failed its check. The model is told why and rewrites once.',
@@ -2231,15 +2232,15 @@ const ONTOLOGY_STEPS: Step[] = [
     why: 'SPARQL-LLM, from the SIB Swiss Institute of Bioinformatics, generates queries using metadata about the graph and human-written example queries, and validates each query against the schema before it runs. A wrong query is cheaper to catch before it reaches the graph than after.',
     what: [
       '<b>Live, in our own form:</b> a schema card stating only shapes we have verified, real example queries, and a machine-readable description of every graph (VoID) in the repository.',
-      '<b>Live, since 7 November: validating before running.</b> A snapshot read from the graph says what each named graph holds. A query that cannot return anything, because of a problem in a part it requires, is refused with the reason and what the graph does hold, using none of the server\'s two query slots. A dead branch of a UNION or an OPTIONAL passes. Replayed on 236 queries the agent had written, it wrongly refused none and caught 8 of 32 failures, though it took three attempts on that same history. In 28 exercises and 100 fresh questions it fired once, so whether it improves answers is not yet shown.',
+      '<b>Built, and only logging: validating before running.</b> A snapshot read from the graph says what each named graph holds, and a query that cannot return anything is flagged with the reason. Replayed on 236 queries the agent had written, it wrongly flagged none and caught 8 of 32 failures, though it took three attempts on that same history. In 228 fresh runs it fired once, so its gain is not shown, and a stale snapshot could refuse a good query. So it records what it would have refused, and refuses nothing.',
       '<b>Not built: choosing examples by question.</b> The agent reads the whole card every time. Retrieving only the examples close to the question would keep it short as the ontology grows.',
       '<b>Not built: a card from the data.</b> Ours is written by hand and has gone stale twice. Generating its counts and shapes from the graph\'s own description would stop that.',
     ],
     where: ['Live: <code>apps/demo-bible-mcp/src/sparql.ts</code> (the card and the door) and <code>scripts/build_scripture_kb.py</code> (the VoID description).', 'Reference: <a href="https://arxiv.org/abs/2512.14277">SPARQL-LLM</a>. Its reported results are on other graphs, not on Scripture, and the paper is listed as under review.'],
-    by: 'A model writes the query; code validates it against a snapshot of the graph; the graph has the last word.',
+    by: 'A model writes the query, and the graph has the last word. Code logs what the validator would have said.',
     reads: ['The ontology\'s classes and properties.', 'The graph\'s VoID description and the example queries.'],
-    leaves: ['The reason a query was refused, on the record, before it ran.'],
-    stops: ['Two tries. A refused query goes back to the model with the reason, and the answer goes on without the graph if the rewrite fails too.', 'What the snapshot does not cover passes, and the snapshot has to be regenerated when a graph changes.'],
+    leaves: ['In the log, what it would have refused and why.'],
+    stops: ['It stops nothing while it only logs.', 'The door gives the server a 17-second limit on every query.'],
   },
   {
     id: 'gta', name: 'GTA-RAG', color: '#f59e0b', at: [905, 984],

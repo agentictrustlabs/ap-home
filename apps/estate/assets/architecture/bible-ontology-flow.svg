@@ -144,8 +144,8 @@
 <g transform="translate(862.84,732.84) scale(1.43)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.3"/><circle cx="18" cy="7" r="2.3"/><circle cx="12" cy="18" r="2.3"/><path d="M8.2 6.4l7.5.400M7.2 8l3.7 8M16.8 9l-3.7 7"/></g>
 <circle cx="850" cy="720" r="11" fill="#0b1020" stroke="#8b5cf6" stroke-width="2"/><text x="850" y="724" text-anchor="middle" class="k">11</text>
 <text x="880" y="807" text-anchor="middle" class="n">Graph research</text>
-<text x="880" y="826" text-anchor="middle" class="s">model writes a query</text>
-<text x="880" y="842" text-anchor="middle" class="s">code refuses a bad one</text>
+<text x="880" y="826" text-anchor="middle" class="s">readings of a passage only:</text>
+<text x="880" y="842" text-anchor="middle" class="s">model writes a query</text>
 </g>
 <g>
 <rect x="1087" y="717" width="66" height="66" rx="18" fill="#22c55e"/>
@@ -212,7 +212,7 @@
 <text x="1250" y="1076" text-anchor="middle" class="s">writes, code refuses</text>
 </g>
 <rect x="130.10000000000002" y="1084" width="169.79999999999998" height="24" rx="12" fill="#22c55e" fill-opacity="0.16" stroke="#22c55e"/><text x="215" y="1100" text-anchor="middle" class="s" style="fill:#22c55e;font-size:12px">pattern live in step 11</text>
-<rect x="452" y="1084" width="216" height="24" rx="12" fill="#f59e0b" fill-opacity="0.16" stroke="#f59e0b"/><text x="560" y="1100" text-anchor="middle" class="s" style="fill:#f59e0b;font-size:12px">validator live; gain not shown</text>
+<rect x="435.5" y="1084" width="249" height="24" rx="12" fill="#f59e0b" fill-opacity="0.16" stroke="#f59e0b"/><text x="560" y="1100" text-anchor="middle" class="s" style="fill:#f59e0b;font-size:12px">validator logs only; gain not shown</text>
 <rect x="783.8" y="1084" width="242.39999999999998" height="24" rx="12" fill="#f59e0b" fill-opacity="0.16" stroke="#f59e0b"/><text x="905" y="1100" text-anchor="middle" class="s" style="fill:#f59e0b;font-size:12px">exercises live; training not built</text>
 <rect x="1145.3" y="1084" width="209.39999999999998" height="24" rx="12" fill="#f59e0b" fill-opacity="0.16" stroke="#f59e0b"/><text x="1250" y="1100" text-anchor="middle" class="s" style="fill:#f59e0b;font-size:12px">tested on altered verses only</text>
 <path d="M430 608V638H220Q215 638 215 643V938" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#m2)"/>
@@ -220,5 +220,5 @@
 <text x="387.5" y="974" text-anchor="middle" class="s" style="fill:#f59e0b">both improve step 11</text>
 <path d="M855 984H606" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#m2)"/>
 <text x="732.5" y="974" text-anchor="middle" class="s" style="fill:#f59e0b">the score finds the misses</text>
-<text x="730" y="1140" text-anchor="middle" class="s" style="fill:#f59e0b">On 28 story questions, scored by code: 25% without graph research, 86 to 93% with it. On 100 real questions, mostly "Who was...": 2 better, 3 worse, 95 the same.</text>
+<text x="730" y="1140" text-anchor="middle" class="s" style="fill:#f59e0b">Exercises scored by code: 25% without graph research, 86 to 93% with it. 100 questions written for these layers, judged blind: 12 better, 15 worse, 73 the same.</text>
 </svg>

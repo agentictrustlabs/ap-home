@@ -55,7 +55,7 @@ band(672, 204, GREEN, '3 · USE IT: LIVE ASK', 'the ontology gathers and checks;
 t(ROW[0], Y3, GREY, 'person', 'Reader', ['asks a question']);
 t(ROW[1], Y3, '#ef4444', 'scales', 'Judge the question', ['intent names a scope', 'and what to gather'], { n: 9 });
 t(ROW[2], Y3, TEAL, 'search', 'Gather by id', ['a name binds, or none', 'notes, original words'], { n: 10 });
-t(ROW[3], Y3, VIOLET, 'graph', 'Graph research', ['model writes a query', 'code refuses a bad one'], { n: 11 });
+t(ROW[3], Y3, VIOLET, 'graph', 'Graph research', ['readings of a passage only:', 'model writes a query'], { n: 11 });
 t(ROW[4], Y3, GREEN, 'pen', 'Write and prove', ['every verse checked', 'receipt names sources'], { n: 12 });
 t(ROW[5], Y3, GREY, 'person', 'Reader', ['answer and links']);
 for (let i = 0; i < 5; i++) arrow(`M${ROW[i] + 45} ${Y3}H${ROW[i + 1] - 49}`);
@@ -78,7 +78,7 @@ t(XI[2], Y4, AMBER, 'target', 'GTA-RAG', ['graph paths become', 'research exerci
 t(XI[3], Y4, AMBER, 'check', 'Decide and refuse', ['ontology decides, model', 'writes, code refuses'], { n: 16, outline: true });
 const PY = Y4 + 100;
 pill(XI[0], PY, 'pattern live in step 11', GREEN);
-pill(XI[1], PY, 'validator live; gain not shown', AMBER);
+pill(XI[1], PY, 'validator logs only; gain not shown', AMBER);
 pill(XI[2], PY, 'exercises live; training not built', AMBER);
 pill(XI[3], PY, 'tested on altered verses only', AMBER);
 // what they read, and what comes back
@@ -87,5 +87,5 @@ arrow(`M${XI[0] + 46} ${Y4}H${XI[1] - 50}`, { color: AMBER, dash: true, both: tr
 note((XI[0] + XI[1]) / 2, Y4 - 10, ['both improve step 11'], { color: AMBER });
 arrow(`M${XI[2] - 50} ${Y4}H${XI[1] + 46}`, { color: AMBER, dash: true });
 note((XI[1] + XI[2]) / 2, Y4 - 10, ['the score finds the misses'], { color: AMBER });
-note(730, PY + 56, ['On 28 story questions, scored by code: 25% without graph research, 86 to 93% with it. On 100 real questions, mostly "Who was...": 2 better, 3 worse, 95 the same.'], { color: AMBER });
+note(730, PY + 56, ['Exercises scored by code: 25% without graph research, 86 to 93% with it. 100 questions written for these layers, judged blind: 12 better, 15 worse, 73 the same.'], { color: AMBER });
 finish(process.argv[2], "How the Bible's ontology is made, stored and used", 'A four-band architecture picture: how canonical ids, stories, situations and readings are built; the graph and skills registry that store them; the live Ask harness that reads them; and the harness ideas ASTER, SPARQL-LLM, GTA-RAG and decide-and-refuse, each with how far it has got.');
