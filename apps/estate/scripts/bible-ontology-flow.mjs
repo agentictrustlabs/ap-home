@@ -78,7 +78,7 @@ t(XI[2], Y4, AMBER, 'target', 'GTA-RAG', ['graph paths become', 'research exerci
 t(XI[3], Y4, AMBER, 'check', 'Decide and refuse', ['ontology decides, model', 'writes, code refuses'], { n: 16, outline: true });
 const PY = Y4 + 100;
 pill(XI[0], PY, 'pattern live in step 11', GREEN);
-pill(XI[1], PY, 'card live; validator not built', AMBER);
+pill(XI[1], PY, 'validator live; gain not shown', AMBER);
 pill(XI[2], PY, 'exercises live; training not built', AMBER);
 pill(XI[3], PY, 'tested on altered verses only', AMBER);
 // what they read, and what comes back
@@ -87,5 +87,5 @@ arrow(`M${XI[0] + 46} ${Y4}H${XI[1] - 50}`, { color: AMBER, dash: true, both: tr
 note((XI[0] + XI[1]) / 2, Y4 - 10, ['both improve step 11'], { color: AMBER });
 arrow(`M${XI[2] - 50} ${Y4}H${XI[1] + 46}`, { color: AMBER, dash: true });
 note((XI[1] + XI[2]) / 2, Y4 - 10, ['the score finds the misses'], { color: AMBER });
-note(730, PY + 56, ['Measured by code on 28 story questions: the agent passed 25% without graph research and 93% with it.'], { color: AMBER });
+note(730, PY + 56, ['On 28 story questions, scored by code: 25% without graph research, 86 to 93% with it. On 100 real questions, mostly "Who was...": 2 better, 3 worse, 95 the same.'], { color: AMBER });
 finish(process.argv[2], "How the Bible's ontology is made, stored and used", 'A four-band architecture picture: how canonical ids, stories, situations and readings are built; the graph and skills registry that store them; the live Ask harness that reads them; and the harness ideas ASTER, SPARQL-LLM, GTA-RAG and decide-and-refuse, each with how far it has got.');
