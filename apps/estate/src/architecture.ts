@@ -2012,7 +2012,303 @@ const TEST_BODY = `
 <li>A key is one publisher's view of a correct answer. The verses can overrule it, but only where they settle the point.</li>
 </ul>`;
 
+// ───────────────────────────────────────────────────────────────── the Bible's ontology (skills: ontology/, scripts/; verifiable-content-demo: apps/demo-bible-mcp, apps/demo-bible-a2a)
+
+const ONTOLOGY_ALT =
+  "A diagram in four bands. Band one, made before anyone asks: source words in Hebrew, Aramaic and Greek, canonical ids, the Bible's story, who said what, " +
+  'the writings and their retellings, and recorded readings of a verse, joined by one thread of ids. Band two, stored: one graph with two doors, a GraphDB repository and fast ' +
+  'tables, and skill artifacts in a registry. Band three, the live Ask harness: judge the question, gather by id, graph research, write and prove. Band four, harness ideas with ' +
+  'their status: ASTER, whose pattern is live; SPARQL-LLM, whose schema card is live and whose validator is not built; GTA-RAG, whose exercises are live and whose training is not built; and decide and refuse, tested on altered verses only.';
+
+const BUILD = 'Built ahead of time from the <code>skills</code> repository (<code>ontology/</code>, <code>scripts/</code>), never at ask time.';
+const STORE = 'GraphDB repository <code>scripture-kb</code>, read by a read-only delegate user that can read nothing else and write nothing.';
+const ASK = 'The Scripture Agent Worker (<code>demo-bible-a2a-faithnet</code>) at <code>scripture.faithnet.io</code>.';
+const DOOR = 'The library Worker (<code>demo-bible-mcp-faithnet</code>), reached over a service binding.';
+
+const ONTOLOGY_STEPS: Step[] = [
+  {
+    id: 'source', name: 'Source words', color: '#14b8a6', at: [130, 196],
+    summary: 'Every word of the Hebrew, Aramaic and Greek, tagged and frozen.',
+    why: "If the ontology were read off an English Bible, it would inherit that translation's decisions, and a translator could never check against them. So everything starts from the original words, and the verse ids come from there.",
+    what: [
+      'The 1,189 chapters are held as frozen tokens: the source word, its transliteration, its parsing, its Strong\'s number and a dictionary gloss.',
+      "Grammar comes from Macula's structure and the STEP lexicon. For an Old Testament verse the builder can also see how the Septuagint's translators read it.",
+      'A verse has a language-free id such as <code>Gen.22.2</code>. Nothing downstream depends on the wording of any edition.',
+    ],
+    where: [BUILD, 'Tokens: <code>evaluations/bible-translation/source/tokens/</code>. Licences: <code>docs/bible-translation/manifest.json</code>; a dataset outside the allow-list is refused.'],
+    by: 'Code only.',
+    reads: ['The source editions, by exact revision.', "STEP, Macula and the Septuagint's text."],
+    leaves: ['One token file per chapter.', 'The verse ids every later step uses.'],
+    stops: ['A component not in the manifest, or with a licence outside the allow-list, does not enter.'],
+  },
+  {
+    id: 'ids', name: 'Canonical ids', color: '#3b82f6', at: [370, 196],
+    summary: 'People, places and words each get one stable id, with a stated confidence.',
+    why: 'Names collide. Eight people are called Simon, and Joseph is both a patriarch and the husband of Mary. If a record is joined by name, those people merge silently. So identity is a claim that has to be earned, and it is recorded with how sure we are and why.',
+    what: [
+      "The knowledge base holds 3,129 people, 553 settlements and more places besides, 5,535 name forms, 5,221 key terms (one per Strong's number) and 184 theological concepts.",
+      'An id carries where the person appears, such as <code>skb:person-Isaac_Gen.17.19-Jas</code>, so two people who share a name are two ids.',
+      'Every binding records <code>canon_confidence</code>, <code>canon_method</code> and <code>canon_basis</code>. <code>1.0</code> means a native, authoritative id. Anything lower has to say why, and a low-confidence match is never upgraded to look certain.',
+      'At ask time a shared name binds nothing: the candidates are listed and none is chosen.',
+    ],
+    where: [BUILD, 'Graphs: <code>scripture:kb</code> and <code>scripture:kb-sa</code>. Projection: <code>scripts/writings/build-kb-projection.py</code>.'],
+    by: 'Code from reference data (TIPNR, OpenBible and curated files). A model does not mint ids.',
+    reads: ['The reference datasets, each with its licence.', 'The source words, for Strong\'s numbers and first mentions.'],
+    leaves: ['A stable id for each person, place, term and concept.', 'Confidence, method and basis on every binding.'],
+    stops: ['A name that cannot be bound to one referent stays unbound and visible. It is not guessed.'],
+  },
+  {
+    id: 'story', name: "The Bible's story", color: '#8b5cf6', at: [610, 196],
+    summary: 'Scenes and the state at every verse: who is on stage, who is speaking.',
+    why: 'A verse rarely explains itself. "He said to him" means nothing until you know who is on stage. Holding the story as data means a reader, a translator and an agent all resolve "he" the same way, and can see the record.',
+    what: [
+      'For each book, a model reads the source tokens, their parsing, the lexicon, the grammar and the knowledge base, and proposes 6,857 scenes and 30,965 verse states: the setting, the cast, the current speaker and the audience.',
+      'No English Bible wording enters the prompt. The labels are written in English, and an edition\'s section headings are the starting point for scene cuts: those are the two places English remains.',
+      'Spend is tiered: a small model builds every book, code assesses the result, and a stronger model rebuilds only the chapters flagged.',
+    ],
+    where: [BUILD, 'Builder: <code>scripts/build-discourse.py</code>. Graphs: <code>scripture:discourse</code> and <code>scripture:discourse:references</code>.'],
+    by: 'A small model proposes (Claude Haiku 5.5), code checks, a stronger model on flagged chapters only.',
+    reads: ['Tokens, grammar and lexicon.', 'The knowledge base and period context.'],
+    leaves: ['One JSON per book, which a reviewer can edit.', 'Scene and state records in the graph, bound to canonical ids.'],
+    stops: ['A cut-off model reply is split and retried, never trusted.', 'A run of words shared with a held English Bible is flagged as a leak.'],
+  },
+  {
+    id: 'said', name: 'Who said what', color: '#ec4899', at: [850, 196],
+    summary: 'Acts of speech, commissions, journeys, and the kind of situation each scene is.',
+    why: 'Much of the Bible is who said what to whom, and who went where to say it. Those questions cannot be answered by searching for similar text. They need a record that joins a speaker, an audience and a verse.',
+    what: [
+      '8,404 communication acts: communicator, audience, kind (speech, oracle, teaching, letter and others), place, time and the verse. Plus 336 commissions and 220 journeys.',
+      '6,488 of the 6,857 canon scenes carry up to three situation kinds, such as <code>scr:Battle</code>, <code>scr:Prophecy</code> or <code>scr:Judgment</code>. A kind is a class in the ontology, so the same query crosses the canon and the writings.',
+      'These are modelled with DOLCE and PROV terms, so a scene is a description a situation satisfies, and every act can say where it came from.',
+    ],
+    where: [BUILD, 'Graphs: <code>scripture:communication</code> and <code>scripture:situations</code>. Situation typing: <code>scripts/type-scene-situations.py</code>.'],
+    by: 'Code from the story states where they decide it; a small model for the rest. Marked unreviewed.',
+    reads: ['The story layer.', 'The event classes of the ontology.'],
+    leaves: ['Acts and situation kinds, each on canonical ids.', '<code>reviewStatus</code>, which says these were derived, not reviewed.'],
+    stops: ['A kind must be an event class. A shape in the ontology refuses anything else.'],
+  },
+  {
+    id: 'writings', name: 'Writings and retellings', color: '#f97316', at: [1090, 196],
+    summary: "The same story model over other works, joined by shared episodes.",
+    why: 'Which ancient works retell Genesis 22, and how do they differ? That needs the works and the Bible to share one way of describing a story. So a held writing gets the same scenes and speakers as the canon, and points at the same people.',
+    what: [
+      'Works such as Jubilees, 1 Enoch and 1 Clement get a story built unit by unit: scenes, states and mentions, stored in 154 story files.',
+      'These works are held as translated units, so this layer is built from those translations, unlike the canon\'s. Their licence decides their graph: share-alike works live apart from the rest.',
+      '405 episodes are stories told in several places. A scene of any work can tell an episode, so a chapter of Genesis reaches the paragraphs that retell it.',
+      'An index projected from the writings store holds 342,746 units with their verse links and name mentions, 15.8 million facts. The text is not in the graph: it is read from the store by id.',
+    ],
+    where: [BUILD, 'Builders: <code>scripts/writings/build-work-story.py</code> and <code>scripts/build_scripture_kb.py</code>. Graphs: <code>writings:story</code>, <code>writings:story-sa</code>, <code>writings:layer</code> and <code>writings:index</code>.'],
+    by: 'A small model proposes; code checks. An episode records a confidence and <code>model-proposed</code>.',
+    reads: ['The held units of each work.', 'The knowledge base, for every id a name could denote.'],
+    leaves: ['Story records per work, bound to the same ids as the canon.', 'Episodes, and the scenes that tell them.'],
+    stops: ['A name that could denote several people is passed on as ambiguous, not resolved by code.', 'An episode asserts no order and no truth between tellings. It is an index of tellings.'],
+  },
+  {
+    id: 'readings', name: 'Readings of a verse', color: '#22c55e', at: [1330, 196],
+    summary: 'What each reader said about a verse, with the exact quote and a check on it.',
+    why: 'Asked how a verse has been read, a model will happily attribute a view to Rashi or Calvin from memory. A reading is only useful if it comes with the words it rests on, so each record keeps its quote and that quote gets checked.',
+    what: [
+      '9,146 open-licence readings across 425 verses, 283 of them New Testament, plus a share-alike set in its own graph. The verses are chiefly the ones people actually ask about, drawn from a study of 300 questions.',
+      'A model proposes each claim with a verbatim quote. Code checks that the quote is really in the source, that the vocabulary is the ontology\'s, and that the date is the work\'s and not the model\'s.',
+      'A second, independent call reads only the quote and the claim and says whether one supports the other: entailed, cannot tell, or not entailed.',
+      'New Testament readings come from commentaries in our own collection, and only from notes filed exactly at the verse. A catechism that cites a verse as a proof text does not count as a reading of it.',
+    ],
+    where: [BUILD, 'Extractor: <code>scripts/extract-claims.py</code>. Importers: <code>scripts/sources/</code>. Graphs: <code>scripture:interpretations</code> and <code>scripture:interpretations-sa</code>.'],
+    by: 'A small model proposes, code checks, a second model call judges support. People can adjudicate; nearly all are not yet reviewed.',
+    reads: ['Commentary passages at the verse, each with its licence, in Hebrew or English as held.'],
+    leaves: ['A claim with its source, date, method and quote.', 'A row for a person to adjudicate.'],
+    stops: ['A quote not found in the source is quarantined.', 'A failed check keeps the claim in the record. Ask refuses to read it (step 11).'],
+  },
+  {
+    id: 'store', name: 'One graph, two doors', color: '#3b82f6', at: [430, 512],
+    summary: 'A graph for any question shape, and fast tables for the common ones.',
+    why: 'An agent answering in seconds cannot run an open-ended graph query for every name. But some questions have shapes no fixed table anticipates. So the same data is served two ways, and neither is written to while answering.',
+    what: [
+      'The <code>scripture-kb</code> repository holds about 22 million facts in nearly 50 named graphs, so a query can say exactly which layer it means. Each graph\'s size and source are described in the repository itself.',
+      'A read-only SPARQL door accepts SELECT and ASK only, adds a row limit, and times out at 20 seconds. The agent reads a schema card first, which states only shapes that have been verified.',
+      'The commonly needed facts are also projected at build time into D1 tables: names, kin, verse referents, concepts and notes. Answering uses these without touching the graph.',
+    ],
+    where: [STORE, DOOR, 'Door: <code>apps/demo-bible-mcp/src/sparql.ts</code>. Tables: <code>src/kb.ts</code>.'],
+    by: 'Code only.',
+    reads: ['The committed Turtle files and exports from the writings store.'],
+    leaves: ['A repository the agent can read and cannot change.', 'Counts verified against the source files at each load.'],
+    stops: ['Updates and federation are refused, by the door and by the delegate user\'s rights.', 'A slow query gets a timeout and a hint to narrow it.'],
+  },
+  {
+    id: 'skills', name: 'Skill artifacts', color: '#f472b6', at: [1120, 512],
+    summary: 'What each kind of question gathers and how its answer is shaped, as versioned files.',
+    why: 'The ontology says what is known. It does not say what a particular question needs. Skill artifacts carry that judgement as files that can be read, versioned and tested, without changing the harness code.',
+    what: [
+      '43 published artifacts, including <b>intents</b> (what kind of question this is), <b>scopes</b> (what to gather), <b>forms</b> (the shape of an answer) and <b>reader</b> artifacts (for example, an age band).',
+      'A scope card lists what it gathers. <code>gather: [held, meaning, knowledge, graph]</code> on the Bible-subject scope is what lets graph research run there. The card for a question about a passage leaves <code>graph</code> out.',
+      'The agent reads them from the registry at ask time, and admits one only if the Scripture organization owns it, it is the newest published version, and its content matches its commitment.',
+    ],
+    where: ['The skills registry Worker (<code>skills-mcp</code>), reached over a service binding.', 'Source files: <code>skills/scripture/*/SKILL.md</code>. Reader: <code>apps/demo-bible-a2a/src/scripture-skills.ts</code>.'],
+    by: 'People and agents author; code admits.',
+    reads: ['The registry row and its content commitment.'],
+    leaves: ['On each answer\'s receipt: every skill used, with its version and commitment.'],
+    stops: ['A skill that fails admission is listed with the reason and not used.'],
+  },
+  {
+    id: 'judge', name: 'Judge the question', color: '#ef4444', at: [340, 750],
+    summary: 'An intent card names a scope, and the scope says what to gather.',
+    why: 'A question about a person, about a verse and about a doctrine need different material. Picking the intent first means the gathering suits the question, and the choice is on the record.',
+    what: [
+      'One small model call sees the intent cards and gives a probability for each. A rule in code accepts a choice only with enough confidence and margin.',
+      'A chosen intent names its sources (Scripture, general knowledge or both) and can bring a scope and a form with it.',
+      'When no scope acts, graph research may still run, with a list of the question shapes only the graph can serve. A test showed the judge abstained on most questions like "What did Matthew Henry say about Priscilla?", which is the graph\'s best shape.',
+    ],
+    where: [ASK, 'Source: <code>src/harness/draft-prove.ts</code>, the intent stage, and <code>src/harness/intent-vocab.ts</code>.'],
+    by: 'A small model, then a rule in code.',
+    reads: ['The intent, scope and form artifacts.', 'The question.'],
+    leaves: ['The intent stage on the receipt: what was offered, the probabilities and what acted.'],
+    stops: ['It never stops the run. A hold means no scope acts.'],
+  },
+  {
+    id: 'gather', name: 'Gather by id', color: '#14b8a6', at: [610, 750],
+    summary: 'Names bound to ids, notes at the verse, and the original words behind it.',
+    why: 'This is where the ids earn their keep. Once a name has become an id, everything held about that person can be reached without a text search that also finds everyone else with the name.',
+    what: [
+      'Names in the question go to <code>kb_link</code>. One referent binds; several are listed, and none is chosen. A name we do not hold is reported, and can take Scripture off the plan altogether.',
+      'A question naming a verse reads the study notes and commentaries filed there, each kept as one tradition\'s reading.',
+      'The original words behind a cited verse are read from the source tokens, so the answer can speak about the Hebrew or Greek from data, not memory.',
+    ],
+    where: [ASK, DOOR, 'Source: <code>src/harness/verse-notes.ts</code> and <code>src/harness/original-context.ts</code>. Tools: <code>kb_link</code>, <code>notes_at</code> and <code>original_context</code>.'],
+    by: 'Code, over the D1 tables. No graph query is needed for these.',
+    reads: ['The D1 tables, the writings store and the source tokens.'],
+    leaves: ['The binding of each name, with confidence, method and basis, on the receipt.'],
+    stops: ['A shared name binds nothing.', 'A failed read is recorded and the answer goes on.'],
+  },
+  {
+    id: 'research', name: 'Graph research', color: '#8b5cf6', at: [880, 750],
+    summary: 'The model writes its own graph query; code runs it, or refuses it.',
+    why: 'Fixed tools answer fixed shapes. "What did Naomi say to Ruth, and where?" and "Which writings retell Genesis 3?" are joins across layers that no one wrote a tool for. Here the ontology becomes something the agent investigates.',
+    what: [
+      'The model reads the schema card and the question\'s names as bound in step 10, then decides whether a query is needed at all. "What does Romans 8:28 promise?" needs none.',
+      'It writes a SPARQL query. The door runs it. On a refusal or an empty result it may rewrite once.',
+      'Unit ids in the results are fetched from the store as text, and verses are resolved against the signed edition. Other rows go to the writer named as the graph\'s records, never as Scripture.',
+      'Code refuses any query on the recorded readings that does not exclude claims whose quote failed its check. The model is told why and rewrites once.',
+    ],
+    where: [ASK, DOOR, 'Source: <code>src/harness/graph-research.ts</code>.'],
+    by: 'A small model writes the query; code runs and refuses.',
+    reads: ['The schema card, the bound names and the graph.'],
+    leaves: ['The decision and why, each query, how many rows, and what was handed on.'],
+    stops: ['Two tries at most. A failed search does not stop the answer.', 'An empty result reaches the writer only if the question asked what the collection holds.'],
+  },
+  {
+    id: 'write', name: 'Write and prove', color: '#22c55e', at: [1120, 750],
+    summary: 'A model writes the answer; code proves every verse it quotes.',
+    why: 'The ontology does not write the answer. It decides what the writer has in front of it. What is said still has to be checked, and the check is code, so it cannot be talked out of a result.',
+    what: [
+      'The writer gets the question, the gathered material and the graph\'s records, under the form the skill chose.',
+      'Code proves each quoted verse against the signed edition, and a failed check sends the draft back once.',
+      'The answer returns with links to the writings it used and a receipt naming every skill, name binding and graph query.',
+    ],
+    where: [ASK, 'Source: <code>src/harness/draft-prove.ts</code>.'],
+    by: 'A model writes (Claude Haiku 5.5); code proves.',
+    reads: ['The signed corpus and everything gathered.'],
+    leaves: ['The answer, its citations and its receipt.'],
+    stops: ['A verse that fails its check does not stand as quoted.'],
+  },
+  {
+    id: 'aster', name: 'ASTER', color: '#f59e0b', at: [215, 984],
+    summary: 'An agent investigates the graph. The pattern is live; the rest is an option.',
+    why: 'ASTER is an IBM Research approach to text-to-SPARQL in which an agent resolves entities, explores relationships, writes a query, runs it and revises it from what comes back. It treats a graph as something to investigate, not something to memorize.',
+    what: [
+      '<b>Live, in step 11:</b> resolve the names first, read the schema card, execute, inspect and refine once. On 110 code-scored exercises this took the agent from 73% to 86%.',
+      '<b>How it uses the ontology\'s layers:</b> the schema says which relationships exist and which way they run, the concepts say which senses a question might mean, and the records hold the facts. Our model often declines to query word meanings, where a fixed path still does better (100% against 58%).',
+      '<b>Not adopted:</b> ASTER\'s separate, inspectable investigation skills, and exploring the schema step by step during an ask. Those would become skill artifacts in the registry if a test shows they help.',
+    ],
+    where: ['Live in <code>src/harness/graph-research.ts</code>.', 'Reference: <a href="https://research.ibm.com/publications/aster-agentic-text-to-sparql-with-task-skills-autonomous-exploration-and-refinement">ASTER, IBM Research</a>. Its reported scores are on Wikidata, not on Scripture.'],
+    by: 'A model investigates; code runs and refuses.',
+    reads: ['The ontology\'s schema, concepts and records.'],
+    leaves: ['A trace of every query and result.'],
+    stops: ['At most two queries a question today.'],
+  },
+  {
+    id: 'sparqllm', name: 'SPARQL-LLM', color: '#f59e0b', at: [560, 984],
+    summary: 'Metadata about the graph and real example queries, then a check before running.',
+    why: 'SPARQL-LLM, from the SIB Swiss Institute of Bioinformatics, generates queries using metadata about the graph and human-written example queries, and validates each query against the schema before it runs. A wrong query is cheaper to catch before it reaches the graph than after.',
+    what: [
+      '<b>Live, in our own form:</b> a schema card stating only shapes we have verified, real example queries, and a machine-readable description of every graph (VoID) in the repository.',
+      '<b>Not built: validating before running.</b> Today a bad query is caught when the graph refuses it or returns nothing. Checking each triple pattern against the ontology first would catch a wrong predicate or a reversed relationship, and tell the model what is wrong, with no load on the graph.',
+      '<b>Not built: choosing examples by question.</b> The agent reads the whole card every time. Retrieving only the examples close to the question would keep it short as the ontology grows.',
+      '<b>Not built: a card from the data.</b> Ours is written by hand and has gone stale twice. Generating its counts and shapes from the graph\'s own description would stop that.',
+    ],
+    where: ['Live: <code>apps/demo-bible-mcp/src/sparql.ts</code> (the card and the door) and <code>scripts/build_scripture_kb.py</code> (the VoID description).', 'Reference: <a href="https://arxiv.org/abs/2512.14277">SPARQL-LLM</a>. Its reported results are on other graphs, not on Scripture, and the paper is listed as under review.'],
+    by: 'Today, a model writes and the graph refuses. Proposed: code validates against the ontology first.',
+    reads: ['The ontology\'s classes and properties.', 'The graph\'s VoID description and the example queries.'],
+    leaves: ['Proposed: the reason a query was refused, on the record, before it ran.'],
+    stops: ['Today: two tries. A validator would refuse a query that does not fit the schema, and the model rewrites.'],
+  },
+  {
+    id: 'gta', name: 'GTA-RAG', color: '#f59e0b', at: [905, 984],
+    summary: 'The graph writes research exercises, and code marks them. Training comes later.',
+    why: 'GTA-RAG takes connected paths through a graph, turns them into multi-step questions, and teaches an agent to fetch the evidence those paths require. Our ontology already holds such paths, and it can mark the work without a model\'s opinion.',
+    what: [
+      '<b>Live, as a measure:</b> 138 exercises drawn from the graph, such as a person\'s kin, an author on a person, a speech between two people, the readings of a verse and an episode\'s retellings. Each names the verses or units an answer must have opened.',
+      'Marking is code: a set intersection over what the run fetched, handed on and cited. It costs nothing to rescore and has no judge noise.',
+      '<b>What it already found:</b> on 28 story exercises, the agent passed 25% without graph research and 93% with it. It also exposed that only 3% of the writings\' story data had been loaded.',
+      '<b>Not built:</b> training on these exercises. The next step is GEPA, which improves prompts and skill text against this score. Training a model comes last, and only if that leaves a gap worth the cost.',
+    ],
+    where: ['Exercises: <code>apps/demo-bible-a2a/scripts/research-exercises.mts</code>. Scoring: <code>scripts/research-baseline.mts</code>.', 'Reference: <a href="https://arxiv.org/abs/2608.22479">GTA-RAG</a>.'],
+    by: 'Code draws and marks the exercises. A model answers them.',
+    reads: ['The ontology\'s paths: person to writings, verse to readings, chapter to episode to unit.'],
+    leaves: ['A score per kind of question and a list of what was missed.'],
+    stops: ['A seed the knowledge base cannot bind to one referent is skipped and printed. It does not become an exercise.'],
+  },
+  {
+    id: 'decide', name: 'Decide and refuse', color: '#f59e0b', at: [1250, 984],
+    summary: 'The ontology decides what each word means, a model writes, and code refuses a miss.',
+    why: 'Better evidence alone does not stop a model reciting a verse it knows. Given a deliberately changed source word, a drafter followed it only 7% of the time and still reported that it had rendered it. So this idea moves the decision out of the writing.',
+    what: [
+      '<b>Decide:</b> code builds a skeleton for the verse: clauses, decided names, and candidates per word. Choosing among a word\'s own candidates, a model reads the source. It recited the original on only 2 of 100 changed words.',
+      '<b>Write:</b> a model puts the decided meanings into English.',
+      '<b>Refuse:</b> code checks that each decided word is present and sends the text back, at most twice.',
+      '<b>So far:</b> the draft followed a changed word 67.8% of the time with no false reflections, but only on altered verses, where a strange sentence can be correct. Whether it holds good English on real text is the next test. It is proposed for translation first. Nothing here is live.',
+      '<b>For the ontology:</b> each decision would become a reviewable record against a term\'s senses (<code>scr:KeyTerm</code>, <code>btr:TermSense</code>). Each word would be decided once, not again on every run.',
+    ],
+    where: ['Spec: <code>docs/bible-translation/structural-drafting-spec-2026-11-06.md</code>. Test: <code>scripts/skeleton-enforce.mts</code>.'],
+    by: 'Code builds the skeleton, a model picks senses and writes, and code refuses.',
+    reads: ['The source tokens, the lexicon, the knowledge base\'s names and concepts.'],
+    leaves: ['Today: a test record. Proposed: a sense decision per word that a person can review.'],
+    stops: ['Two refusals at most. What stays missing is reported.'],
+  },
+];
+
+const ONTOLOGY_BODY = `<h2>The short version</h2>
+<p>The Scripture Agent does not answer from what a model remembers. Before anyone asks, we build a record of the Bible from its original words: who everyone is, what happens in each scene, who said what to whom, which other works retell each story, and how readers have taken each verse. Every record hangs on a canonical id and says how sure we are.</p>
+<p>When a question arrives, skill artifacts decide what it needs, the harness gathers by id, and if the question has a shape no fixed tool serves, the model writes a graph query of its own. A model writes the answer. Code proves its verses.</p>
+<h2>Three rules that run through it</h2>
+<ul>
+<li><b>Identity is earned.</b> A name is not an id. A shared name binds nothing, and every binding has a confidence, a method and a basis.</li>
+<li><b>A model proposes; code decides.</b> Models do the reading at scale. Code checks quotes, shapes and ids. Weak records stay visible and marked.</li>
+<li><b>Knowing and doing are kept apart.</b> The ontology says what is known. A skill says what a kind of question needs. The harness carries both out and records what it used.</li>
+</ul>
+<h2>What this does not do yet</h2>
+<ul>
+<li>Most stories and readings were made by models and have not been reviewed by a person. The records say so.</li>
+<li>Readings cover 425 verses, not the whole Bible. About one claim in four failed its quote check; those stay in the graph, and code stops Ask reading them. Others were inconclusive and are still used.</li>
+<li>Labels and descriptions are in English, even where they were derived from Hebrew and Greek. The writings' stories are built from translations.</li>
+<li>Graph research helps where a question has its shape. On 100 ordinary questions it changed 9: 3 better, 6 the same, none worse.</li>
+<li>The ideas in the fourth band are at different stages, and each step says exactly where. Measured gains on exercises do not show the same gain on every real question.</li>
+</ul>
+<p>The harness around all this: <a href="/architecture/scripture-ask">How the Scripture Agent answers a question</a>. How answers are tested: <a href="/architecture/testing-answers">How we test the Scripture Agent's answers</a>.</p>`;
+
 export const POSTS: Post[] = [
+  {
+    slug: 'bible-ontology',
+    title: "How the Bible's ontology is made, and how Ask and new harness ideas use it",
+    date: '2026-11-07',
+    description:
+      'How canonical ids, stories, situations and readings are built from the Hebrew and Greek, how the Ask harness and its skill artifacts use them, and where ASTER, SPARQL-LLM, GTA-RAG and decide-and-refuse fit.',
+    picture: {
+      svg: '/architecture/bible-ontology-flow.svg', png: '/architecture/bible-ontology-flow.png', alt: ONTOLOGY_ALT, width: 1460, height: 1190,
+      caption: 'Grey arrows are the build and the ask. Pink arrows are skill artifacts. Dashed amber is work at different stages: each tile says how far it has got.',
+    },
+    steps: ONTOLOGY_STEPS,
+    body: ONTOLOGY_BODY,
+  },
   {
     slug: 'testing-answers',
     title: "How we test the Scripture Agent's answers",
