@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1460 960" width="1460" height="960" role="img" aria-labelledby="t d">
+<title id="t">How we measure an answer against what its author wrote</title>
+<desc id="d">Published answers (study notes, commentaries, articles and writings before 1000 AD) are the source. The candidate is pinned. Questions are formed from what a note or article answers. The gold is the author's own sentences. Five answerers answer: our original-language record, our English answer, the bare model, Product 1 and Product 2. A judge says, for each author sentence, whether an answer stated it, and code checks the judge's quote; the author's own text and a decoy test the judge first. Links are counted by code. A record test changes a name or number in every record the harness reads and asks which word the answer uses. A report keeps each number apart.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#8b95b5"/></marker><marker id="b" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#8b95b5"/></marker><marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#f472b6"/></marker><marker id="bs" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#f472b6"/></marker><marker id="m0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#a855f7"/></marker><marker id="m0s" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 0 5l10 5z" fill="#a855f7"/></marker>
+<style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#eef1fb}.h{font-size:30px;font-weight:700}.n{font-size:16px;font-weight:650}.t{font-size:13px;font-weight:600}.k{font-size:12px;font-weight:700}.s{font-size:13px;fill:#9aa5c7}.b{font-size:12px;font-weight:700;letter-spacing:.09em;fill:#9aa5c7}</style></defs>
+<rect width="1460" height="960" rx="22" fill="#0b1020"/>
+<text x="40" y="52" class="h">How we measure an answer against what its author wrote</text>
+<text x="40" y="78" class="s" text-anchor="start">The gold is the author's own sentences, not what a model remembers. A judge only says whether each sentence was said, and code checks its quote. Links and records are counted by code.</text>
+<path d="M124 410H172" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M256 410H304" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M388 410H436" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M520 410H568" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M652 410H712" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M796 410H856" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M940 410H1000" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M1084 410H1144" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<path d="M1228 410H1336" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<g>
+<rect x="52" y="378" width="64" height="64" rx="18" fill="#64748b"/>
+<g transform="translate(67.36,393.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 4.5h4v15h-4zM8.5 4.5h4v15h-4z"/><path d="M14.2 6l3.6-1 3 13.5-3.6 1z"/></g>
+<text x="84" y="466" text-anchor="middle" class="n">Sources</text>
+<text x="84" y="485" text-anchor="middle" class="s">notes, articles,</text>
+<text x="84" y="501" text-anchor="middle" class="s">early writings</text>
+</g>
+<g>
+<rect x="184" y="378" width="64" height="64" rx="18" fill="#8b5cf6"/>
+<g transform="translate(199.36,393.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="10" r="6"/><path d="M9.3 10l2 2 3.4-3.8"/><path d="M8.5 15l-1.5 5.5 5-2.5 5 2.5-1.5-5.5"/></g>
+<circle cx="187" cy="381" r="11" fill="#0b1020" stroke="#8b5cf6" stroke-width="2"/><text x="187" y="385" text-anchor="middle" class="k">1</text>
+<text x="216" y="466" text-anchor="middle" class="n">Pin</text>
+<text x="216" y="485" text-anchor="middle" class="s">freeze the code</text>
+</g>
+<g>
+<rect x="316" y="378" width="64" height="64" rx="18" fill="#3b82f6"/>
+<g transform="translate(331.36,393.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16v11H11l-4.5 3.5v-3.5H4z"/><path d="M8 9.5h8M8 12.8h5"/></g>
+<circle cx="319" cy="381" r="11" fill="#0b1020" stroke="#3b82f6" stroke-width="2"/><text x="319" y="385" text-anchor="middle" class="k">2</text>
+<text x="348" y="466" text-anchor="middle" class="n">Questions</text>
+<text x="348" y="485" text-anchor="middle" class="s">from what a note</text>
+<text x="348" y="501" text-anchor="middle" class="s">answers</text>
+</g>
+<g>
+<rect x="448" y="378" width="64" height="64" rx="18" fill="#14b8a6"/>
+<g transform="translate(463.36,393.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5h7l4 4v13h-11z"/><path d="M13.5 3.5v4h4"/><path d="M9 12h6M9 15.5h6"/></g>
+<circle cx="451" cy="381" r="11" fill="#0b1020" stroke="#14b8a6" stroke-width="2"/><text x="451" y="385" text-anchor="middle" class="k">3</text>
+<text x="480" y="466" text-anchor="middle" class="n">Gold</text>
+<text x="480" y="485" text-anchor="middle" class="s">author's sentences</text>
+</g>
+<g>
+<rect x="580" y="378" width="64" height="64" rx="18" fill="#f59e0b"/>
+<g transform="translate(595.36,393.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5l1-4.5L16 4.5 19.5 8 9 18.5z"/><path d="M13.5 7l3.5 3.5"/></g>
+<circle cx="583" cy="381" r="11" fill="#0b1020" stroke="#f59e0b" stroke-width="2"/><text x="583" y="385" text-anchor="middle" class="k">4</text>
+<text x="612" y="466" text-anchor="middle" class="n">Answer</text>
+<text x="612" y="485" text-anchor="middle" class="s">five answerers</text>
+</g>
+<g>
+<rect x="724" y="378" width="64" height="64" rx="18" fill="#ef4444"/>
+<g transform="translate(739.36,393.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M7 20h10M5 7h14"/><path d="M5 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/><path d="M19 7l-2.5 6a2.7 2.7 0 0 0 5 0z"/></g>
+<circle cx="727" cy="381" r="11" fill="#0b1020" stroke="#ef4444" stroke-width="2"/><text x="727" y="385" text-anchor="middle" class="k">5</text>
+<text x="756" y="466" text-anchor="middle" class="n">Judge</text>
+<text x="756" y="485" text-anchor="middle" class="s">each sentence said?</text>
+</g>
+<g>
+<rect x="868" y="378" width="64" height="64" rx="18" fill="#0ea5e9"/>
+<g transform="translate(883.36,393.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.2 1.2"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.2-1.2"/></g>
+<circle cx="871" cy="381" r="11" fill="#0b1020" stroke="#0ea5e9" stroke-width="2"/><text x="871" y="385" text-anchor="middle" class="k">6</text>
+<text x="900" y="466" text-anchor="middle" class="n">Links</text>
+<text x="900" y="485" text-anchor="middle" class="s">counted by code</text>
+</g>
+<g>
+<rect x="1012" y="378" width="64" height="64" rx="18" fill="#a855f7"/>
+<g transform="translate(1027.36,393.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h5M9 12c3.5 0 3-5.5 6.5-5.5H19M9 12c3.5 0 3 5.5 6.5 5.5H19"/><path d="M17 4.5l2 2-2 2M17 15.5l2 2-2 2"/></g>
+<circle cx="1015" cy="381" r="11" fill="#0b1020" stroke="#a855f7" stroke-width="2"/><text x="1015" y="385" text-anchor="middle" class="k">7</text>
+<text x="1044" y="466" text-anchor="middle" class="n">Record test</text>
+<text x="1044" y="485" text-anchor="middle" class="s">record or memory?</text>
+</g>
+<g>
+<rect x="1156" y="378" width="64" height="64" rx="18" fill="#6366f1"/>
+<g transform="translate(1171.36,393.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h12v17l-2.4-1.6-2.4 1.6-2.4-1.6-2.4 1.6L6 20.5z"/><path d="M9 8.5h6M9 12h6M9 15.5h3.5"/></g>
+<circle cx="1159" cy="381" r="11" fill="#0b1020" stroke="#6366f1" stroke-width="2"/><text x="1159" y="385" text-anchor="middle" class="k">8</text>
+<text x="1188" y="466" text-anchor="middle" class="n">Report</text>
+<text x="1188" y="485" text-anchor="middle" class="s">each number apart</text>
+</g>
+<g>
+<rect x="1348" y="378" width="64" height="64" rx="18" fill="#64748b"/>
+<g transform="translate(1363.36,393.36) scale(1.3866666666666667)" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l1.9 5.6 5.6 1.9-5.6 1.9L12 18.5l-1.9-5.6L4.5 11l5.6-1.9z"/><path d="M18.5 16.5v3M17 18h3"/></g>
+<text x="1380" y="466" text-anchor="middle" class="n">What we learn</text>
+<text x="1380" y="485" text-anchor="middle" class="s">what to fix next</text>
+</g>
+<text x="756" y="154" text-anchor="middle" class="b" style="fill:#f472b6">CHECKS ON THE JUDGE</text>
+<g>
+<rect x="638" y="176" width="56" height="56" rx="16" fill="#111933" stroke="#f472b6" stroke-width="2.2"/>
+<g transform="translate(651.44,189.44) scale(1.2133333333333334)" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5h7l4 4v13h-11z"/><path d="M13.5 3.5v4h4"/><path d="M9 12h6M9 15.5h6"/></g>
+<text x="666" y="256" text-anchor="middle" class="n">Author's own text</text>
+<text x="666" y="275" text-anchor="middle" class="s">must read as said</text>
+</g>
+<g>
+<rect x="818" y="176" width="56" height="56" rx="16" fill="#111933" stroke="#f472b6" stroke-width="2.2"/>
+<g transform="translate(831.44,189.44) scale(1.2133333333333334)" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5a4 4 0 0 0-4.8 5.2L4.5 15.4l2.6 2.6 5.2-5.2A4 4 0 0 0 17.5 8l-2.5 2.5-2-2z"/></g>
+<text x="846" y="256" text-anchor="middle" class="n">Decoy</text>
+<text x="846" y="275" text-anchor="middle" class="s">must read as unsaid</text>
+</g>
+<path d="M666 290V320Q666 336 682 336H726Q742 336 742 352V366" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
+<path d="M846 290V320Q846 336 830 336H786Q770 336 770 352V366" fill="none" stroke="#f472b6" stroke-width="2"  marker-end="url(#as)"/>
+<text x="612" y="776" text-anchor="middle" class="b">THE ANSWERERS</text>
+<path d="M348 620V604Q348 588 364 588H860Q876 588 876 604V620M480 588V620M612 588V620M744 588V620" fill="none" stroke="#8b95b5" stroke-width="2"/>
+<path d="M612 588V504" fill="none" stroke="#8b95b5" stroke-width="2"  marker-end="url(#a)"/>
+<g>
+<rect x="320" y="632" width="56" height="56" rx="16" fill="#111933" stroke="#f59e0b" stroke-width="2.2"/>
+<g transform="translate(333.44,645.44) scale(1.2133333333333334)" fill="none" stroke="#f59e0b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4M4 16l8 4 8-4"/></g>
+<text x="348" y="712" text-anchor="middle" class="n">Native record</text>
+<text x="348" y="731" text-anchor="middle" class="s">before English</text>
+</g>
+<g>
+<rect x="452" y="632" width="56" height="56" rx="16" fill="#111933" stroke="#f59e0b" stroke-width="2.2"/>
+<g transform="translate(465.44,645.44) scale(1.2133333333333334)" fill="none" stroke="#f59e0b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5l1-4.5L16 4.5 19.5 8 9 18.5z"/><path d="M13.5 7l3.5 3.5"/></g>
+<text x="480" y="712" text-anchor="middle" class="n">Our answer</text>
+<text x="480" y="731" text-anchor="middle" class="s">in English</text>
+</g>
+<g>
+<rect x="584" y="632" width="56" height="56" rx="16" fill="#111933" stroke="#f59e0b" stroke-width="2.2"/>
+<g transform="translate(597.44,645.44) scale(1.2133333333333334)" fill="none" stroke="#f59e0b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8" width="14" height="10.5" rx="3"/><path d="M12 8V4.5"/><circle cx="12" cy="3.8" r="1"/><circle cx="9.3" cy="13" r="1.2"/><circle cx="14.7" cy="13" r="1.2"/></g>
+<text x="612" y="712" text-anchor="middle" class="n">Bare model</text>
+<text x="612" y="731" text-anchor="middle" class="s">no sources</text>
+</g>
+<g>
+<rect x="716" y="632" width="56" height="56" rx="16" fill="#111933" stroke="#f59e0b" stroke-width="2.2"/>
+<g transform="translate(729.44,645.44) scale(1.2133333333333334)" fill="none" stroke="#f59e0b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8" width="14" height="10.5" rx="3"/><path d="M12 8V4.5"/><circle cx="12" cy="3.8" r="1"/><circle cx="9.3" cy="13" r="1.2"/><circle cx="14.7" cy="13" r="1.2"/></g>
+<text x="744" y="712" text-anchor="middle" class="n">Product 1</text>
+<text x="744" y="731" text-anchor="middle" class="s"></text>
+</g>
+<g>
+<rect x="848" y="632" width="56" height="56" rx="16" fill="#111933" stroke="#f59e0b" stroke-width="2.2"/>
+<g transform="translate(861.44,645.44) scale(1.2133333333333334)" fill="none" stroke="#f59e0b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8" width="14" height="10.5" rx="3"/><path d="M12 8V4.5"/><circle cx="12" cy="3.8" r="1"/><circle cx="9.3" cy="13" r="1.2"/><circle cx="14.7" cy="13" r="1.2"/></g>
+<text x="876" y="712" text-anchor="middle" class="n">Product 2</text>
+<text x="876" y="731" text-anchor="middle" class="s">saved answers</text>
+</g>
+<g>
+<rect x="1056" y="632" width="56" height="56" rx="16" fill="#111933" stroke="#a855f7" stroke-width="2.2"/>
+<g transform="translate(1069.44,645.44) scale(1.2133333333333334)" fill="none" stroke="#a855f7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5a4 4 0 0 0-4.8 5.2L4.5 15.4l2.6 2.6 5.2-5.2A4 4 0 0 0 17.5 8l-2.5 2.5-2-2z"/></g>
+<text x="1084" y="712" text-anchor="middle" class="n">Changed records</text>
+<text x="1084" y="731" text-anchor="middle" class="s">Saul → Ashbel</text>
+</g>
+<path d="M1084 620V530Q1084 514 1068 514H1060Q1044 514 1044 498V504" fill="none" stroke="#a855f7" stroke-width="2"  marker-end="url(#m0)"/>
+<text x="1128" y="650" text-anchor="start" class="s" style="fill:#a855f7">the harness answers again;</text>
+<text x="1128" y="666" text-anchor="start" class="s" style="fill:#a855f7">which word does it use?</text>
+<path d="M84 370V128Q84 112 100 112H464Q480 112 480 128V366" fill="none" stroke="#8b95b5" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#a)"/>
+<text x="96" y="136" text-anchor="start" class="s">the author's own words,</text>
+<text x="96" y="152" text-anchor="start" class="s">exact sentences only</text>
+<path d="M40 790h44" stroke="#8b95b5" stroke-width="2" marker-end="url(#a)"/><text x="98" y="794" class="s" text-anchor="start">questions, gold and answers</text>
+<path d="M40 816h44" stroke="#f472b6" stroke-width="2" marker-end="url(#as)"/><text x="98" y="820" class="s" text-anchor="start">a check on the judge</text>
+<path d="M40 842h44" stroke="#a855f7" stroke-width="2" marker-end="url(#a)"/><text x="98" y="846" class="s" text-anchor="start">the record test</text>
+<text x="40" y="882" text-anchor="start" class="s">A track whose checks fail reports no number.</text>
+<text x="40" y="898" text-anchor="start" class="s">Every number names who assessed it: code, a model, or a person.</text>
+<text x="1420" y="934" class="s" text-anchor="end">faithnet.estate/architecture</text>
+</svg>

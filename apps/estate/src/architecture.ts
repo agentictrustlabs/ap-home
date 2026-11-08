@@ -2297,7 +2297,208 @@ const ONTOLOGY_BODY = `<h2>The short version</h2>
 </ul>
 <p>The harness around all this: <a href="/architecture/scripture-ask">How the Scripture Agent answers a question</a>. How answers are tested: <a href="/architecture/testing-answers">How we test the Scripture Agent's answers</a>.</p>`;
 
+// ───────────────────────────────────────────────────────────────── the Ask evaluation harness (vcd apps/demo-bible-a2a/scripts/assessment)
+
+const EVAL_ALT =
+  "A flow diagram. Published answers (study notes, commentaries, articles and writings before 1000 AD) are the source. The candidate is pinned. Questions are formed from what a note or article answers. The gold is the author's own sentences. Five answerers answer: our original-language record, our English answer, the bare model, Product 1 and Product 2. A judge says, for each author sentence, whether an answer stated it, and code checks the judge's quote; the author's own text and a decoy test the judge first. Links are counted by code. A record test changes a name or number in every record the harness reads and asks which word the answer uses. A report keeps each number apart.";
+const EV_RUN = "Evaluation scripts on the operator's machine (<code>apps/demo-bible-a2a/scripts/assessment/</code>), run from a copy of the code checked out at the pin. They are not Workers and readers never meet them.";
+const EV_STORE = "A private evaluation store. Questions, answers, notes and verdicts stay there. The repository holds ids, counts and digests only, because several of the authors' texts may not be republished.";
+
+const EVAL_STEPS: Step[] = [
+  {
+    id: 'pin', name: 'Pin', color: '#8b5cf6', at: [216, 410],
+    summary: 'The version being tested is frozen, so a result always names the code that produced it.',
+    why: 'A number is only useful if you can say which code earned it. An earlier assessment was run from code that was never saved, and could not be reproduced.',
+    what: [
+      'The candidate is frozen as a named git ref (for example <code>ask-claim-isolation-20261108</code>). Every run happens in a copy checked out at that ref.',
+      'The runner hashes the code it runs. If anything changes mid-run, it refuses to continue ("Code changed"), so one study cannot mix two versions.',
+      'The judge records its own code hash separately, so the same answers can be re-judged under a corrected grader, and the result says it was re-judged.',
+    ],
+    where: [EV_RUN],
+    by: 'Code only.',
+    reads: ['The pinned code.'],
+    leaves: ["The study's protocol: pin, code hash, models, spending cap."],
+    stops: ['A changed file stops the run.', 'A spending cap stops it, and any call left without a price must be settled before the next run starts.'],
+  },
+  {
+    id: 'questions', name: 'Questions', color: '#3b82f6', at: [348, 410],
+    summary: 'Each question is one that a published note or article actually answers.',
+    why: "If a question is invented apart from its gold, the gold may not answer it. Starting from the author makes the test fair: the author's text is a complete answer to what was asked.",
+    what: [
+      'For a verse question, a small model proposes the question a study note answers, for example "What does Paul mean in Romans 3:31 when he says faith does not nullify the law, and how can faith uphold it?" from the note on Romans 3:31.',
+      'For a topical question, the question is an article\'s own title, such as "What happens after death?"',
+      'For the ancient-language test, the questions ask about one word in one verse: <i>ruach</i> in Genesis 1:2, Immanuel in Isaiah 7:14, <i>nephesh</i> in Genesis 2:7.',
+      'A comparison set is drawn by a recorded random seed and refuses any question an earlier test already used.',
+    ],
+    where: [EV_RUN, EV_STORE],
+    by: 'A small model proposes the wording, and code decides what enters the set.',
+    reads: ['The notes and articles.', 'The questions already used.'],
+    leaves: ['A set of questions, each tied to its source, with a hash of the set.'],
+    stops: ['A question already used is refused.'],
+  },
+  {
+    id: 'gold', name: 'Gold', color: '#14b8a6', at: [480, 410],
+    summary: "The gold is the author's own sentences, word for word.",
+    why: "A judge asked \"is this a good answer?\" grades against what it remembers. Holding the answer to the author's exact sentences makes the test about what the author wrote.",
+    what: [
+      "For a study note, the gold is the note's sentences. For a longer article or commentary, a small model suggests the central sentences, and code keeps a sentence only if it appears in the text exactly.",
+      'Several authors can answer the same question. Romans 3:31 is scored separately against the Tyndale note, against Calvin (1540) and against the Expositor\'s Greek Testament.',
+      "For the ancient-language test, the gold is a reading of each early witness, and it must be anchored in the witness's own words. Code admits a reading only if its anchor is in the Greek, Aramaic or Hebrew text. At Genesis 1:2 the Septuagint reads πνεῦμα θεοῦ (\"spirit of God\"), Targum Onkelos reads רוּחָא … מְנַשְּׁבָא (\"a wind … blowing\"), and Pseudo-Jonathan reads \"a spirit of mercies\". Each is kept as its own witness and the test never picks one.",
+    ],
+    where: [EV_RUN, EV_STORE],
+    by: 'A model may propose, and code admits only exact text.',
+    reads: ['The notes, articles and early writings.'],
+    leaves: ["Each author's claims, each with its source's hash."],
+    stops: ['A suggested sentence that is not in the text word for word is dropped.', 'A reading whose anchor is not in the witness is dropped.'],
+  },
+  {
+    id: 'answer', name: 'Answer', color: '#f59e0b', at: [612, 410],
+    summary: 'Five answerers take the same question.',
+    why: 'A score means little alone. The bare model shows what memory can already do. The products show what a reader could get elsewhere. Our own original-language record shows what we knew before writing in English.',
+    what: [
+      '<b>Our harness</b>, run from the pin, gives two texts. One is the reading it forms in the original language before any English (its bound native claims). The other is its English answer.',
+      '<b>The bare model</b> is the same writer model with the question alone, with no tools and no sources.',
+      '<b>Product 1</b> is asked once per question and its answer is saved with the time. <b>Product 2</b> refused every call in November (its monthly quota), so its saved answers from 2 to 5 November are used where they exist, and it is reported as not measured where they do not.',
+    ],
+    where: [EV_RUN, EV_STORE],
+    by: 'Models answer, and code records each answer with its time and cost.',
+    reads: ['The question.', 'For our harness, its own live retrieval.'],
+    leaves: ["Each answer, with our harness's full run record: what it retrieved, what it gave the writer and what each claim cites."],
+    stops: ['A product that refuses is stopped at its first refusal and recorded as unavailable, never scored as wrong.'],
+  },
+  {
+    id: 'judge', name: 'Judge', color: '#ef4444', at: [756, 410],
+    summary: 'For each author sentence: stated, differs, contradicted or absent. Code checks the quote.',
+    why: 'The judge is never asked which answer is better. It answers a narrow question that can be checked: does this text say what this sentence says?',
+    what: [
+      "The judge is Claude Haiku 5.5, named on every result. For each of the author's sentences it says <i>stated</i>, <i>differs</i>, <i>contradicted</i> or <i>absent</i>, and gives a quote from the answer.",
+      'A verdict counts only if code finds that quote in the answer.',
+      'A reading counts as stated when the answer holds the same reading, whether or not it names the witness. "Immanuel means God with us" states Eusebius\'s reading even if Eusebius is never named.',
+      'Before any verdict is read, two checks run on every case. The author\'s own text must read as stating its own sentences, at 0.9 or more. Four sentences from another question\'s author must read as not stated, at 0.8 or more. If a track fails either check, it reports no number.',
+    ],
+    where: [EV_RUN, EV_STORE],
+    by: 'A model gives the verdict, and code checks the quote and the controls.',
+    reads: ["The author's sentences.", 'Each answer.'],
+    leaves: ['One verdict per sentence per answer, with its quote.'],
+    stops: ['A verdict whose quote is not in the answer does not count.', 'A failed judgment is retried and the failed attempt is archived.'],
+  },
+  {
+    id: 'links', name: 'Links', color: '#0ea5e9', at: [900, 410],
+    summary: "Did the answer reach the author's passages and the earliest witnesses? Code counts it.",
+    why: 'An answer can be right and cite nothing useful, or cite well and say little. So links are a second score, never folded into the first.',
+    what: [
+      "The author's references and the answer's citations are read by the same parser, then compared exactly and within two verses of the same chapter.",
+      'For our harness, the run record shows how far each early writing got. It can be <i>retrieved</i> (found), <i>handed</i> (given to the writer) or <i>in a claim</i> (cited as evidence). A product has no run record, so we count the works it names.',
+      'For the ancient-language test, the pool for each verse is built by code from everything held before 1000 AD. It is ranked in three tiers: ancient versions (the Septuagint and the Targums), writings that comment on the verse, and passing citations.',
+    ],
+    where: [EV_RUN],
+    by: 'Code only.',
+    reads: ["The author's references.", "Our harness's run record.", 'The writings index.'],
+    leaves: ['Link counts per answerer, per tier.'],
+    stops: ['A weaker source used while a stronger one was missed is flagged.'],
+  },
+  {
+    id: 'record', name: 'Record test', color: '#a855f7', at: [1044, 410],
+    summary: 'Change a name or number in every record the harness reads. Does the answer follow the record or memory?',
+    why: 'On well-known questions a model answering from memory looks complete. This is the one test memory cannot pass: when the records say something else, which does the answer use?',
+    what: [
+      'A target is picked by rule: a name or number word that our harness restated, that appears at least twice in what it retrieved, and that is not in the question. Its replacement is another name or number of the same kind (Saul to Ashbel, twelve to fourteen).',
+      'A wrapper around the pinned candidate changes the word in every record it receives, and maps requests back so its tools still work.',
+      'A run is graded only if its own prompts prove the swap. The new word must reach the writer, and the old word may appear only in text the run itself wrote.',
+      'Code counts the result: <i>record</i> (the new word), <i>memory</i> (the old word), <i>conflict</i> (both) or <i>silent</i> (neither). No model judges it.',
+    ],
+    where: [EV_RUN, EV_STORE],
+    by: 'Code only.',
+    reads: ['A study already run at the pin.', 'The names in the knowledge base.'],
+    leaves: ['One outcome per case, and every claim that cites a record while stating the remembered word.'],
+    stops: ['A run whose prompts do not prove the swap is not graded, and the reason is given.'],
+  },
+  {
+    id: 'report', name: 'Report', color: '#6366f1', at: [1188, 410],
+    summary: 'Each number on its own, named by who assessed it, with what memory alone scores beside it.',
+    why: 'One blended score hides the very things to fix. Kept apart, the numbers show where the answer was lost: in retrieval, in the hand-off to the writer, or in the English.',
+    what: [
+      "<b>Coverage</b> is the share of the author's sentences stated, per track. <b>Distinctive coverage</b> counts only the sentences the bare model did not state, so memory cannot score them. The <b>lift over the bare model</b> is paired, with a 95% interval.",
+      '<b>Links</b> are counted per tier. The <b>record rate</b> carries a Wilson interval.',
+      'Every number says whether code, a model (named) or a person assessed it. A judge\'s concern is a lead, never a counted error, until a person confirms it.',
+    ],
+    where: [EV_RUN, EV_STORE],
+    by: 'Code.',
+    reads: ['Every verdict, link count and record outcome.'],
+    leaves: ['A scores file per study. Ids and numbers are committed, and text never is.'],
+    stops: ['A track whose checks on the judge failed reports no number.'],
+  },
+];
+
+const EVAL_BODY = `
+<h2>Why we built it</h2>
+<p>Our earlier quality test showed a judge two answers and asked which was better. The judge had no author in front of it, so in practice it graded against what it remembered a good answer should say. On the most familiar questions, a model answering from memory looked complete, and our harness looked worse than the bare model. The owner put it plainly: the test measured whether an answer matched what the model remembers, not what the person who wrote the note actually wrote. This harness measures the second thing.</p>
+
+<h2>Three tests, one ruler</h2>
+<ul>
+<li><b>The authors' answers.</b> Verse questions are scored against study notes and commentaries, and topical questions against published articles. The gold is the author's own sentences.</li>
+<li><b>The ancient languages, before English.</b> For a word in a verse, every writing we hold from before 1000 AD at that verse forms a pool. Each early witness's reading is anchored in its own words. Five answerers are judged against those readings, including our own original-language record before any English is written.</li>
+<li><b>Record or memory.</b> A name or number is changed in every record the harness reads, and the test checks which word the answer uses.</li>
+</ul>
+
+<h2>Example: one question, one author, five sentences</h2>
+<p>The question was "What does Paul mean in Romans 3:31 when he says faith does not nullify the law, and how can faith uphold it?" The gold is the five sentences of the open Tyndale study note on that verse (Tyndale House Publishers, via BibleAquifer, CC BY-SA 4.0). Among them: "However, faith does not cancel the law" and "God gives the Holy Spirit to those who have faith, and the Spirit enables them to do what is right." The judge was Claude Haiku 5.5.</p>
+<ul>
+<li><b>Our English answer stated 2 of 5.</b> For "faith does not cancel the law" the judge quoted "Paul means that faith does not make God's law irrelevant". It read three sentences as <i>differs</i>, among them the Spirit sentence, because our answer speaks of love fulfilling the law and not of the Spirit enabling it.</li>
+<li><b>The bare model stated 3 of 5.</b></li>
+<li><b>Product 1 stated all 5.</b></li>
+<li><b>The two checks passed on this case.</b> The note's own text read as stating all five sentences, and four sentences from another author's note read as absent from it.</li>
+</ul>
+<p>The same question is also scored against Calvin's commentary (1540) and the Expositor's Greek Testament, each on its own.</p>
+
+<h2>Example: what the original-language record knew and the English lost</h2>
+<p>The question was "What does 'Immanuel' mean in Isaiah 7:14?" The pool held ten writings from before 1000 AD at that verse. The Septuagint (Ἐμμανουήλ) and Targum Jonathan keep the name untranslated. Eusebius, in the <i>Demonstration of the Gospel</i> (about 314), glosses it: "they shall call his name God with us … for Emmanuel signifies this." Our harness's original-language record said the name is conventionally understood as "God with us". Its own review then withheld that line, because its evidence did not establish the gloss, and the English answer dropped it. Eusebius was in the store the whole time and never reached the reading step.</p>
+<p>Across 13 word-in-a-verse questions, with 72 anchored readings from 41 witnesses, the judge's controls scored 0.97 and 0.99. The share of witness readings each stage stated:</p>
+<ul>
+<li>our original-language record: 0.19</li>
+<li>our English answer: 0.12</li>
+<li>the bare model: 0.12</li>
+<li>Product 1: 0.10</li>
+<li>Product 2, from saved answers: 0.16</li>
+</ul>
+<p>Our original-language record stated 14 readings and the English kept 9, gaining none. The harness retrieved 6 of the 23 ancient versions, handed 3 to the writer, and built no claim on any writing from before 1000 AD. The lever is getting those writings to the writer.</p>
+
+<h2>Example: the record says fourteen, the answer says twelve</h2>
+<p>In the record test, "twelve" became "fourteen" in every record, so the writer received Matthew 10:5 as "these fourteen Jesus sent out". In another case, "Saul" became "Ashbel" in the records about Doeg. Of 16 cases, 11 passed the check that the swap really reached the writer. The answer followed the record in 6, followed memory in 3, and named neither in 2. That is a record rate of 0.55, with a 95% interval of 0.28 to 0.79, short of the 0.8 bar fixed in advance. Two of the three memory answers were laundered citations: a claim saying "the Twelve" was bound to the very verse that, as the writer saw it, said fourteen. Our binding checks that a claim cites records we hold, not that it says what they say. That is now a fix to make.</p>
+
+<h2>Example: the commentaries now reach their verses</h2>
+<p>The first ancient-language run could hardly see the New Testament. Chrysostom's homilies, Cyril of Alexandria on Luke and John, and Theodoret on Romans were all in the store. But a section was placed on a verse only when its text cited one. These authors head each section with the verse they expound, for example "Ver. 29. 'Being filled with all unrighteousness…'" in Chrysostom's fifth homily on Romans, and the index ignored those headings. Code now reads each heading and checks its quotation against the verse. The section is placed only when the quotation is found there, together with up to three paragraphs that follow it. That added 7,668 links for 5,527 sections, and a hand check of 40 found all 40 on the right verse. Cyril on Luke (429) and Theodoret on Romans (410) carry dates, so they now join the pool of writings from before 1000 AD. Chrysostom's homilies reach their verses too, but the index still withholds their dates. The collected volume had been dated from the wrong record, and a date is now given only when it is bound to the homily's own record. Until those bindings are made, his homilies stay out of the pool. They are also the only new material at Romans 3:25, John 14:16 and John 19:30.</p>
+
+<h2>What did not work</h2>
+<ul>
+<li><b>Cutting a sentence out as a negative control.</b> We removed one of the author's sentences and expected the judge to call it absent. It still read as stated 12 times in 29, and the judge was right: authors restate their point. The decoy took its place.</li>
+<li><b>Counting the reading only when the witness was named.</b> The first ancient-language grading turned the reading score into a second link score. The same answers were re-judged under the corrected rule, and the first grading is kept as the record of the error.</li>
+<li><b>Checking names in bound claims.</b> The check flagged "Paul" 31 times out of 37, because a verse need not repeat its speaker. It now checks numbers only, and names are tested by the record test.</li>
+<li><b>A record test that leaked.</b> The first run left the original word in places the swap did not reach: lines with a colon, and a summary the candidate fetched for itself. The original reached the writer in 11 of 15 runs. That run was withdrawn, and every run must now prove its swap.</li>
+</ul>
+
+<h2>What it cannot tell us yet</h2>
+<ul>
+<li>These are first runs on 13 to 16 questions. They are leads for what to fix, not rates to quote. The product differences are a few readings out of 72 and do not rank the products.</li>
+<li>The judge's checks cover the easy edges: the author's text word for word, and an unrelated author. A paraphrase check (an author's sentence reworded should read as stated, and negated as contradicted) is next.</li>
+<li>The readings are a model's statement of each witness. They are anchored in the witness's words by code, but no person has reviewed them.</li>
+<li>Some authors' notes may not be republished, so their text stays in the private store. This page quotes only open and public-domain sources.</li>
+</ul>`;
+
 export const POSTS: Post[] = [
+  {
+    slug: 'eval-harness',
+    title: 'How we measure an answer against what its author wrote',
+    date: '2026-11-08',
+    description:
+      "Our answer-quality test used to grade against what a model remembers. Now the gold is the author's own sentences, the earliest witnesses are read in their own languages, and a record test checks whether the answer follows its sources. How questions and answers are formed, how they are scored, and what the first runs found.",
+    picture: {
+      svg: '/architecture/eval-harness-flow.svg', png: '/architecture/eval-harness-flow.png', alt: EVAL_ALT, width: 1460, height: 960,
+      caption: 'Grey arrows are the questions, gold and answers. Pink arrows are checks on the judge. Purple is the record test.',
+    },
+    steps: EVAL_STEPS,
+    body: EVAL_BODY,
+  },
   {
     slug: 'bible-ontology',
     title: "How the Bible's ontology is made, and how Ask and new harness ideas use it",
