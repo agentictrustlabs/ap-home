@@ -107,8 +107,6 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          UPSTASH_EMAIL: ${{ secrets.UPSTASH_EMAIL }}
-          UPSTASH_API_KEY: ${{ secrets.UPSTASH_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.ESTATE_GEMINI_API_KEY }}
           # The town's only.
           WORKERS_SUBDOMAIN: ${{ vars.WORKERS_SUBDOMAIN }}

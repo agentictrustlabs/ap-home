@@ -184,7 +184,9 @@ function makeCtx(): Ctx {
       if (url.includes('api.vercel.com') && url.includes('/domains')) return { status: 200, json: async () => ({ domains: [{ name: `${workerNames(request.id).home}.vercel.app` }] }) };
       if (url.includes('api.vercel.com') && url.includes('/deployments') && init?.method === 'POST') return { status: 200, json: async () => ({ id: 'dpl_dry', readyState: 'READY' }) };
       if (url.includes('api.vercel.com') && url.includes('/deployments/')) return { status: 200, json: async () => ({ readyState: 'READY' }) };
-      if (url.includes('api.upstash.com')) return { status: 200, json: async () => ({ database_id: 'db_dry', endpoint: 'dry.upstash.io', rest_token: 'dry' }) };
+      if (url.includes('api.vercel.com') && url.includes('/integrations/configurations')) return { status: 200, json: async () => ([{ id: 'icfg_dry', slug: 'upstash' }]) };
+      if (url.includes('api.vercel.com') && url.includes('/storage/stores/integration/direct')) { recorded.push(`  home store: ${String(init?.body)}`); return { status: 200, json: async () => ({ store: { id: 'store_dry' } }) }; }
+      if (url.includes('api.vercel.com') && url.includes('/connections')) return { status: 201, json: async () => ({}) };
       if (url.includes('interactions-session-key')) return { status: 200, json: async () => ({ address: fakeAddr('kms-interactions' + request.id) }) };
       return { status: 200, json: async () => ({}) };
     },
@@ -192,7 +194,7 @@ function makeCtx(): Ctx {
 }
 
 // ── state ───────────────────────────────────────────────────────────────────────────────────────────────────
-type State = { done: string[]; homeHost?: string; vercelProjectId?: string; gatewayTokenHash?: string; nameRegistered?: boolean; notes: string[]; operatorNotes: string[] };
+type State = { done: string[]; homeHost?: string; vercelProjectId?: string; kvStoreId?: string; kvConnected?: boolean; gatewayTokenHash?: string; nameRegistered?: boolean; notes: string[]; operatorNotes: string[] };
 const state: State = existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, 'utf8')) : { done: [], notes: [], operatorNotes: [] };
 const save = () => writeFileSync(STATE_FILE, `${JSON.stringify(state, null, 2)}\n`);
 
@@ -250,6 +252,33 @@ const vercel = (path: string, init?: RequestInit) => {
   const url = `https://api.vercel.com${path}${team ? `${path.includes('?') ? '&' : '?'}teamId=${team}` : ''}`;
   return ctx.http(url, { ...init, headers: { authorization: `Bearer ${env('VERCEL_TOKEN')}`, 'content-type': 'application/json', ...(init?.headers ?? {}) } });
 };
+
+/**
+ * The Home's own Upstash store, created through the Vercel account's Upstash integration and connected to the Home
+ * project (which writes its KV_REST_API_URL / KV_REST_API_TOKEN). The store id is saved the moment it exists, so a
+ * resumed build connects the SAME store instead of making a second one.
+ */
+async function homeStore(): Promise<void> {
+  const configs = await (await vercel('/v1/integrations/configurations?view=account')).json();
+  const list: Array<{ id: string; slug?: string }> = Array.isArray(configs) ? configs : configs.configurations ?? [];
+  const cfg = process.env.VERCEL_UPSTASH_CONFIGURATION_ID || list.find((c) => c.slug === 'upstash')?.id;
+  if (!cfg) throw new Error('This Vercel account has no Upstash integration. In Vercel: Storage → Create Database → Upstash for Redis, once; then re-run.');
+  if (!state.kvStoreId) {
+    // Hosted: Pay As You Go, like the town's other Homes. An owner's own account: Vercel picks a free plan unless KV_PLAN names one.
+    const plan = process.env.KV_PLAN || (OWN ? '' : 'paid');
+    const r = await vercel('/v1/storage/stores/integration/direct', { method: 'POST', body: JSON.stringify({ name: `${request.id}-home-kv`, integrationConfigurationId: cfg, integrationProductIdOrSlug: 'upstash-kv', source: 'cli', ...(plan ? { billingPlanId: plan } : {}) }) });
+    const j = await r.json();
+    if (r.status >= 300 || !j.store?.id) throw new Error(`Vercel did not create the Home's store (${r.status}${j.error?.message ? `: ${j.error.message}` : ''})`);
+    state.kvStoreId = j.store.id as string;
+    save();
+  }
+  if (!state.kvConnected) {
+    const r = await vercel(`/v1/integrations/installations/${cfg}/resources/${state.kvStoreId}/connections`, { method: 'POST', body: JSON.stringify({ projectId: state.vercelProjectId, envVarEnvironments: ['production', 'preview'], makeEnvVarsSensitive: true }) });
+    if (r.status >= 300 && r.status !== 409) throw new Error(`Vercel did not connect the store to the Home (${r.status})`);
+    state.kvConnected = true;
+    save();
+  }
+}
 
 /**
  * A chain token for this estate in the town's chain gateway (its TOKENS KV). The token is returned and held in memory;
@@ -510,13 +539,12 @@ const steps: Record<string, Step> = {
       const d = decl();
       const v = localVars();
       const home = `https://${d.homeHost}`;
-      // Its OWN, EMPTY key-value store (runbook §5 ⚠: a shared store opens the wrong Home).
-      const up = await ctx.http('https://api.upstash.com/v2/redis/database', { method: 'POST', headers: { authorization: `Basic ${Buffer.from(`${env('UPSTASH_EMAIL')}:${env('UPSTASH_API_KEY')}`).toString('base64')}`, 'content-type': 'application/json' }, body: JSON.stringify({ name: `${request.id}-home`, platform: 'aws', primary_region: 'us-east-1', tls: true }) });
-      const db = await up.json();
-      if (!db.endpoint || !db.rest_token) throw new Error('Upstash did not create the Home\'s store');
+      // Its OWN, EMPTY key-value store (runbook §5 ⚠: a shared store opens the wrong Home), made through the Vercel
+      // account's Upstash integration, as the existing Homes' stores were (an Upstash account Vercel manages cannot
+      // create databases itself). Connecting it to the Home is what writes the Home's KV_REST_API_* settings.
+      await homeStore();
       if (!v.BROKER_PRIVATE_JWK || !v.BROKER_KID) throw new Error('the custody file has no Home signing key — re-run from agents');
       const sensitive: Record<string, string> = {
-        KV_REST_API_URL: `https://${db.endpoint}`, KV_REST_API_TOKEN: db.rest_token,
         RPC_URL: v.RPC_URL, A2A_CUSTODY_URL: d.hosts.runtime, A2A_CUSTODY_BRIDGE_SECRET: v.A2A_CUSTODY_BRIDGE_SECRET ?? '',
         BROKER_PRIVATE_JWK: v.BROKER_PRIVATE_JWK, ...(v.DEMO_SIGNER_SECRET ? { DEMO_SIGNER_SECRET: v.DEMO_SIGNER_SECRET } : {}),
         DEMO_A2A_URL: d.hosts.runtime, DEMO_EDGE_URL: d.hosts.edge, A2A_VAULT_URL: d.hosts.vault,
