@@ -464,8 +464,11 @@ const steps: Record<string, Step> = {
       const gemini = env('GEMINI_API_KEY', !DRY && !OWN);
       if (gemini) putSecret('runtime', 'GEMINI_API_KEY', gemini);
       else if (OWN) state.notes.push('No model key: add an ESTATE_GEMINI_API_KEY secret to your GitHub and re-run, or set it on the runtime yourself — until then its agents cannot answer in words.');
-      const inference = env('INFERENCE_APP_KEY', !DRY && !OWN);
+      // Optional for every estate: without it the runtime talks to Gemini directly (its declared ORCHESTRATION_LLM).
+      // Each estate should get its OWN app key from the gateway, never a copy of another estate's.
+      const inference = env('INFERENCE_APP_KEY', false);
       if (inference) putSecret('runtime', 'INFERENCE_APP_KEY', inference);
+      else if (!DRY) state.operatorNotes.push(`No model-gateway key: ${request.id}'s agents use Gemini directly. To route them through the town's gateway, issue it an app key and set INFERENCE_APP_KEY on ${names.runtime}.`);
       putSecret('runtime', 'A2A_INTERNAL_MARKER', randomBytes(24).toString('base64url'));
       // Kept with the estate's other secrets (so a resumed build installs the SAME one, and the owner has it).
       let heartbeat = localVars().TOWN_HEARTBEAT_TOKEN;
