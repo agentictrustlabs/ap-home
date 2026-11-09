@@ -9,6 +9,10 @@ export interface AkcsEnv {
   /** Dev stacks: static token from the AKCS CLI; production: a workload TokenProvider. */
   AKCS_TOKEN?: string;
   AKCS_ACCEPTED_PROTECTION_LEVELS?: string;
+  /** Protection level for the envelope keys this vault CREATES (per-person KEKs). Unset = the library's
+   *  CVM_WRAPPED. A dev-local AKCS node (a local or staging estate) can only create DEV_LOCAL keys and
+   *  refuses anything else, so such an estate sets DEV_LOCAL here — production leaves it unset. */
+  AKCS_KEY_PROTECTION_LEVEL?: string;
 }
 
 export function isAgenticKms(env: { A2A_KMS_BACKEND?: string }): boolean {
