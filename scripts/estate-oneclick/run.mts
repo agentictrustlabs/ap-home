@@ -517,9 +517,13 @@ const steps: Record<string, Step> = {
         RPC_URL: v.RPC_URL, A2A_CUSTODY_URL: d.hosts.runtime, A2A_CUSTODY_BRIDGE_SECRET: v.A2A_CUSTODY_BRIDGE_SECRET ?? '',
         BROKER_PRIVATE_JWK: v.BROKER_PRIVATE_JWK, ...(v.DEMO_SIGNER_SECRET ? { DEMO_SIGNER_SECRET: v.DEMO_SIGNER_SECRET } : {}),
         DEMO_A2A_URL: d.hosts.runtime, DEMO_EDGE_URL: d.hosts.edge, A2A_VAULT_URL: d.hosts.vault,
+        // apps/home/next.config.mjs: production MUST set it, or /mcp-bind goes to faithnet's vault (the "demo-mcp" Worker).
+        DEMO_MCP_URL: d.hosts.vault,
       };
       const plain: Record<string, string> = {
         BROKER_KID: v.BROKER_KID,
+        // apps/home/server/_lib/origin.ts: unset means impact-agent.me only, and sign-in on this Home fails.
+        ALLOWED_ISSUER_HOSTS: `${d.homeHost},*.${d.homeHost}`,
         NEXT_PUBLIC_HOME_ORIGIN: home, NEXT_PUBLIC_CONNECT_DOMAIN: d.homeHost, NEXT_PUBLIC_BRAND_NAME: d.name, NEXT_PUBLIC_ESTATE_NAME: d.name,
         NEXT_PUBLIC_CHAIN_ID: String(TOWN.chain.id), NEXT_PUBLIC_CHAIN_NAME: TOWN.chain.name, NEXT_PUBLIC_RPC_URL: `${d.hosts.runtime}/rpc`,
         NEXT_PUBLIC_A2A_DOMAIN: new URL(d.hosts.runtime).host, NEXT_PUBLIC_DEMO_EDGE_ORIGIN: d.hosts.edge, NEXT_PUBLIC_HOME_MCP_ORIGIN: d.hosts.homeMcp,
