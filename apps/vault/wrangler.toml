@@ -216,7 +216,7 @@ AKCS_BASE_URL = "https://kms.faithnet.io"
 [[env.test-one.d1_databases]]
 binding = "DB"
 database_name = "test-one-db"
-database_id = "__D1_DB__"
+database_id = "bb078b9d-8ba0-448d-9fab-d31f30e2b2a7"
 migrations_dir = "migrations"
 
 [[env.test-one.durable_objects.bindings]]
