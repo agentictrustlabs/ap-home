@@ -5,7 +5,8 @@
     "workers-config",
     "cloud-resources",
     "key-vault",
-    "chain-access"
+    "chain-access",
+    "agents"
   ],
   "notes": [],
   "operatorNotes": [],
