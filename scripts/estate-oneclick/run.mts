@@ -528,7 +528,9 @@ const steps: Record<string, Step> = {
       // 441 §7.2: the harness agent's custodian must BE the interactions key the runtime signs with — the key-vault
       // key, not the local one bootstrap chartered it under. Read the live key from the runtime and rotate onto it.
       const d = decl();
-      const r = await ctx.http(`${d.hosts.runtime}/a2a/agent/interactions-session-key`);
+      // Straight to the runtime Worker: `/a2a/…` is the Home's proxy prefix, not a runtime route.
+      const r = await ctx.http(`${d.hosts.runtime}/agent/interactions-session-key`);
+      if (r.status !== 200) throw new Error(`the runtime would not report its interactions key (${r.status}) — is it deployed?`);
       const kmsKey = String((await r.json()).address ?? '').toLowerCase();
       if (!/^0x[0-9a-f]{40}$/.test(kmsKey)) throw new Error('the runtime did not report its interactions key — is it deployed?');
       const v = localVars();
