@@ -57,6 +57,7 @@ import { readSsoCookie } from '../lib/sso-cookie';
 import { SESSION_KEY } from '../context/session';
 import type { Home } from './types';
 import { homeLabel } from './types';
+import { namesOrgsAtCreation } from '../whitelabel/provisioning';
 
 /** The person's Home session Bearer, from wherever it lives (explicit auth → this-origin localStorage →
  *  parent-domain SSO cookie) — session-gated /connect endpoints (e.g. the naming + membership stores)
@@ -601,6 +602,11 @@ export async function createOrganization(
      *  `org.profile.displayName` and rides the `org` payload as `orgProfile`, which `/oidc/grant` projects onto
      *  the steward's link — so the first `/token` and `related-orgs` read already carry `displayName`. */
     displayName?: string;
+    /** NAME LATER (2026-10-28, Rich): a NEW organization is chartered with NO public name — vault, stewardship and
+     *  every grant exactly as a named one, its type declared, the name it goes by (`displayName`, else `base`) kept
+     *  in its own `org.profile`. Claiming a public name is a separate act, from its Naming page. Leaving the name off
+     *  discloses less; it does not hide the account or its on-chain relationships. */
+    nameLater?: boolean;
     onProgress?: (p: { step: number; total: number; label: string; hint?: string }) => void;
   } = {},
 ): Promise<Result<{ org: Record<string, unknown>; grant: unknown }>> {
@@ -709,19 +715,22 @@ export async function createOrganization(
       return { ok: false, error: e instanceof Error ? e.message : 'existing-org grant failed' };
     }
   }
+  // NAME LATER — asked for by the caller, or the relying app's own setting (`provisioning.orgPublicName: false`).
+  if (opts.nameLater === undefined && !namesOrgsAtCreation(opts.requestedBy)) opts = { ...opts, nameLater: true };
   // spec 256 — route by credential, like secureHome: a Google member's org is custodied by their
   // KMS C_sub and deployed server-side (ZERO device prompts); passkey/wallet sign on device.
   const say = opts.onProgress;
   say?.({
     step: 1,
     total: 5,
-    label: 'Finding a name…',
+    label: opts.nameLater ? 'Setting up the organization…' : 'Finding a name…',
     hint: 'This can take a moment — we’re setting the organization up.',
   });
   // ap-town spec 431 — a priced org root: the device-signed path (passkey / wallet / demo custody) deploys the org
   // NAMELESS and buys its name next from the person's treasury, as the KMS path and the portal already do. Sending
   // the legacy register call in the deploy batch reverted the whole ceremony (0xea8e4eb5) for every such sign-in.
-  const bought = !isKmsVia(via) && kindNameIsBought('org');
+  // A name-later organization buys nothing now: it deploys nameless and is named, if ever, from its Naming page.
+  const bought = !opts.nameLater && !isKmsVia(via) && kindNameIsBought('org');
   // Pick the label BEFORE anything is deployed: a label the naming gate refuses (a real domain, a taken name) must
   // deploy nothing — 0xB992… exists unnamed because the pick came after the deploy on 2026-10-08.
   let boughtLabel: string | null = null;
@@ -775,7 +784,7 @@ export async function createOrganization(
         if (!ix.ok) console.warn('[org-create] interactions grant not provisioned:', ix.error);
       }),
       x.stewardshipDelegation
-        ? vaultWriteWithDelegation(x.stewardshipDelegation, 'org.profile', { v: 1, displayName: commonName || x.childName }).catch((e: unknown) =>
+        ? vaultWriteWithDelegation(x.stewardshipDelegation, 'org.profile', { v: 1, displayName: commonName || x.childName || base }).catch((e: unknown) =>
             console.warn('[org-create] org profile seed failed:', e),
           )
         : Promise.resolve(),
@@ -862,7 +871,8 @@ export async function createOrganization(
       stewardshipDelegation: x.stewardshipDelegation,  // org→person (person reads org)
       operationalDelegation: x.operationalDelegation,  // org→app service agent (submit intents)
       readGrantDelegation: x.readGrantDelegation,      // org→app workspace (read one record family)
-      ...(commonName ? { orgProfile: { displayName: commonName } } : {}), // → the steward's link, at /oidc/grant
+      ...(commonName || (opts.nameLater && base) ? { orgProfile: { displayName: commonName || base } } : {}), // → the steward's link, at /oidc/grant
+      ...(opts.nameLater ? { nameLater: true } : {}), // no public name yet
     },
     grant: x.delegation,
   };
