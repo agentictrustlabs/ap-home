@@ -84,3 +84,49 @@ export function mintToken(run: CvmRun, k: Kms, id: string, subject: string): str
   if (!token) throw new Error(`the key custody did not return a token for ${subject}`);
   return token;
 }
+
+/** Runs `az` with these arguments (outside the CVM) and returns its stdout. */
+export type AzRun = (args: string[]) => string;
+
+/** Creating a tenant or a signing key unseals through secure key release; binding callers and minting tokens do not. */
+export function needsUnseal(st: KmsState, id: string): boolean {
+  return !st.tenant || !st.keys[`${id}-relay`] || !st.keys[`${id}-interactions-session`];
+}
+
+const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/**
+ * Runs `fn` with the CVM able to reach the attestation service, only when the estate still needs a tenant or a key.
+ * The CVM's subnet has no way out by design, so this opens a temporary NAT gateway on it (as the town operator did by
+ * hand on 2026-10-15) and ALWAYS removes it again — the CVM is closed before this returns, whether `fn` worked or not.
+ */
+export function withEgress<T>(az: AzRun, run: CvmRun, k: Kms, id: string, fn: () => T): T {
+  const e = k.egress;
+  if (!e || !needsUnseal(readStatus(run, k, id), id)) return fn();
+  const rg = ['-g', k.resourceGroup];
+  const pip = 'pip-akcs-skr-build';
+  const nat = 'nat-akcs-skr-build';
+  try {
+    az(['network', 'public-ip', 'create', ...rg, '-n', pip, '-l', e.location, '--sku', 'Standard', '--allocation-method', 'Static', '-o', 'none']);
+    az(['network', 'nat', 'gateway', 'create', ...rg, '-n', nat, '-l', e.location, '--public-ip-addresses', pip, '--idle-timeout', '4', '-o', 'none']);
+    az(['network', 'vnet', 'subnet', 'update', ...rg, '--vnet-name', e.vnet, '-n', e.subnet, '--nat-gateway', nat, '-o', 'none']);
+    // Wait until the CVM can actually reach the attestation service (any HTTP answer will do).
+    let reached = false;
+    for (let i = 0; i < 6 && !reached; i++) {
+      if (i) sleepSync(15_000);
+      reached = /EGRESS [1-5]\d\d/.test(run(`curl -s -o /dev/null -m 15 -w "EGRESS %{http_code}\n" ${e.probe} || echo "EGRESS none"`));
+    }
+    if (!reached) throw new Error(`the key custody could not reach ${e.probe} even with the temporary NAT gateway`);
+    return fn();
+  } finally {
+    const failed: string[] = [];
+    const tryAz = (what: string, args: string[]) => { try { az(args); } catch { failed.push(what); } };
+    tryAz('detach the NAT gateway', ['network', 'vnet', 'subnet', 'update', ...rg, '--vnet-name', e.vnet, '-n', e.subnet, '--remove', 'natGateway', '-o', 'none']);
+    tryAz(`delete ${nat}`, ['network', 'nat', 'gateway', 'delete', ...rg, '-n', nat]);
+    tryAz(`delete ${pip}`, ['network', 'public-ip', 'delete', ...rg, '-n', pip]);
+    if (failed.length) {
+      // Loud on purpose: the key custody must not stay open.
+      throw new Error(`the key custody's temporary internet access was NOT fully removed (${failed.join(', ')}) — remove ${nat} and ${pip} from ${k.resourceGroup} by hand`);
+    }
+  }
+}

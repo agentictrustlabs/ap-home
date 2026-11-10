@@ -55,7 +55,9 @@
     "audience": "akcs-pilot",
     "signingKey": "/etc/akcs/issuer/issuer-signing-key.pem",
     "tokenTtlSecs": 31536000,
-    "runtimeSigningPurposes": "EIP712,ERC4337_USER_OPERATION,EIP7702_AUTHORIZATION,PERSONAL_SIGN_DIGEST,RAW_32_BYTE_DIGEST,EIP155_TRANSACTION"
+    "runtimeSigningPurposes": "EIP712,ERC4337_USER_OPERATION,EIP7702_AUTHORIZATION,PERSONAL_SIGN_DIGEST,RAW_32_BYTE_DIGEST,EIP155_TRANSACTION",
+    "_egress": "The CVM subnet has no outbound path. Creating a tenant or key unseals through secure key release, which must reach the attestation service, so the build opens a temporary NAT gateway on this subnet and deletes it after (as Rich did by hand 2026-10-15). Needs the build SP's role \"AKCS egress window (createestate)\" on the resource group.",
+    "egress": { "vnet": "vnet-akcs-pilot", "subnet": "snet-akcs-cvm", "location": "westus", "probe": "https://sharedwus.wus.attest.azure.net/" }
   },
 
   "_chainGateway": "Where the town mints an estate's chain token (ap-town apps/chain-gateway, its TOKENS KV).",

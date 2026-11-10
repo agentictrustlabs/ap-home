@@ -34,6 +34,9 @@ export interface TownProfile {
   kms: {
     resourceGroup: string; vm: string; config: string; envFile: string; issuer: string; kid: string; audience: string;
     signingKey: string; tokenTtlSecs: number; runtimeSigningPurposes: string;
+    /** The CVM has no way out by design; creating a tenant or key unseals, which must reach the attestation service.
+     *  The build opens a NAT gateway on this subnet for that, and removes it again (kms.mts withEgress). */
+    egress?: { vnet: string; subnet: string; location: string; probe: string };
   };
   chainGateway: { dir: string; env: string };
 }
