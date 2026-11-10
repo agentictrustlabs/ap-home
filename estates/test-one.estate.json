@@ -21,7 +21,8 @@
   "extraOrigins": [],
   "agents": {
     "harness": "0xa0765ACb665E5a015913EfEF55aCBD5C61A534e9",
-    "interactions": "0x335b13f7792B4A0CDdC4e6D58Feb43040559d48d"
+    "interactions": "0x335b13f7792B4A0CDdC4e6D58Feb43040559d48d",
+    "estate": "0x37182964c510b99c32f281107c75a24d83e16a11"
   },
   "_extras": "This estate's own product choices. ORCHESTRATION_LLM is impact-agent's: the model the harness plans with, paid through the GEMINI_API_KEY the build installs.",
   "extras": {
