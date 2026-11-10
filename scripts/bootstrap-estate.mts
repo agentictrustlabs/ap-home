@@ -49,7 +49,7 @@ const deploymentName = arg('--deployment') ?? 'faithchain';
 const resolveFrom = createRequire(import.meta.url);
 const deploymentPath = deploymentFile
   ? deploymentFile.replace(/^~/, process.env.HOME ?? '')
-  : resolveFrom.resolve(`@agenticprimitives/contracts/deployments-${deploymentName}.json`);
+  : resolveFrom.resolve(`@agenticprimitives/contracts/deployments-json/${deploymentName}`);
 const deployment = JSON.parse(readFileSync(deploymentPath, 'utf8')) as {
   chainId: number; entryPoint: Address; agentAccountFactory: Address;
 };
