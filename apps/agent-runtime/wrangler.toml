@@ -1221,6 +1221,8 @@ workers_dev = true
 binding = "AI"
 
 [env.test-three.vars]
+AKCS_INTERACTIONS_KEY_ID = "01a1c7de-1719-7182-9b28-d08904ce9ca0"
+AKCS_RELAY_KEY_ID = "01a1c7de-13ae-7ab3-bd49-a6c56dd56f9e"
 ESTATE_ID = "test-three"
 AKCS_TENANT_ID = "test-three"
 BROKER_ISS = "https://test-three-home.vercel.app"
