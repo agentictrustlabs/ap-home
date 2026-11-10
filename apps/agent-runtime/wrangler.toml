@@ -1305,7 +1305,7 @@ bindings = [
 [[env.test-three.d1_databases]]
 binding = "OPS"
 database_name = "test-three-ops"
-database_id = "__D1_OPS__"
+database_id = "6ee0da77-60bb-4742-9e06-9eec17d7eefa"
 
 [[env.test-three.queues.producers]]
 binding = "RUNTIME_WAKE"
@@ -1324,17 +1324,17 @@ max_concurrency = 2
 
 [[env.test-three.kv_namespaces]]
 binding = "BRIDGE_NONCES"
-id = "__KV_BRIDGE_NONCES__"
+id = "41e8d503046e47fbbff5f37202bdc8dd"
 [[env.test-three.kv_namespaces]]
 binding = "SUBJECT_SA_MAP"
-id = "__KV_SUBJECT_SA_MAP__"
+id = "3f9048c273ca4ddfab9de532c68646c9"
 [[env.test-three.kv_namespaces]]
 binding = "FED_TOKENS"
-id = "__KV_FED_TOKENS__"
+id = "c74809bb78914589be42ef4fea79dce7"
 
 [[env.test-three.kv_namespaces]]
 binding = "RELEASED_CARDS"
-id = "__KV_RELEASED_CARDS__"
+id = "4b1860b317ae434b90b30b8ca96e6346"
 
 [[env.test-three.services]]
 binding = "MCP"

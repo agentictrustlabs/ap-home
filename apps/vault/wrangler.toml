@@ -300,7 +300,7 @@ AKCS_BASE_URL = "https://kms.faithnet.io"
 [[env.test-three.d1_databases]]
 binding = "DB"
 database_name = "test-three-db"
-database_id = "__D1_DB__"
+database_id = "b2478259-df5f-4769-b121-699d4500407f"
 migrations_dir = "migrations"
 
 [[env.test-three.durable_objects.bindings]]
