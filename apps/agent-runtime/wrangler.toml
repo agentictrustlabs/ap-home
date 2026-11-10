@@ -1007,7 +1007,7 @@ bindings = [
 [[env.test-one.d1_databases]]
 binding = "OPS"
 database_name = "test-one-ops"
-database_id = "__D1_OPS__"
+database_id = "4199cdde-c6e2-4fd7-9dd6-b66917989717"
 
 [[env.test-one.queues.producers]]
 binding = "RUNTIME_WAKE"
@@ -1026,17 +1026,17 @@ max_concurrency = 2
 
 [[env.test-one.kv_namespaces]]
 binding = "BRIDGE_NONCES"
-id = "__KV_BRIDGE_NONCES__"
+id = "13c2fa3f6aaf438484fdd2f56b4d1adc"
 [[env.test-one.kv_namespaces]]
 binding = "SUBJECT_SA_MAP"
-id = "__KV_SUBJECT_SA_MAP__"
+id = "93188bca49ed459dae9acaffd4a48128"
 [[env.test-one.kv_namespaces]]
 binding = "FED_TOKENS"
-id = "__KV_FED_TOKENS__"
+id = "e007c22b28a14947a965ee2b80f649ba"
 
 [[env.test-one.kv_namespaces]]
 binding = "RELEASED_CARDS"
-id = "__KV_RELEASED_CARDS__"
+id = "56d1bd2a284c4151aa14573b535aa13b"
 
 [[env.test-one.services]]
 binding = "MCP"
