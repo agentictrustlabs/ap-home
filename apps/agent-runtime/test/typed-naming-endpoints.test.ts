@@ -71,3 +71,25 @@ describe('typed naming on the KMS-custodied endpoints', () => {
     expect(handler('/custody/oidc/name-agent')).toContain('sizeCallGas(c.env, body.agent, callData)');
   });
 });
+
+// NAME LATER (2026-10-28, Rich): an organization may be chartered with no public name — but only when asked for
+// explicitly, still typed, and an org request that simply lacks a name is still refused.
+describe('name-later organizations on the KMS-custodied endpoints', () => {
+  const org = handler('/custody/oidc/bootstrap-org');
+  const agent = handler('/custody/oidc/bootstrap-agent');
+
+  it('is an explicit flag, never inferred from a missing label', () => {
+    expect(org).toContain('body?.nameLater === true');
+    expect(agent).toContain('body.nameLater === true');
+    // Without the flag both still demand a name.
+    expect(org).toContain("'session + label + node + delegate required'");
+    expect(agent).toContain("error: 'org_requires_name'");
+  });
+
+  it('claims no name, but still declares the type in the same genesis (nameless is not typeless)', () => {
+    expect(org).toMatch(/const nameCalls = nameLater(?: \|\| !root\.ok)?\s*\?\s*\[\]/);
+    expect(org).toContain('[...declare, ...nameCalls, ...approveCalls]');
+    expect(org).toMatch(/const orgName = nameLater(?: \|\| !root\.ok)? \? ''/);
+    expect(agent).toMatch(/orgNameLater && body\.tld[\s\S]*declareTypeCallsFor\(c\.env, childSA/);
+  });
+});
