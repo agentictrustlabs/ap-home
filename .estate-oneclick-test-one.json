@@ -17,6 +17,7 @@
     "runtime: REVIEW: still mentions faithnet → command = \"npx tsx scripts/deploy.mts --preflight-only --env faithnet\""
   ],
   "operatorNotes": [
+    "Register test-one.estate: in agenticprimitives/packages/contracts, as the naming root's owner — ESTATE_LABEL=test-one ESTATE_AGENT=0x37182964c510b99c32f281107c75a24d83e16a11 forge script script/AddEstateName.s.sol:AddEstateName --rpc-url <faithchain rpc> --broadcast. Until then the estate works; its agent simply has no .estate name.",
     "Register test-one.estate: in agenticprimitives/packages/contracts, as the naming root's owner — ESTATE_LABEL=test-one ESTATE_AGENT=0x37182964c510b99c32f281107c75a24d83e16a11 forge script script/AddEstateName.s.sol:AddEstateName --rpc-url <faithchain rpc> --broadcast. Until then the estate works; its agent simply has no .estate name."
   ],
   "vercelProjectId": "prj_VsmnUXqMwktE12ATFLqeurmoB1mf",
