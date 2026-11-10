@@ -141,7 +141,16 @@ function makeCtx(): Ctx {
   if (!DRY) {
     return {
       recorded,
-      sh: (cmd, args, o = {}) => execFileSync(cmd, args, { cwd: o.cwd, input: o.input, env: { ...process.env, ...(o.env ?? {}) }, encoding: 'utf8', maxBuffer: 1 << 26, stdio: ['pipe', 'pipe', o.secret ? 'pipe' : 'inherit'] }),
+      sh: (cmd, args, o = {}) => {
+        try {
+          return execFileSync(cmd, args, { cwd: o.cwd, input: o.input, env: { ...process.env, ...(o.env ?? {}) }, encoding: 'utf8', maxBuffer: 1 << 26, stdio: ['pipe', 'pipe', o.secret ? 'pipe' : 'inherit'] });
+        } catch (e) {
+          // stdout is captured, so a failing check (`pnpm check`, …) would say nothing. Show its tail — never a secret one's.
+          const out = String((e as { stdout?: unknown }).stdout ?? '');
+          if (!o.secret && out.trim()) process.stderr.write(`--- last output of ${cmd} ${args[0] ?? ''} ---\n${out.trim().split('\n').slice(-80).join('\n')}\n---\n`);
+          throw e;
+        }
+      },
       http: async (url, init) => { const r = await fetch(url, init); return { status: r.status, ok: r.ok, json: () => r.json() }; },
     };
   }
