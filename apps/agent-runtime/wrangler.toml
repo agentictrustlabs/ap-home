@@ -1156,7 +1156,7 @@ bindings = [
 [[env.test-two.d1_databases]]
 binding = "OPS"
 database_name = "test-two-ops"
-database_id = "__D1_OPS__"
+database_id = "3edb3d1a-a112-4993-aff8-e35264757f32"
 
 [[env.test-two.queues.producers]]
 binding = "RUNTIME_WAKE"
@@ -1175,17 +1175,17 @@ max_concurrency = 2
 
 [[env.test-two.kv_namespaces]]
 binding = "BRIDGE_NONCES"
-id = "__KV_BRIDGE_NONCES__"
+id = "237c3f0af55a46a2a1428cea78aaddd4"
 [[env.test-two.kv_namespaces]]
 binding = "SUBJECT_SA_MAP"
-id = "__KV_SUBJECT_SA_MAP__"
+id = "4090428d3f4f48039df28f8f44e7c891"
 [[env.test-two.kv_namespaces]]
 binding = "FED_TOKENS"
-id = "__KV_FED_TOKENS__"
+id = "edd6c9907ab140e687e0cc53b91716dd"
 
 [[env.test-two.kv_namespaces]]
 binding = "RELEASED_CARDS"
-id = "__KV_RELEASED_CARDS__"
+id = "734abb79adb041c0ba4d0e883d9d0f9d"
 
 [[env.test-two.services]]
 binding = "MCP"
