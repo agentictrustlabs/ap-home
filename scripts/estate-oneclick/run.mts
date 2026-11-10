@@ -205,6 +205,8 @@ const names = workerNames(request.id);
 const localVars = (): Record<string, string> => Object.fromEntries(readFileSync(LOCAL, 'utf8').split('\n').filter((l) => /^[A-Z_0-9]+=/.test(l)).map((l) => { const i = l.indexOf('='); return [l.slice(0, i), l.slice(i + 1).replace(/^'(.*)'$/, '$1')]; }));
 const ctx = makeCtx();
 const wrangler = (args: string[], o: Parameters<Ctx['sh']>[2] = {}) => ctx.sh('npx', ['-y', 'wrangler', ...args], o);
+// ap-town pins wrangler 3, whose `kv key` has no --remote; npx would pick that local copy. Name v4 for the town's KV.
+const townWrangler = (args: string[], o: Parameters<Ctx['sh']>[2] = {}) => ctx.sh('npx', ['-y', 'wrangler@4', ...args], o);
 const putSecret = (app: App, name: string, value: string) => wrangler(['secret', 'put', name, '--env', request.id, '-c', TOML_PATHS[app]], { input: value, secret: true });
 /** One script on the town's key-custody CVM. */
 const cvm: CvmRun = (script, o) => ctx.sh('az', azArgs(TOWN.kms, script), { secret: o?.secret });
@@ -287,11 +289,11 @@ async function homeStore(): Promise<void> {
 function mintChainToken(previousHash?: string): { token: string; hash: string } {
   const gw = join(AP_TOWN, TOWN.chainGateway.dir);
   if (previousHash) {
-    try { wrangler(['kv', 'key', 'delete', '--binding', 'TOKENS', '--env', TOWN.chainGateway.env, '--remote', `t:${previousHash}`], { cwd: gw }); } catch { /* already gone */ }
+    try { townWrangler(['kv', 'key', 'delete', '--binding', 'TOKENS', '--env', TOWN.chainGateway.env, '--remote', `t:${previousHash}`], { cwd: gw }); } catch { /* already gone */ }
   }
   const token = randomBytes(32).toString('base64url');
   const hash = createHash('sha256').update(token).digest('hex');
-  wrangler(['kv', 'key', 'put', '--binding', 'TOKENS', '--env', TOWN.chainGateway.env, '--remote', `t:${hash}`, JSON.stringify({ app: `${request.id}-runtime`, readRps: 20, writeRps: 20 })], { cwd: gw });
+  townWrangler(['kv', 'key', 'put', '--binding', 'TOKENS', '--env', TOWN.chainGateway.env, '--remote', `t:${hash}`, JSON.stringify({ app: `${request.id}-runtime`, readRps: 20, writeRps: 20 })], { cwd: gw });
   return { token, hash };
 }
 
@@ -339,7 +341,7 @@ const steps: Record<string, Step> = {
         if (!res.ok) throw new Error(`the site would not take the town package (${res.status})`);
       } catch (e) {
         // Nobody will ever hold this chain token: revoke it, so a retry does not leave a live one behind.
-        try { wrangler(['kv', 'key', 'delete', '--binding', 'TOKENS', '--env', TOWN.chainGateway.env, '--remote', `t:${chain.hash}`], { cwd: join(AP_TOWN, TOWN.chainGateway.dir) }); } catch { /* already gone */ }
+        try { townWrangler(['kv', 'key', 'delete', '--binding', 'TOKENS', '--env', TOWN.chainGateway.env, '--remote', `t:${chain.hash}`], { cwd: join(AP_TOWN, TOWN.chainGateway.dir) }); } catch { /* already gone */ }
         throw e;
       }
     },

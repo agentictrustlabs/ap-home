@@ -65,6 +65,13 @@ export function ensureKeyVault(run: CvmRun, k: Kms, id: string): { relay: string
     const ids = Object.fromEntries([...out.matchAll(/(relay|interactions-session)\s+([0-9a-f-]{36})/g)].map((m) => [m[1], m[2]]));
     relay ??= ids.relay;
     interactions ??= ids['interactions-session'];
+    // create-key can print log lines (JSON too) before its answer, which hides the ids from the parse above.
+    // The keys exist either way — read them back by name.
+    if (!relay || !interactions) {
+      const after = readStatus(run, k, id);
+      relay ??= after.keys[`${id}-relay`];
+      interactions ??= after.keys[`${id}-interactions-session`];
+    }
   }
   if (!relay || !interactions) throw new Error('could not read both signing key ids back from the key custody');
   return { relay, interactions };
