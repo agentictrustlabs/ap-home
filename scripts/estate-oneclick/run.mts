@@ -219,6 +219,14 @@ const wrangler = (args: string[], o: Parameters<Ctx['sh']>[2] = {}) => ctx.sh('n
 const townWrangler = (args: string[], o: Parameters<Ctx['sh']>[2] = {}) => ctx.sh('npx', ['-y', 'wrangler@4', ...args], o);
 const putSecret = (app: App, name: string, value: string) => wrangler(['secret', 'put', name, '--env', request.id, '-c', TOML_PATHS[app]], { input: value, secret: true });
 // From the Worker's own folder: a stamped `[env.<id>.build]` command (the runtime's vault preflight) runs relative to it.
+/** A Worker's brand-new workers.dev address takes a little while to answer after its first deploy. Wait for 200. */
+async function waitForHealth(url: string): Promise<void> {
+  for (let i = 0; i < 36; i++) {
+    try { if ((await ctx.http(url)).status === 200) return; } catch { /* not up yet */ }
+    if (!DRY) await new Promise((r) => setTimeout(r, 5_000));
+  }
+  throw new Error(`${url} did not answer within 3 minutes of its deploy`);
+}
 const deployWorker = (app: App) => wrangler(['deploy', '--env', request.id, '-c', 'wrangler.toml'], { cwd: dirname(TOML_PATHS[app]) });
 /** One script on the town's key-custody CVM. */
 const cvm: CvmRun = (script, o) => ctx.sh('az', azArgs(TOWN.kms, script), { secret: o?.secret });
@@ -531,6 +539,8 @@ const steps: Record<string, Step> = {
       deployWorker('vault');
       const vaultDb = /database_name\s*=\s*"([^"]+)"/.exec(readFileSync(TOML_PATHS.vault, 'utf8').split(`[env.${request.id}`)[1] ?? '')?.[1];
       if (vaultDb) wrangler(['d1', 'migrations', 'apply', vaultDb, '--remote', '--env', request.id, '-c', TOML_PATHS.vault]);
+      // The runtime's preflight asks the vault's /health — on a first deploy, before its address answers, it would refuse.
+      await waitForHealth(`${decl().hosts.vault}/health`);
       for (const app of ['runtime', 'edge', 'homeMcp'] as App[]) deployWorker(app);
     },
   },
@@ -541,6 +551,7 @@ const steps: Record<string, Step> = {
       // key, not the local one bootstrap chartered it under. Read the live key from the runtime and rotate onto it.
       const d = decl();
       // Straight to the runtime Worker: `/a2a/…` is the Home's proxy prefix, not a runtime route.
+      await waitForHealth(`${d.hosts.runtime}/health`);
       const r = await ctx.http(`${d.hosts.runtime}/agent/interactions-session-key`);
       if (r.status !== 200) throw new Error(`the runtime would not report its interactions key (${r.status}) — is it deployed?`);
       const kmsKey = String((await r.json()).address ?? '').toLowerCase();
