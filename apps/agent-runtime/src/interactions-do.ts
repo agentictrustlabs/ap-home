@@ -2669,7 +2669,25 @@ export class InteractionsDO {
       // and the invite path had no other signal to go on.
       try {
         if (body.data !== undefined) {
-          await this.writeDoc(dg, resource, body.data);
+          // WRITES ARE NOT A TOKEN CAPABILITY (security audit H-02, 2026-11-04). Anyone could POST a record
+          // here with an `emailHash` of their choosing and then redeem it as a session for that person.
+          // Creating or rewriting an invitation is the org acting: it takes the steward proof, like
+          // `invite.put`. A token holder (the invitee, at redeem) may only mark an EXISTING invitation
+          // redeemed; its email, expiry and grant never change that way.
+          const existing = ((await this.vaultFor(dg).read<Record<string, unknown>>({ owner: "", resource }))?.data ?? null) as Record<string, unknown> | null;
+          const steward = body.session || body.stewardship
+            ? await this.ownerStewardOrBridge(request, rawBody, op, principal, String(body.session ?? ""), body.stewardship as IncomingDelegation | undefined)
+            : ({ ok: false, reason: "no steward proof" } as const);
+          if (steward.ok) {
+            await this.writeDoc(dg, resource, body.data);
+            return json({ ok: true });
+          }
+          if (!existing) return json({ error: "creating an invitation needs a steward of this organization" }, 403);
+          const d = (body.data ?? {}) as Record<string, unknown>;
+          if (d.status !== "redeemed") return json({ error: "an invitation link may only mark its invitation redeemed" }, 403);
+          if (existing.status === "declined") return json({ error: "this invitation was declined" }, 409);
+          const agent = typeof d.agent === "string" && /^0x[0-9a-fA-F]{40}$/.test(d.agent) ? d.agent.toLowerCase() : undefined;
+          await this.writeDoc(dg, resource, { ...existing, status: "redeemed", redeemedAt: Date.now(), ...(agent ? { agent } : {}) });
           return json({ ok: true });
         }
         const rec = await this.vaultFor(dg).read<unknown>({ owner: '', resource });

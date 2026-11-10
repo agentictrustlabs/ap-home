@@ -43,8 +43,16 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return json({ ok: true, delivery: 'sent' });
   }
 
+  // No SMS rail and no explicit dev opt-in: refuse. The code must never come back to the caller in a deployed
+  // estate — echoing it let anyone sign in as any phone number (security audit H-01, 2026-11-04). Same rule
+  // as email-start: echo only when unconfigured AND DEV_OTP_ECHO=true.
+  const devEcho = env.DEV_OTP_ECHO === 'true';
+  if (!useMessaging && !devEcho) {
+    return json({ error: 'Phone sign-in isn’t available here yet — use your email instead.', reason: 'sms_not_configured' }, 503);
+  }
+
   // Otherwise WE own the code (verified locally in phone-verify's `dev` path). Deliver it via Twilio
-  // Programmable Messaging when configured (trial-friendly, no Verify upgrade), else log/echo it.
+  // Programmable Messaging when configured (trial-friendly, no Verify upgrade), else (dev only) echo it.
   const code = devOtp();
   await env.AUTH_CODES.put(key, JSON.stringify({ aud, provider: 'dev', code, attempts: 0 }), { expirationTtl: 600 });
 
@@ -54,8 +62,6 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return json({ ok: true, delivery: 'sent' });
   }
 
-  console.log(`[phone-start] (dev) OTP for ${phone} = ${code}`);
-  // Twilio is unconfigured, so the only delivery channel is this same trusted browser flow.
-  // Real Twilio Verify/Messaging paths above never echo codes.
+  // DEV_OTP_ECHO=true and no SMS rail: a local/dev convenience only. Never logs the number or the code.
   return json({ ok: true, delivery: 'logged', devCode: code });
 };
