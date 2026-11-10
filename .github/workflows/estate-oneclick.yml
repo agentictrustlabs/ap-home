@@ -60,6 +60,9 @@ jobs:
         run: |
           if git ls-remote --exit-code --heads origin "estate/$ESTATE_ID" >/dev/null; then
             git fetch origin "estate/$ESTATE_ID" && git checkout -B "estate/$ESTATE_ID" "origin/estate/$ESTATE_ID"
+            # Take this run's master too, so a fix landed since the last attempt reaches the retry.
+            git -c user.name="estate-oneclick" -c user.email="estate-oneclick@users.noreply.github.com" \
+              merge --no-edit -m "estate: $ESTATE_ID — take master for this attempt" "$GITHUB_SHA"
             echo "resuming from estate/$ESTATE_ID"
           fi
 
