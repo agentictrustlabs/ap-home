@@ -72,6 +72,18 @@ export const WORKSPACE_CONTENT_SCOPE: readonly string[] = [
  *  relationships, the playbook or a member's private records. */
 export const GOVERNED_CONTENT_SCOPE: readonly string[] = WORKSPACE_CONTENT_SCOPE;
 
+/** Spec 344 §2.1 — WHAT THE GOVERNOR LETS ITS WORKSPACE DO: the scope of the governor → workspace OPERATING grant.
+ *  Two things, nothing more: keep its own `aporg:Workspace` entity in the governor's vault (read + write — the
+ *  descriptor the coordinator maintains), and read the governor's ROSTER (`org.membership:member:*`) — an `open`
+ *  workspace's participants are the governor's current members, resolved live, never copied. Never the governor's
+ *  custody, relationships, playbook, treasury, or any member's private records; never a write to the roster. */
+export function workspaceOperatingScope(workspace: Address | string, server: string): { server: string; resources: string[]; ops: ('read' | 'write')[] }[] {
+  return [
+    { server, resources: [`vault:${workspaceRecordKey(workspace)}`], ops: ['read', 'write'] },
+    { server, resources: ['vault:org.membership:member:*'], ops: ['read'] },
+  ];
+}
+
 /** The `aporg:Workspace` entity, in the GOVERNOR's vault, keyed by the agent that coordinates it. */
 export const workspaceRecordKey = (ws: Address | string): string => `workspace:${ws.toLowerCase()}`;
 
@@ -81,6 +93,10 @@ export interface WorkspaceGovernorPointer {
   /** Spec 424 — the workspace→governor CONTENT read grant (a member chains its org membership onto it to read the
    *  workspace's content through the governor). Present only on workspaces created with the member-read path. */
   governorRead?: DelegationWire;
+  /** Spec 344 §2.1 — the governor → workspace OPERATING grant: the governing organization's own authorization for this
+   *  workspace to operate. The runtime treats the workspace as governed only while it is valid and unrevoked; revoke
+   *  it and the workspace is inert. Absent on workspaces chartered before 2026-10-28 until Repair re-issues it. */
+  governorMandate?: DelegationWire;
 }
 
 /** The `aporg:Workspace` record as the organization keeps it. `governedBy` is the organization itself: the record
@@ -103,8 +119,32 @@ export function workspaceRecordOf(input: { governor: Address; workspace: Address
   };
 }
 
-export function governorPointerOf(input: { governor: Address; workspace: Address; governorRead?: DelegationWire }): WorkspaceGovernorPointer {
-  return { governedBy: input.governor.toLowerCase() as Address, coordinatedBy: input.workspace.toLowerCase() as Address, ...(input.governorRead ? { governorRead: input.governorRead } : {}) };
+export function governorPointerOf(input: { governor: Address; workspace: Address; governorRead?: DelegationWire; governorMandate?: DelegationWire }): WorkspaceGovernorPointer {
+  return {
+    governedBy: input.governor.toLowerCase() as Address,
+    coordinatedBy: input.workspace.toLowerCase() as Address,
+    ...(input.governorRead ? { governorRead: input.governorRead } : {}),
+    ...(input.governorMandate ? { governorMandate: input.governorMandate } : {}),
+  };
+}
+
+/** The two grants a governed workspace is born with, by name: `governorRead` (workspace → governor, the member read path)
+ *  and `governorMandate` (governor → workspace, its authority to operate). */
+export type GovernanceGrant = 'governorRead' | 'governorMandate';
+
+/** Pure: which of the two grants a pointer is MISSING — present means a wire between the right two agents, in the right
+ *  direction. The chain decides validity and revocation; this only says what a Repair would have to issue. */
+export function governanceGaps(pointer: unknown, workspace: Address | string): GovernanceGrant[] {
+  const governor = governorOf(pointer);
+  if (!governor) return [];
+  const ws = workspace.toString().toLowerCase();
+  const p = pointer as { governorRead?: { delegator?: string; delegate?: string }; governorMandate?: { delegator?: string; delegate?: string } };
+  const between = (w: { delegator?: string; delegate?: string } | undefined, from: string, to: string) =>
+    !!w && String(w.delegator ?? '').toLowerCase() === from && String(w.delegate ?? '').toLowerCase() === to;
+  const gaps: GovernanceGrant[] = [];
+  if (!between(p.governorRead, ws, governor)) gaps.push('governorRead');
+  if (!between(p.governorMandate, governor, ws)) gaps.push('governorMandate');
+  return gaps;
 }
 
 /** Pure: the governing organization a `workspace.governor` record names, or null for no pointer / a malformed one —
@@ -134,6 +174,8 @@ export async function writeGovernancePair(input: {
    *  the field runtime that resolves a workspace's governor also gets the grant a member chains their org
    *  membership onto. Omitted ⇒ no member read path yet (the pre-424 state), never a broad read. */
   governorRead?: DelegationWire;
+  /** Spec 344 §2.1 — the governor → workspace OPERATING grant, kept beside the read grant on `workspace.governor`. */
+  governorMandate?: DelegationWire;
 }): Promise<void> {
   await vaultWriteWithDelegation(input.orgStewardship, workspaceRecordKey(input.workspace), workspaceRecordOf(input));
   await vaultWriteWithDelegation(input.wsStewardship, WORKSPACE_GOVERNOR_RECORD, governorPointerOf(input));
