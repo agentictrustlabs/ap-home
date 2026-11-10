@@ -6,7 +6,8 @@
     "cloud-resources",
     "key-vault",
     "chain-access",
-    "chain-access"
+    "chain-access",
+    "agents"
   ],
   "notes": [
     "runtime: REVIEW: still mentions faithnet → command = \"npx tsx scripts/deploy.mts --preflight-only --env faithnet\""
