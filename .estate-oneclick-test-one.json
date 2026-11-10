@@ -3,7 +3,8 @@
     "home-address",
     "declare",
     "workers-config",
-    "cloud-resources"
+    "cloud-resources",
+    "key-vault"
   ],
   "notes": [
     "runtime: REVIEW: still mentions faithnet → command = \"npx tsx scripts/deploy.mts --preflight-only --env faithnet\""
