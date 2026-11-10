@@ -1060,4 +1060,4 @@ binding = "HARNESS_WORKFLOW"
 class_name = "HarnessApprovalWorkflow"
 
 [env.test-one.build]
-command = "npx tsx scripts/deploy.mts --preflight-only --env faithnet"
+command = "npx tsx scripts/deploy.mts --preflight-only --env test-one"
