@@ -32,7 +32,7 @@
 import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { randomBytes, createHash, generateKeyPairSync } from 'node:crypto';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { buildDeclaration, workerNames, type Hosts } from './declaration.mts';
 import { stampEnvBlock, appendBlock, fillPlaceholders, TOML_PATHS, commonRuntimeKeys, type App } from './env-blocks.mts';
 import { townRow, addEstateRow } from './town-row.mts';
@@ -208,6 +208,8 @@ const wrangler = (args: string[], o: Parameters<Ctx['sh']>[2] = {}) => ctx.sh('n
 // ap-town pins wrangler 3, whose `kv key` has no --remote; npx would pick that local copy. Name v4 for the town's KV.
 const townWrangler = (args: string[], o: Parameters<Ctx['sh']>[2] = {}) => ctx.sh('npx', ['-y', 'wrangler@4', ...args], o);
 const putSecret = (app: App, name: string, value: string) => wrangler(['secret', 'put', name, '--env', request.id, '-c', TOML_PATHS[app]], { input: value, secret: true });
+// From the Worker's own folder: a stamped `[env.<id>.build]` command (the runtime's vault preflight) runs relative to it.
+const deployWorker = (app: App) => wrangler(['deploy', '--env', request.id, '-c', 'wrangler.toml'], { cwd: dirname(TOML_PATHS[app]) });
 /** One script on the town's key-custody CVM. */
 const cvm: CvmRun = (script, o) => ctx.sh('az', azArgs(TOWN.kms, script), { secret: o?.secret });
 
@@ -514,10 +516,10 @@ const steps: Record<string, Step> = {
     title: 'Deploy its services',
     run: async () => {
       // Dependencies were installed by the workflow BEFORE any secret was in the environment, never here.
-      wrangler(['deploy', '--env', request.id, '-c', TOML_PATHS.vault]);
+      deployWorker('vault');
       const vaultDb = /database_name\s*=\s*"([^"]+)"/.exec(readFileSync(TOML_PATHS.vault, 'utf8').split(`[env.${request.id}`)[1] ?? '')?.[1];
       if (vaultDb) wrangler(['d1', 'migrations', 'apply', vaultDb, '--remote', '--env', request.id, '-c', TOML_PATHS.vault]);
-      for (const app of ['runtime', 'edge', 'homeMcp'] as App[]) wrangler(['deploy', '--env', request.id, '-c', TOML_PATHS[app]]);
+      for (const app of ['runtime', 'edge', 'homeMcp'] as App[]) deployWorker(app);
     },
   },
   custody: {

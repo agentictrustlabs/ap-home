@@ -211,6 +211,8 @@ export function stampEnvBlock(toml: string, input: StampInput): StampResult {
         return true;
       });
     }
+    // The runtime's pre-deploy check (`deploy.mts --preflight-only --env <env>`) must ask THIS estate's vault.
+    if (suffix === '.build') lines = lines.map((l) => l.replace(new RegExp(`--env ${from}\\b`, 'g'), `--env ${input.id}`));
     if (suffix === '') {
       const jobName = input.app === 'homeMcp' ? input.names.homeMcp : input.names[input.app];
       lines = lines.filter((l) => !/^\s*(name|workers_dev|routes|route)\s*=/.test(l));
