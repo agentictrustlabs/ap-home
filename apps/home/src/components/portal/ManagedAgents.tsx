@@ -19,12 +19,13 @@ import { assignDefaultArchetype } from '../../home/default-archetype';
 import { buyNameForNewAgent, kindNameIsBought } from '../../home/charter-name';
 import { NAMING_COIN, namePrice } from '../../lib/naming-price';
 import { emitControlEvent } from '../../home/control-plane';
-import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, signHashFor, type Via } from '../../home/onboarding';
+import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, governanceGapWords, repairWorkspaceGovernance, signHashFor, type Via } from '../../home/onboarding';
+import { governanceGaps, governorOf, WORKSPACE_GOVERNOR_RECORD, type GovernanceGrant } from '../../lib/workspace-governor';
 import { setOrgLifecycleStatus } from '../../home/org-lifecycle';
 import { orgStatusOf, STATUS_LABEL, type OrgSurface } from '../../lib/org-lifecycle';
 import type { DelegationWire } from '../../lib/delegation';
 import { ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS } from '../../lib/delegation';
-import { vaultWriteWithDelegation } from '../../lib/vault-client';
+import { vaultReadWithDelegation, vaultWriteWithDelegation } from '../../lib/vault-client';
 import { COINS, FUNDING_COIN, shown, type Coin } from '../../lib/coins';
 import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
@@ -807,6 +808,7 @@ export function OrganizationsManager({
                   steward's Enable when a plane is missing (a service chartered before 2026-10-10 was born without them). */}
               <ServicePlanes agent={svc.agent} token={token} via={via} />
               {!svc.name && <NameAgentForm agent={svc.agent} kind={svc.kind} parent={svc.parent} person={person} token={token} via={via} onDone={reload} />}
+              {svc.kind === 'workspace' && <WorkspaceGovernanceRow ws={svc} orgs={orgs} person={person} token={token} via={via} />}
             </div>
           ))}
 
@@ -930,6 +932,62 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * A GOVERNED WORKSPACE'S GRANTS (Rich, 2026-10-28): says which of the two governance grants this workspace lacks — the
+ * workspace → organization content read, the organization → workspace operating grant — and offers Repair, which issues
+ * only the missing ones. Silent when both are there, and for a standalone workspace (no governor recorded).
+ */
+function WorkspaceGovernanceRow({ ws, orgs, person, token, via }: { ws: ManagedAgent; orgs: ManagedAgent[]; person: string; token: string; via: string }) {
+  const [gaps, setGaps] = useState<GovernanceGrant[] | null>(null);
+  const [governor, setGovernor] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const wire = ws.stewardshipDelegation as DelegationWire | undefined;
+  useEffect(() => {
+    if (!wire) return;
+    let live = true;
+    void vaultReadWithDelegation(wire, WORKSPACE_GOVERNOR_RECORD)
+      .then((pointer) => {
+        if (!live) return;
+        const g = governorOf(pointer);
+        setGovernor(g);
+        setGaps(g ? governanceGaps(pointer, ws.agent) : []);
+      })
+      .catch(() => { if (live) setGaps([]); });
+    return () => { live = false; };
+  }, [wire, ws.agent]);
+  if (!gaps || !gaps.length || !governor || !wire) return msg ? <p className="onboarding-note" style={{ margin: '.4rem 0 0' }}>{msg}</p> : null;
+  const org = orgs.find((o) => o.agent.toLowerCase() === governor);
+  const orgWire = org?.stewardshipDelegation as DelegationWire | undefined;
+  async function repair() {
+    if (!orgWire) return;
+    setBusy(true); setMsg('');
+    const r = await repairWorkspaceGovernance({
+      ws: ws.agent as `0x${string}`, wsStewardship: wire!, governor: governor as `0x${string}`, orgStewardship: orgWire,
+      label: ws.name || '', person: person as `0x${string}`, via: via.toLowerCase() as Via, auth: { token }, token,
+    });
+    setBusy(false);
+    if (!r.ok) { setMsg(r.error); return; }
+    setGaps(r.missing);
+    setMsg(r.missing.length ? `Partly repaired — still missing: ${r.missing.map(governanceGapWords).join('; ')}.` : 'Repaired — both governance grants are in place.');
+  }
+  return (
+    <div style={{ marginTop: '.5rem', paddingTop: '.5rem', borderTop: '1px solid var(--c-g100, #eee)', fontSize: '.82rem' }} data-testid={`ws-governance-${ws.agent.toLowerCase()}`}>
+      <p className="onboarding-hint taken" style={{ margin: 0 }}>
+        Governed by {org?.name || governor}, but missing {gaps.map(governanceGapWords).join(' and ')}.
+      </p>
+      {orgWire ? (
+        <BusyButton busy={busy} busyLabel="Repairing…" className="btn-ghost" style={{ fontSize: '.8rem', padding: '.3rem .6rem', marginTop: '.35rem' }} onClick={() => void repair()}>
+          Repair governance
+        </BusyButton>
+      ) : (
+        <p className="onboarding-note" style={{ margin: '.3rem 0 0' }}>A steward of {org?.name || 'the governing organization'} can repair it.</p>
+      )}
+      {msg && <p className="onboarding-note" style={{ margin: '.3rem 0 0' }}>{msg}</p>}
     </div>
   );
 }

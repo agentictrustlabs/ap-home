@@ -20,7 +20,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import { InteractionsDO, type InteractionsDeps } from '../src/interactions-do.js';
 import { REQUIRED_SCOPES as SOURCE_REQUIRED_SCOPES } from '../src/interactions-do.js';
-import { buildVaultRecordScopeCaveat } from '@agenticprimitives/delegation';
+import { buildVaultRecordScopeCaveat, buildCaveat, encodeTimestampTerms, encodeValueTerms } from '@agenticprimitives/delegation';
 
 const ORG = '0x1111111111111111111111111111111111111111';
 const MEMBER = '0x2222222222222222222222222222222222222222';
@@ -56,6 +56,8 @@ interface World {
   records: Map<string, unknown>;
   /** Flip to make every ERC-1271 verification fail — "the proof no longer holds". */
   proofsValid: boolean;
+  /** Flip to make DelegationManager.isRevoked answer true for every wire — "the grant was revoked". */
+  revoked?: boolean;
 }
 
 function depsFor(w: World): InteractionsDeps {
@@ -63,6 +65,7 @@ function depsFor(w: World): InteractionsDeps {
     new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
   return {
     async erc1271() { return w.proofsValid; },
+    async isRevoked() { return w.revoked === true; },
     async vaultTool(_grant, toolName, args) {
       const a = args as { recordType?: string; recordTypes?: string[]; data?: unknown };
       if (toolName === 'set_vault_record') { w.records.set(String(a.recordType), a.data); return ok({ ok: true }); }
@@ -500,6 +503,24 @@ describe('a governed workspace admits members of its governing organization', ()
   let wsWorld: World;
   let wsDo: InteractionsDO;
 
+  const DM = '0x7777777777777777777777777777777777777777';
+  const TS = '0x7777777777777777777777777777777777777701';
+  const VAL = '0x7777777777777777777777777777777777777702';
+  let requireMandate = false;
+  /** The governor → workspace OPERATING grant (spec 344 §2.1), shaped as the Home issues it. */
+  const mandate = (opts: { from?: string; to?: string; validUntil?: number } = {}) => {
+    const ts = buildCaveat(TS as `0x${string}`, encodeTimestampTerms(0, opts.validUntil ?? Math.floor(Date.now() / 1000) + 3600));
+    const val = buildCaveat(VAL as `0x${string}`, encodeValueTerms(0n));
+    const scope = buildVaultRecordScopeCaveat([
+      { server: 'demo-mcp', resources: [`vault:workspace:${WS}`], ops: ['read', 'write'] },
+      { server: 'demo-mcp', resources: ['vault:org.membership:member:*'], ops: ['read'] },
+    ] as Parameters<typeof buildVaultRecordScopeCaveat>[0]);
+    return {
+      delegator: opts.from ?? ORG, delegate: opts.to ?? WS, authority: `0x${'f'.repeat(64)}`,
+      caveats: [ts, val, scope].map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: '0x' })),
+      salt: '7', signature: `0x${'ef'.repeat(65)}`,
+    };
+  };
   const mkDo = (world: World, interactions: unknown) => {
     const m = new Map<string, unknown>();
     m.set('state', { grant: grantWire });
@@ -511,12 +532,15 @@ describe('a governed workspace admits members of its governing organization', ()
       } } as unknown as DurableObjectState,
       { RPC_URL: 'https://rpc.example.test', CHAIN_ID: String(CHAIN), MCP_URL: 'https://mcp.example.test',
         BROKER_ISS, BROKER_JWKS_URL: JWKS_URL, DEMO_SSO_AUD: AUD, A2A_INTERNAL_MARKER: MARKER,
+        DELEGATION_MANAGER: DM, TIMESTAMP_ENFORCER: TS, VALUE_ENFORCER: VAL,
+        ...(requireMandate ? { WORKSPACE_GOVERNOR_MANDATE: 'required' } : {}),
         INTERACTIONS: interactions } as unknown as ConstructorParameters<typeof InteractionsDO>[1],
       depsFor(world),
     );
   };
 
   beforeEach(() => {
+    requireMandate = false;
     orgWorld = { records: new Map(), proofsValid: true };
     wsWorld = { records: new Map(), proofsValid: true };
     const orgDo = mkDo(orgWorld, undefined);
@@ -565,6 +589,63 @@ describe('a governed workspace admits members of its governing organization', ()
       proof: { signature: `0x${'cd'.repeat(65)}` },
     } }]);
     expect((await wsCall('channels.list', MEMBER)).status).toBe(403);
+  });
+
+  describe('only while the governor\'s OPERATING grant holds (spec 344 §2.1)', () => {
+    const listNaomi = () => orgWorld.records.set('directory.data', [{ listing: {
+      subject: caip(MEMBER), displayName: 'Naomi', publishedAt: new Date(Date.now() - 60_000).toISOString(),
+      proof: { signature: `0x${'cd'.repeat(65)}` },
+    } }]);
+    const rebuild = () => {
+      const orgDo = mkDo(orgWorld, undefined);
+      const ns = { idFromName: (n: string) => n, get: (id: string) => ({ fetch: (r: Request) => (id === ORG.toLowerCase() ? orgDo.fetch(r) : Promise.resolve(new Response('{}', { status: 404 }))) }) };
+      wsDo = mkDo(wsWorld, ns);
+    };
+
+    it('ADMITS a governor\'s member when the pointer carries a live grant from that governor', async () => {
+      listNaomi();
+      wsWorld.records.set('workspace.governor', { governedBy: ORG, governorMandate: mandate() });
+      const r = await wsCall('channels.list', MEMBER);
+      expect(r.status).toBe(200);
+      expect((await r.json() as { you: string }).you).toBe('Naomi');
+    });
+
+    it('REFUSES once the governor revokes the grant — the workspace is inert as a governed one', async () => {
+      listNaomi();
+      wsWorld.records.set('workspace.governor', { governedBy: ORG, governorMandate: mandate() });
+      wsWorld.revoked = true;
+      expect((await wsCall('channels.list', MEMBER)).status).toBe(403);
+    });
+
+    it('REFUSES an expired grant', async () => {
+      listNaomi();
+      wsWorld.records.set('workspace.governor', { governedBy: ORG, governorMandate: mandate({ validUntil: Math.floor(Date.now() / 1000) - 60 }) });
+      expect((await wsCall('channels.list', MEMBER)).status).toBe(403);
+    });
+
+    it('REFUSES a grant from anyone but the governor the pointer names, or to anyone but this workspace', async () => {
+      listNaomi();
+      wsWorld.records.set('workspace.governor', { governedBy: ORG, governorMandate: mandate({ from: OUTSIDER }) });
+      expect((await wsCall('channels.list', MEMBER)).status).toBe(403);
+      wsWorld.records.set('workspace.governor', { governedBy: ORG, governorMandate: mandate({ to: OUTSIDER }) });
+      rebuild(); // a fresh object: the governor answer is remembered for a minute
+      expect((await wsCall('channels.list', MEMBER)).status).toBe(403);
+    });
+
+    it('REFUSES a grant whose signature does not verify', async () => {
+      listNaomi();
+      wsWorld.records.set('workspace.governor', { governedBy: ORG, governorMandate: mandate() });
+      wsWorld.proofsValid = false;
+      expect((await wsCall('channels.list', MEMBER)).status).toBe(403);
+    });
+
+    it('a pointer from before the grant existed is honoured — unless the deployment requires the grant', async () => {
+      listNaomi();
+      expect((await wsCall('channels.list', MEMBER)).status).toBe(200);
+      requireMandate = true;
+      rebuild();
+      expect((await wsCall('channels.list', MEMBER)).status).toBe(403);
+    });
   });
 
   it('the governor refuses internal.member.recorded without the in-Worker marker', async () => {

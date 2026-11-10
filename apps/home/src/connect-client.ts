@@ -1561,6 +1561,8 @@ export interface CreateManagedAgentResult {
   /** The child→parent oversight grant (spec 246) — returned so create-time seeding (org:profile,
    *  spec 321 item-1) can write the child's vault without re-fetching the link. */
   stewardshipDelegation?: DelegationWire;
+  /** A governed workspace created without one of its governance grants (`workspace-governor.ts` GovernanceGrant). */
+  governanceMissing?: string[];
 }
 
 /** Public demo roster names the custodian EOA. Used only after isDemoCustodyHome. */
