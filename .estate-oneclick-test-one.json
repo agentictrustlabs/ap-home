@@ -9,7 +9,8 @@
     "chain-access",
     "agents",
     "secrets",
-    "deploy"
+    "deploy",
+    "custody"
   ],
   "notes": [
     "runtime: REVIEW: still mentions faithnet → command = \"npx tsx scripts/deploy.mts --preflight-only --env faithnet\""
