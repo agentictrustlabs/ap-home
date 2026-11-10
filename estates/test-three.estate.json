@@ -19,7 +19,10 @@
   "_hosts": "Where each Worker answers when there is no zone to put mcp./edge. under. deriveVars reads these (estate-shape.patch).",
   "altZones": [],
   "extraOrigins": [],
-  "agents": {},
+  "agents": {
+    "harness": "0x775718bA7e534ed831BdAF0dd4B1d109e8a946d6",
+    "interactions": "0x43f6D63b9cA84994A9F260aC00ee7e5FFCF8A7CB"
+  },
   "_extras": "This estate's own product choices. ORCHESTRATION_LLM is impact-agent's: the model the harness plans with, paid through the GEMINI_API_KEY the build installs.",
   "extras": {
     "ORCHESTRATION_LLM": "gemini"
