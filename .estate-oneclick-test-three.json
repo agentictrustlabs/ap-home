@@ -13,7 +13,9 @@
     "home"
   ],
   "notes": [],
-  "operatorNotes": [],
+  "operatorNotes": [
+    "Register test-three.estate: in agenticprimitives/packages/contracts, as the naming root's owner — ESTATE_LABEL=test-three ESTATE_AGENT=0xd09565a180cf9f079ffb22b2f27dc2e26bcfbc78 forge script script/AddEstateName.s.sol:AddEstateName --rpc-url <faithchain rpc> --broadcast. Until then the estate works; its agent simply has no .estate name."
+  ],
   "vercelProjectId": "prj_CzzWhlH5b45zYKYYSVM53hac2KbB",
   "homeHost": "test-three-home.vercel.app",
   "gatewayTokenHash": "b9cb1e9829aea96ee1055c72ecc93ea8f2bedfd6462881d0d1eb0c07f6c26b8b",
