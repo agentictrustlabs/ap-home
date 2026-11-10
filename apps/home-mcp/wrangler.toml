@@ -135,3 +135,26 @@ CLIENT_ID_ACT = "home-mcp-act"
 ACT_CLIENT_IDS = ""
 ACT_REDIRECT_URIS = "https://agent.meta.ai/api/hatch/oauth/callback"
 DEMO_CONNECT_ENABLED = "true"
+
+# ── test-two (spec 441) — stamped by scripts/estate-oneclick from [env.faithnet]. Worker names, storage ids and
+# hosts are this estate's own; the town baseline is the sibling's. Do not hand-edit the derived vars.
+[env.test-two]
+name = "test-two-home-mcp"
+workers_dev = true
+account_id = "5da2feaa56593839672948e16c6e809d"
+
+[[env.test-two.durable_objects.bindings]]
+name = "STORE"
+class_name = "HomeMcpStoreDO"
+
+[env.test-two.vars]
+HOME_ORIGIN = "https://test-two-home.vercel.app"
+BROKER_JWKS_URL = "https://test-two-home.vercel.app/jwks"
+A2A_ORIGIN = "https://test-two-runtime.richardpedersen3.workers.dev"
+CHAIN_ID = "34348"
+DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
+CLIENT_ID = "home-mcp"
+CLIENT_ID_ACT = "home-mcp-act"
+ACT_CLIENT_IDS = ""
+ACT_REDIRECT_URIS = "https://agent.meta.ai/api/hatch/oauth/callback"
+DEMO_CONNECT_ENABLED = "true"
