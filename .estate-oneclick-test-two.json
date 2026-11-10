@@ -6,7 +6,8 @@
     "cloud-resources",
     "key-vault",
     "chain-access",
-    "agents"
+    "agents",
+    "secrets"
   ],
   "notes": [],
   "operatorNotes": [],
