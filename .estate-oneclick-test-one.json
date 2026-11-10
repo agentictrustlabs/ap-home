@@ -4,12 +4,14 @@
     "declare",
     "workers-config",
     "cloud-resources",
-    "key-vault"
+    "key-vault",
+    "chain-access"
   ],
   "notes": [
     "runtime: REVIEW: still mentions faithnet → command = \"npx tsx scripts/deploy.mts --preflight-only --env faithnet\""
   ],
   "operatorNotes": [],
   "vercelProjectId": "prj_VsmnUXqMwktE12ATFLqeurmoB1mf",
-  "homeHost": "test-one-home.vercel.app"
+  "homeHost": "test-one-home.vercel.app",
+  "gatewayTokenHash": "b7f4ddd67816952d8c3ccb19841a82876f1f2593905ba510931a76a74e84b3ff"
 }
