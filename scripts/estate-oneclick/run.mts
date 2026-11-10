@@ -269,8 +269,9 @@ async function homeStore(): Promise<void> {
   if (!cfg) throw new Error('This Vercel account has no Upstash integration. In Vercel: Storage → Create Database → Upstash for Redis, once; then re-run.');
   if (!state.kvStoreId) {
     // Hosted: Pay As You Go, like the town's other Homes. An owner's own account: Vercel picks a free plan unless KV_PLAN names one.
+    // Upstash requires a region (Vercel: 'metadata should have required property primaryRegion'). iad1 = Vercel's default function region, next to the Home.
     const plan = process.env.KV_PLAN || (OWN ? '' : 'paid');
-    const r = await vercel('/v1/storage/stores/integration/direct', { method: 'POST', body: JSON.stringify({ name: `${request.id}-home-kv`, integrationConfigurationId: cfg, integrationProductIdOrSlug: 'upstash-kv', source: 'cli', ...(plan ? { billingPlanId: plan } : {}) }) });
+    const r = await vercel('/v1/storage/stores/integration/direct', { method: 'POST', body: JSON.stringify({ name: `${request.id}-home-kv`, integrationConfigurationId: cfg, integrationProductIdOrSlug: 'upstash-kv', metadata: { primaryRegion: process.env.KV_REGION || 'iad1' }, source: 'cli', ...(plan ? { billingPlanId: plan } : {}) }) });
     const j = await r.json();
     if (r.status >= 300 || !j.store?.id) throw new Error(`Vercel did not create the Home's store (${r.status}${j.error?.message ? `: ${j.error.message}` : ''})`);
     state.kvStoreId = j.store.id as string;
