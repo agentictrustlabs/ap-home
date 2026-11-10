@@ -5,6 +5,7 @@
     "workers-config",
     "cloud-resources",
     "key-vault",
+    "chain-access",
     "chain-access"
   ],
   "notes": [
@@ -13,5 +14,5 @@
   "operatorNotes": [],
   "vercelProjectId": "prj_VsmnUXqMwktE12ATFLqeurmoB1mf",
   "homeHost": "test-one-home.vercel.app",
-  "gatewayTokenHash": "b7f4ddd67816952d8c3ccb19841a82876f1f2593905ba510931a76a74e84b3ff"
+  "gatewayTokenHash": "1e7f25c07dc531925d75d1793f19bfbc6b0669bb479c204989dcdfb95169b77d"
 }
