@@ -1,9 +1,12 @@
 {
   "done": [
     "home-address",
-    "declare"
+    "declare",
+    "workers-config"
   ],
-  "notes": [],
+  "notes": [
+    "runtime: REVIEW: still mentions faithnet → command = \"npx tsx scripts/deploy.mts --preflight-only --env faithnet\""
+  ],
   "operatorNotes": [],
   "vercelProjectId": "prj_VsmnUXqMwktE12ATFLqeurmoB1mf",
   "homeHost": "test-one-home.vercel.app"
