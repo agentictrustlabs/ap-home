@@ -10,7 +10,8 @@
     "agents",
     "secrets",
     "deploy",
-    "custody"
+    "custody",
+    "home"
   ],
   "notes": [
     "runtime: REVIEW: still mentions faithnet → command = \"npx tsx scripts/deploy.mts --preflight-only --env faithnet\""
@@ -18,5 +19,7 @@
   "operatorNotes": [],
   "vercelProjectId": "prj_VsmnUXqMwktE12ATFLqeurmoB1mf",
   "homeHost": "test-one-home.vercel.app",
-  "gatewayTokenHash": "1e7f25c07dc531925d75d1793f19bfbc6b0669bb479c204989dcdfb95169b77d"
+  "gatewayTokenHash": "1e7f25c07dc531925d75d1793f19bfbc6b0669bb479c204989dcdfb95169b77d",
+  "kvStoreId": "store_FXnBhbt2StyyAxZd",
+  "kvConnected": true
 }
