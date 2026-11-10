@@ -92,6 +92,7 @@ jobs:
       # service principal is THAT operator's identity, scoped to run-command on the CVM and nothing else. Only the town's
       # parts ever sign in: an owner's GitHub has no Azure credential and needs none.
       - name: Sign in to Azure as the KMS operator
+        id: azlogin
         if: inputs.part == 'all' || inputs.part == 'town'
         uses: azure/login@v2
         with: { creds: '${{ secrets.AZURE_CREDENTIALS }}' }
@@ -122,6 +123,21 @@ jobs:
           # The owner's only: the build key file the createestate page gave them.
           ESTATE_BUILD_KEY: ${{ secrets.ESTATE_BUILD_KEY }}
         run: npx tsx scripts/estate-oneclick/run.mts --estate "$ESTATE_ID" --part "$PART" ${REQUEST_ID:+--request-id "$REQUEST_ID"}
+
+      - name: Never leave the key custody open
+        # The builder opens a temporary NAT gateway for the key-vault ceremony and always removes it; this catches a
+        # cancelled run. A no-op when nothing is there.
+        if: always() && steps.azlogin.outcome == 'success'
+        env: { TOWN: "${{ vars.TOWN || 'faithchain' }}" }
+        run: |
+          P="scripts/estate-oneclick/towns/${TOWN}.json"
+          RG=$(jq -r .kms.resourceGroup "$P"); VNET=$(jq -r '.kms.egress.vnet // empty' "$P"); SUBNET=$(jq -r '.kms.egress.subnet // empty' "$P")
+          [ -n "$VNET" ] || exit 0
+          if az network nat gateway show -g "$RG" -n nat-akcs-skr-build -o none 2>/dev/null; then
+            az network vnet subnet update -g "$RG" --vnet-name "$VNET" -n "$SUBNET" --remove natGateway -o none
+            az network nat gateway delete -g "$RG" -n nat-akcs-skr-build
+          fi
+          az network public-ip show -g "$RG" -n pip-akcs-skr-build -o none 2>/dev/null && az network public-ip delete -g "$RG" -n pip-akcs-skr-build || true
 
       - name: Never keep the custody file on the runner
         if: always()

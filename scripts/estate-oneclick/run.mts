@@ -42,7 +42,7 @@ import { sealState, openState, fetchCheckpoint, fetchApproved, signedGet, signed
 import { ID_RE, RESERVED_IDS } from './declaration.mts';
 import { deriveVars, readDeclarations, wranglerVars } from '../estate-shape.mts';
 import { loadTown } from './town.mts';
-import { azArgs, ensureKeyVault, mintToken, type CvmRun } from './kms.mts';
+import { azArgs, ensureKeyVault, mintToken, withEgress, type AzRun, type CvmRun } from './kms.mts';
 import { ecSigner, parseBuildKey, type Signer } from './signer.mts';
 import { stepsFor, type Hosting, type Part } from './plan.mts';
 
@@ -174,6 +174,7 @@ function makeCtx(): Ctx {
           return cvmOut(`relay ${fakeUuid('relay')}\ninteractions-session ${fakeUuid('interactions')}`);
         }
         if (script.includes('mint-token')) return cvmOut('eyJhbGciOiJkcnkifQ.e30.dry');
+        if (script.includes('EGRESS')) return cvmOut('EGRESS 404');
         return cvmOut('');
       }
       if (cmd === 'npx' && joined.includes('d1 create')) return `{"uuid": "${fakeUuid(joined)}"}\n database_id = "${fakeUuid(joined)}"`;
@@ -221,6 +222,7 @@ const putSecret = (app: App, name: string, value: string) => wrangler(['secret',
 const deployWorker = (app: App) => wrangler(['deploy', '--env', request.id, '-c', 'wrangler.toml'], { cwd: dirname(TOML_PATHS[app]) });
 /** One script on the town's key-custody CVM. */
 const cvm: CvmRun = (script, o) => ctx.sh('az', azArgs(TOWN.kms, script), { secret: o?.secret });
+const az: AzRun = (args) => ctx.sh('az', args);
 
 /** Set (or replace) one var in this estate's [env.<id>.vars] of a wrangler.toml. */
 function setVar(app: App, key: string, value: string) {
@@ -340,7 +342,7 @@ const steps: Record<string, Step> = {
     title: 'Open its key vault and its chain access (the town)',
     run: async () => {
       if (request.townPackage) return 'done'; // delivered already; the owner's build has it
-      const ids = ensureKeyVault(cvm, TOWN.kms, request.id);
+      const ids = withEgress(az, cvm, TOWN.kms, request.id, () => ensureKeyVault(cvm, TOWN.kms, request.id));
       const vaultToken = mintToken(cvm, TOWN.kms, request.id, `${request.id}-vault`);
       const runtimeToken = mintToken(cvm, TOWN.kms, request.id, `${request.id}-runtime`);
       const chain = mintChainToken();
@@ -438,7 +440,7 @@ const steps: Record<string, Step> = {
         ids = { relay: p.relayKeyId, interactions: p.interactionsKeyId };
         tokens = { vault: p.vaultToken, runtime: p.runtimeToken };
       } else {
-        ids = ensureKeyVault(cvm, TOWN.kms, request.id);
+        ids = withEgress(az, cvm, TOWN.kms, request.id, () => ensureKeyVault(cvm, TOWN.kms, request.id));
         tokens = { vault: mintToken(cvm, TOWN.kms, request.id, `${request.id}-vault`), runtime: mintToken(cvm, TOWN.kms, request.id, `${request.id}-runtime`) };
       }
       setVar('runtime', 'AKCS_RELAY_KEY_ID', ids.relay);
