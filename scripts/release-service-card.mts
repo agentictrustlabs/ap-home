@@ -173,6 +173,17 @@ for (let pass = 0; pass < 3 && v.errors > 0; pass++) {
     const card = got.draft?.card ?? {};
     const paths = [...new Set(ds.filter((d) => d.code === 'CATALOG_DIVERGENCE').map((d) => `/${String(d.sourcePointer ?? '').split('/').filter(Boolean)[0] ?? ''}`))].filter((x) => x !== '/');
     await patch(paths.map((path) => ({ op: 'replace', path, value: card[path.slice(1)] })), `overrode ${paths.join(' ')} — a self-hosted service's own surface, asserted by ${by}`);
+  } else if (has('VAULT_REFERENCE_DETECTED')) {
+    // The runtime's served skill text names a record-scope SHAPE (`vault:content.artifact.<id>`) as documentation,
+    // and the public-card validator rightly refuses anything that reads like a vault pointer. The steward restates
+    // the field without the scheme literal — an override recorded as theirs, never a validator talked out of it.
+    // (Root cause: apps/agent-runtime/src/host-context.ts `library.granted.read` description; spec 445 gen-4 rebuild.)
+    const got = await studio<{ draft?: { card?: Record<string, unknown> } }>('card.get', { cardResourceId: cardId });
+    const at = (ptr: string): unknown => ptr.split('/').filter(Boolean).reduce<unknown>((o, k) => (o as Record<string, unknown> | undefined)?.[k], got.draft?.card);
+    const ops = ds.filter((d) => d.code === 'VAULT_REFERENCE_DETECTED').map((d) => String(d.sourcePointer)).filter((p) => typeof at(p) === 'string')
+      .map((path) => ({ op: 'replace', path, value: String(at(path)).replace(/`?vault:[^\s`)]*`?/g, 'the record named in the grant') }));
+    if (!ops.length) break;
+    await patch(ops, `restated ${ops.map((o) => o.path).join(' ')} without a vault-scheme literal — asserted by ${by}`);
   } else if (has('CAPABILITY_UNVERIFIED')) {
     // A capability claimed without runtime evidence. The honest move is to stop claiming it, not to assert it
     // harder: `pushNotifications` and `streaming` are DERIVED, and a card that claims them without a wired sender
