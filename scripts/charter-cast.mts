@@ -20,26 +20,40 @@
  */
 import { hashDelegation, buildCaveat, buildDigestBindingCaveat, capabilityHandler, encodeTimestampTerms, encodeValueTerms, encodeAllowedTargetsTerms, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
+import { spawnSync } from 'node:child_process';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
+import { privateKeyToAccount } from 'viem/accounts';
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
 import type { Address, Hex } from 'viem';
 
-const HOME = 'https://www.faithnet.me';
-const CHAIN = 34348;
-const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
-// The three GOVERNANCE contracts a stewardship wire pins, and nothing else. `hasStewardshipShape` in the
-// InteractionsDO identifies a steward POSITIVELY by exactly this set — a payment mandate targets an asset and
-// an A2A grant targets an agent, so neither can be replayed as custody.
-const GOVERNANCE = { agentRelationship: '0x5015bD7d422e003511246f848cDd798cb00BB968', agentNameRegistry: '0x60E949D52660A9D4143ecB0fdA56c0457f20aED9', permissionlessSubregistry: '0x9E803ac48b0F32BCE10BFC183b30f6d756DB11CC' } as const;
-const ENFORCERS = { delegationManager: DM, timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41', value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', payment: '0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1' } as const;
+// Addresses come from the pinned deployment record (DEPLOYMENT, default faithchain) — never a hard-coded generation. The
+// gen-1 literals that stood here chartered against a record the estate had left (spec 445 gen-4 rebuild, 2026-11-11).
+const HOME = (process.env.HOME_URL ?? 'https://www.faithnet.me').replace(/\/$/, '');
+const A2A_URL = (process.env.A2A_URL ?? 'https://a2a.faithnet.io').replace(/\/$/, '');
+// A2A_DIRECT=1 talks to the runtime at A2A_URL instead of through the Home's /a2a rewrite (Vercel answers 502 while a receipt is awaited).
+const A2A_BASE = process.env.A2A_DIRECT ? A2A_URL : `${HOME}/a2a`;
+const D = getDeployments((process.env.DEPLOYMENT ?? 'faithchain') as never) as unknown as Record<string, string | undefined> & { chainId: number };
+const CHAIN = Number(D.chainId);
+const DM = D.delegationManager as Address;
+// The GOVERNANCE contracts a stewardship wire pins, and nothing else. `hasStewardshipShape` in the InteractionsDO identifies a
+// steward POSITIVELY by exactly this set. A generation-4 chain has NO legacy `permissionlessSubregistry`: absent means absent.
+const GOVERNANCE = { agentRelationship: D.agentRelationship, agentNameRegistry: D.agentNameRegistry, permissionlessSubregistry: D.permissionlessSubregistry && !/^0x0{40}$/i.test(D.permissionlessSubregistry) ? D.permissionlessSubregistry : undefined } as const;
+const ENFORCERS = { delegationManager: DM, timestamp: D.timestampEnforcer as Address, allowedTargets: D.allowedTargetsEnforcer as Address, allowedMethods: D.allowedMethodsEnforcer as Address, value: D.valueEnforcer as Address, payment: D.paymentEnforcer as Address, digestBinding: D.digestBindingEnforcer as Address } as const;
+for (const [k, v] of Object.entries({ ...ENFORCERS, agentRelationship: GOVERNANCE.agentRelationship, agentNameRegistry: GOVERNANCE.agentNameRegistry })) if (!/^0x[0-9a-fA-F]{40}$/.test(String(v))) throw new Error(`the deployment record has no ${k}`);
 
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
 const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1); };
-const naming = new AgentNamingClient({ rpcUrl: 'https://a2a.faithnet.io/rpc', chainId: CHAIN, registry: '0x60E949D52660A9D4143ecB0fdA56c0457f20aED9', universalResolver: '0xF343054e046A4145ccae499ECB28197394eE0798' });
+const naming = new AgentNamingClient({ rpcUrl: `${A2A_URL}/rpc`, chainId: CHAIN, registry: D.agentNameRegistry as Address, universalResolver: D.agentNameUniversalResolver as Address });
 
 // The credential that will custody what each person charters — that demo persona's own EOA, the one the Home
 // holds for them. Only the ADDRESS is read here; the key stays in the Home, which signs via /connect/persona-sign.
 const personaKeys = (() => {
+  // ROSTER=<personas json> (name, sa, eoaPrivateKey, eoaAddress) — the estate's roster; DEMO_PERSONA_KEYS in an env file is the older road.
+  if (process.env.ROSTER) {
+    const r = JSON.parse(readFileSync(process.env.ROSTER, 'utf8')) as Record<string, { eoaAddress?: string; eoaPrivateKey?: Hex }>;
+    return Object.fromEntries(Object.entries(r).map(([h, p]) => [h, { eoaAddress: p.eoaAddress ?? (p.eoaPrivateKey ? privateKeyToAccount(p.eoaPrivateKey).address : undefined) }])) as Record<string, { eoaAddress?: string }>;
+  }
   for (const p of [resolvePath('apps/home/.env.local'), process.env.PERSONA_ENV ?? '', resolvePath(process.env.HOME ?? '', 'agenticprimitives/apps/home/.env.local')]) {
     try { if (!p) continue; const env = readFileSync(p, 'utf8'); const m = /^DEMO_PERSONA_KEYS=(.*)$/m.exec(env); if (m) return JSON.parse(m[1]!.trim().replace(/^['"]|['"]$/g, '')) as Record<string, { eoaAddress?: string }>; } catch { /* next */ }
   }
@@ -55,7 +69,7 @@ async function signIn(handle: string): Promise<Who> {
   if (!/^0x[0-9a-f]{40}$/.test(eoa)) fail(`${handle}'s custodian EOA is not in DEMO_PERSONA_KEYS (apps/home/.env.local, or PERSONA_ENV=<path>)`);
   const me = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle, client_id: 'demo-web' }) }));
   if (!me.agent || !me.homeSession) fail(`demo-signin ${handle}: ${JSON.stringify(me).slice(0, 200)}`);
-  const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
+  const csrfRes = await fetch(`${A2A_BASE}/auth/csrf`, { headers: { origin: HOME } });
   const csrf = (await j(csrfRes)) as { token?: string };
   return {
     handle, eoa, sa: String(me.agent).toLowerCase() as Address, session: me.homeSession,
@@ -63,15 +77,15 @@ async function signIn(handle: string): Promise<Who> {
   };
 }
 
-type Reply = { kind?: string; error?: string; runRef?: string; resumeToken?: string; requirement?: MandateRequirementV1; delegator?: Address; delegate?: Address; alsoApprove?: Array<{ digest: Hex }>; prompt?: { kind?: string; digest?: Hex; prompt?: string; stepRef?: string; signer?: string; payload?: unknown; fields?: unknown } };
+type Reply = { kind?: string; result?: { agent?: string }; error?: string; runRef?: string; resumeToken?: string; requirement?: MandateRequirementV1; delegator?: Address; delegate?: Address; alsoApprove?: Array<{ digest: Hex }>; prompt?: { kind?: string; digest?: Hex; prompt?: string; stepRef?: string; signer?: string; payload?: unknown; fields?: unknown } };
 
 /**
  * ONE ACT THROUGH THAT PERSON'S OWN ASK: the plan supplied, the mandate they sign, the prompts they answer.
  * The plan is supplied rather than described so no model is asked to guess which tool a script meant — the
  * same reason the Home admits a screen's plan verbatim.
  */
-async function actAs(who: Who, message: string, toolId: string, args: Record<string, unknown>): Promise<void> {
-  const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a${path}`, { method: 'POST', headers: who.headers, body: JSON.stringify(body) }));
+async function actAs(who: Who, message: string, toolId: string, args: Record<string, unknown>): Promise<{ agent?: string } | undefined> {
+  const post = async (path: string, body: unknown) => j(await fetch(`${A2A_BASE}${path}`, { method: 'POST', headers: who.headers, body: JSON.stringify(body) }));
   const sign = async (digest: Hex): Promise<Hex> => {
     const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${who.session}` }, body: JSON.stringify({ digest }) }));
     if (!b.signature) throw new Error(`persona-sign: ${JSON.stringify(b).slice(0, 160)}`);
@@ -127,6 +141,7 @@ async function actAs(who: Who, message: string, toolId: string, args: Record<str
     break;
   }
   if (rep?.kind !== 'done' && rep?.kind !== 'answer') fail(`${toolId} did not finish: ${JSON.stringify(r).slice(0, 700)}`);
+  return rep?.result;
 }
 
 /**
@@ -140,7 +155,7 @@ async function actAs(who: Who, message: string, toolId: string, args: Record<str
 async function approvalLanded(tx: Hex): Promise<boolean> {
   const UOE = '0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f';
   for (let i = 0; i < 12; i++) {
-    const res = await fetch('https://a2a.faithnet.io/rpc', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getTransactionReceipt', params: [tx] }) });
+    const res = await fetch(`${A2A_URL}/rpc`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getTransactionReceipt', params: [tx] }) });
     const body = (await res.json().catch(() => ({}))) as { result?: { status?: string; logs?: Array<{ topics: string[]; data: string }> } | null };
     const r = body.result ?? null;
     if (r?.status === '0x1') return (r.logs ?? []).some((l) => l.topics[0] === UOE && /1$/.test(l.data.slice(2, 66).replace(/^0+/, '') || '0'));
@@ -188,7 +203,7 @@ async function mintStewardship(who: Who, sa: Address): Promise<unknown> {
     caveats: [
       buildCaveat(ENFORCERS.timestamp as Address, encodeTimestampTerms(0, validUntil)),
       buildCaveat(ENFORCERS.value as Address, encodeValueTerms(0n)),
-      buildCaveat(ENFORCERS.allowedTargets as Address, encodeAllowedTargetsTerms([GOVERNANCE.agentRelationship as Address, GOVERNANCE.agentNameRegistry as Address, GOVERNANCE.permissionlessSubregistry as Address])),
+      buildCaveat(ENFORCERS.allowedTargets as Address, encodeAllowedTargetsTerms([GOVERNANCE.agentRelationship, GOVERNANCE.agentNameRegistry, GOVERNANCE.permissionlessSubregistry].filter((a): a is string => !!a) as Address[])),
     ] as Caveat[],
     salt,
     signature: '0x',
@@ -260,8 +275,14 @@ const castFile = argv.includes('--cast') ? argv[argv.indexOf('--cast') + 1] : un
 const castSpec = castFile ? (JSON.parse(readFileSync(castFile, 'utf8')) as { cast: Array<{ role: string; character: string; handle: string; label: string }>; note?: string; var?: string }) : null;
 const TABLE: ReadonlyArray<{ role: string; character: string; handle: string; label: string }> = castSpec?.cast ?? CAST;
 const VAR = castSpec?.var ?? 'MYSTERY_CAST';
-const ONLY = argv.find((a) => !a.startsWith('--') && a !== castFile);
-const wanted = ONLY ? TABLE.filter((c) => c.role === ONLY || c.label === ONLY) : TABLE;
+// --adopt <label>=<0x…> names an agent a previous run chartered but could not name (the charter is two acts on a priced root).
+// --relabel <label>=<label> swaps a label the gate's DOMAIN RULE refuses (`<label>.com` exists) for one it admits; the part's role is unchanged.
+const RELABEL = new Map(argv.flatMap((a, i) => (argv[i - 1] === '--relabel' ? [a.split('=') as [string, string]] : [])));
+const ADOPT = new Map(argv.flatMap((a, i) => (argv[i - 1] === '--adopt' ? [a.split('=') as [string, string]] : [])));
+const ONLY = argv.find((a, i) => !a.startsWith('--') && a !== castFile && argv[i - 1] !== '--adopt' && argv[i - 1] !== '--handle' && argv[i - 1] !== '--relabel');
+// --handle <persona> keeps only that custodian's parts, so one worker per custodian can run beside the others (each pays from its own treasury).
+const HANDLE = argv.includes('--handle') ? argv[argv.indexOf('--handle') + 1] : undefined;
+const wanted = (ONLY ? TABLE.filter((c) => c.role === ONLY || c.label === ONLY) : TABLE).filter((c) => !HANDLE || c.handle === HANDLE);
 if (wanted.length === 0) fail(`no part called "${ONLY}" — one of ${TABLE.map((c) => c.role).join(', ')}`);
 
 const NOTE_PATH = process.env.NOTE ?? castSpec?.note ?? 'demo/cast.faithnet.json';
@@ -275,7 +296,8 @@ const sessions = new Map<string, Who>();
 const parts: Array<Record<string, unknown>> = [];
 
 for (const part of wanted) {
-  const name = `${part.label}.me`;
+  const label = RELABEL.get(part.label) ?? part.label;
+  const name = `${label}.me`;
   let sa = (await naming.resolveName(name).catch(() => null))?.toLowerCase() as Address | null;
   // Signed in either way: an agent that already exists on chain may still be missing from its custodian's
   // tree (chartering mints it; only the Home write puts it under People), and that is exactly the gap this
@@ -285,22 +307,27 @@ for (const part of wanted) {
   if (sa) {
     console.log(`${name} already resolves → ${sa}  (${part.character})`);
   } else {
-    console.log(`\n── ${part.character} · ${part.role}: ${part.handle} charters ${name} ──`);
-    try {
-      await actAs(who, `add another person of my own called ${part.label}`, 'person.create', { parent: who.sa, label: part.label });
-    } catch (e) {
-      if (!(e instanceof MisreportedApproval)) throw e;
-      console.log(`  ${e.message.slice(0, 120)}…`);
-      console.log(`  the Home says the approval reverted — checking whether ${name} landed anyway`);
-      sa = await landedAnyway(name);
-      if (!sa) fail(`${name} did not land: ${e.message}`);
-      console.log(`  it did: ${name} → ${sa}`);
+    // GENERATION 4: a `.me` is on a PRICED root, so `person.create` DEPLOYS the agent and names nothing (the register call
+    // reverts). The charter is two acts: the deploy, then `buy-name.mts` — paid from the custodian's own treasury.
+    let agent = (ADOPT.get(part.label) ?? '').toLowerCase() as Address | '';
+    if (!agent) {
+      console.log(`\n── ${part.character} · ${part.role}: ${part.handle} charters ${name} ──`);
+      try {
+        const res = await actAs(who, `add another person of my own called ${label}`, 'person.create', { parent: who.sa, label });
+        agent = String(res?.agent ?? '').toLowerCase() as Address;
+      } catch (e) {
+        if (!(e instanceof MisreportedApproval)) throw e;
+        fail(`${name}: ${e.message.slice(0, 200)} — the agent may have landed unnamed; find it and re-run with --adopt ${part.label}=<0x…>`);
+      }
     }
-    for (let i = 0; i < 10 && !sa; i++) {
-      await new Promise((r) => setTimeout(r, 4000));
-      sa = (await naming.resolveName(name).catch(() => null))?.toLowerCase() as Address | null;
-    }
-    if (!sa) fail(`${name} does not resolve after the charter`);
+    if (!/^0x[0-9a-f]{40}$/.test(agent)) fail(`${name}: person.create finished but named no agent`);
+    sa = agent as Address;
+    console.log(`  ${name} chartered unnamed → ${sa}; buying the name from ${part.handle}'s treasury`);
+    const buy = spawnSync('npx', ['tsx', 'scripts/buy-name.mts', '--persona', part.handle, '--owner', sa, '--label', label, '--tld', 'me'], { encoding: 'utf8', env: { ...process.env, A2A_DIRECT: '' }, timeout: 600_000 });
+    if (buy.status !== 0) fail(`buying ${name} failed:\n${(buy.stdout + buy.stderr).split('\n').filter((l) => !/npm warn/.test(l)).slice(-12).join('\n')}`);
+    for (let i = 0; i < 10; i++) { const r = (await naming.resolveName(name).catch(() => null))?.toLowerCase(); if (r === sa) break; await new Promise((x) => setTimeout(x, 4000)); }
+    const resolved = (await naming.resolveName(name).catch(() => null))?.toLowerCase();
+    if (resolved !== sa) fail(`${name} resolves to ${resolved ?? 'nothing'}, not ${sa}, after the purchase`);
     console.log(`  ${name} → ${sa}`);
   }
   // Minted fresh on every run rather than reused: the wire is a year-long grant and re-issuing one is
@@ -308,13 +335,18 @@ for (const part of wanted) {
   // absence made unanswerable.
   await recordAtHome(who, sa, name, await mintStewardship(who, sa));
   parts.push({ role: part.role, character: part.character, name, sa, custodian: part.handle });
+  writeNote();
 }
 
-// ONE PART AT A TIME MUST NOT FORGET THE OTHERS: a run for a single part merges into the note by role, so the
-// six chartered yesterday are not erased by the seventh chartered today.
-const prior = ((note.cast as Array<Record<string, unknown>> | undefined) ?? []).filter((p) => !parts.some((q) => q.role === p.role));
-const merged = [...prior, ...parts].sort((a, b) => TABLE.findIndex((t) => t.role === a.role) - TABLE.findIndex((t) => t.role === b.role));
-Object.assign(note, { cast: merged, charteredAt: new Date().toISOString() });
-writeFileSync(NOTE_PATH, JSON.stringify(note, null, 2) + '\n');
-console.log(`\n✓ ${parts.length} part(s) written to ${NOTE_PATH} (${merged.length} on record)`);
-console.log(`\n${VAR} = "` + merged.map((p) => `${p.role}=${p.name}@${p.custodian}`).join(',') + '"');
+// ONE PART AT A TIME MUST NOT FORGET THE OTHERS: the note is re-read and merged by role at every write, so parts chartered
+// yesterday (or by a sibling `--handle` worker a moment ago) are not erased, and a crash keeps every part already named.
+function writeNote(): number {
+  const cur: Record<string, unknown> = existsSync(NOTE_PATH) ? JSON.parse(readFileSync(NOTE_PATH, 'utf8')) : { ...note };
+  const prior = ((cur.cast as Array<Record<string, unknown>> | undefined) ?? []).filter((p) => !parts.some((q) => q.role === p.role));
+  const merged = [...prior, ...parts].sort((a, b) => TABLE.findIndex((t) => t.role === a.role) - TABLE.findIndex((t) => t.role === b.role));
+  writeFileSync(NOTE_PATH, JSON.stringify({ ...cur, cast: merged, charteredAt: new Date().toISOString() }, null, 2) + '\n');
+  return merged.length;
+}
+const n = writeNote();
+console.log(`\n\u2713 ${parts.length} part(s) written to ${NOTE_PATH} (${n} on record)`);
+console.log(`\n${VAR} = "` + (JSON.parse(readFileSync(NOTE_PATH, 'utf8')).cast as Array<{ role: string; name: string; custodian: string }>).map((p) => `${p.role}=${p.name}@${p.custodian}`).join(',') + '"');

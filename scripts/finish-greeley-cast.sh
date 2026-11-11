@@ -8,11 +8,13 @@
 # reads it from. Every step is idempotent, so a re-run repairs rather than duplicates.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-NOTE=demo/greeley-cast.faithnet.json
+# GEN=.gen4 points the whole road at the generation-4 notes (demo/<cast>.faithnet.gen4.json); the default is generation 1's.
+GEN=${GEN:-}
+NOTE=demo/greeley-cast.faithnet${GEN}.json
 export NOTE
 
 echo "── vaults, skills, archetypes, wires ──"
-NOTE="$NOTE" ARCH_PREFIX=greeley WIRES=demo/greeley-cast-wires.faithnet.json scripts/finish-commission-cast.sh
+NOTE="$NOTE" ARCH_PREFIX=greeley WIRES=demo/greeley-cast-wires.faithnet${GEN}.json scripts/finish-commission-cast.sh
 
 echo
 echo "── the messaging rail: the ask wire and the standing grant, per part ──"
@@ -23,7 +25,7 @@ echo "── the card room's note: both casts, one key ──"
 node -e "
 const fs=require('fs');
 const parts={};
-for (const f of ['demo/commission-cast-messaging.faithnet.json','demo/cast-messaging.faithnet.json','demo/greeley-cast-messaging.faithnet.json']) {
+for (const f of ['demo/commission-cast-messaging.faithnet${GEN}.json','demo/cast-messaging.faithnet${GEN}.json','demo/greeley-cast-messaging.faithnet${GEN}.json']) {
   if (!fs.existsSync(f)) continue;
   const d=JSON.parse(fs.readFileSync(f,'utf8'));
   Object.assign(parts, d.parts);

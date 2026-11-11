@@ -1,0 +1,56 @@
+{
+  "purpose": "the cast of Snowfall at the Belvedere — each character a PERSON agent of a real demo person, never their default (an operator note, not a persona)",
+  "chainId": 34348,
+  "cast": [
+    {
+      "role": "returnee",
+      "character": "Naw Paw Htoo",
+      "name": "naw-elena.me",
+      "sa": "0x7f106378713aee65589250be0120a6ba4cb3090b",
+      "custodian": "elena"
+    },
+    {
+      "role": "household",
+      "character": "Abdi Mberwa",
+      "name": "abdi-dave.me",
+      "sa": "0x873197b547905a377f790cf7b6c785c14565e10b",
+      "custodian": "dave"
+    },
+    {
+      "role": "agency",
+      "character": "Dale Kirkpatrick",
+      "name": "dale-carol.me",
+      "sa": "0xf45e7b23027b36bc751bc68ba142ddf3e3dfa775",
+      "custodian": "carol"
+    },
+    {
+      "role": "funder",
+      "character": "Marguerite Vance",
+      "name": "marguerite-bob.me",
+      "sa": "0xa0508bf3146c9f109ea65f3972fbde31f4118797",
+      "custodian": "bob"
+    },
+    {
+      "role": "researcher",
+      "character": "Ruth Calloway",
+      "name": "ruth-alice.me",
+      "sa": "0xd58f59fcc892ea357c0f2258cf78d7717048a2b3",
+      "custodian": "alice"
+    },
+    {
+      "role": "convener",
+      "character": "Pastor Tom Reyes",
+      "name": "tom-nathan.me",
+      "sa": "0xd1ee98ebfafae88ee99caac7192bf5f8d808a86a",
+      "custodian": "nathan"
+    },
+    {
+      "role": "welcomer",
+      "character": "Bonnie Ahlgren",
+      "name": "bonnie-david.me",
+      "sa": "0xbf7b4fe20c9083052ce34083d7c72eb32c34f3af",
+      "custodian": "david"
+    }
+  ],
+  "charteredAt": "2026-11-11T11:51:08.186Z"
+}

@@ -7,15 +7,20 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 NOTE=${NOTE:-demo/commission-cast.faithnet.json}
 export NOTE
+# GAME / CONTEXT / ARCH_PREFIX / CAST_VAR make the same road serve every cast: belvedere (mystery, belvedere-snowfall, belvedere),
+# commission, greeley, fieldops (fieldops, field-operations, north). The defaults are the Commission's. ROSTER/DEPLOYMENT/HOME_URL pass through.
+GAME=${GAME:-commission}
+CONTEXT_ID=${CONTEXT_ID:-great-commission}
+CAST_VAR=${CAST_VAR:-COMMISSION_CAST}
 echo "── vaults ──"
 npx tsx scripts/activate-cast-vaults.mts 2>&1 | grep -v "npm warn"
 echo "── skills and archetypes ──"
 node -e "const n=require('./$NOTE'); for (const c of n.cast) console.log(c.role, c.name, c.custodian, c.sa)" | while read -r role name handle sa; do
   echo "· $name ($role) — $handle"
-  npx tsx scripts/add-mystery-skills.mts --game commission --as "$name" --by "$handle" 2>&1 | grep -v "npm warn" | grep -E "atl:capabilities|advertises|✗" | sed 's/^/    /'
-  CONTEXT=great-commission ARCHETYPE="${ARCH_PREFIX:-commission}-$role" npx tsx scripts/assign-org-archetype.mts "$handle" "$sa" 2>&1 | grep -v "npm warn" | grep -E "→|digest" | sed 's/^/    /'
+  npx tsx scripts/add-mystery-skills.mts --game "$GAME" --as "$name" --by "$handle" 2>&1 | grep -v "npm warn" | grep -E "atl:capabilities|advertises|✗" | sed 's/^/    /'
+  CONTEXT="$CONTEXT_ID" ARCHETYPE="${ARCH_PREFIX:-commission}-$role" npx tsx scripts/assign-org-archetype.mts "$handle" "$sa" 2>&1 | grep -v "npm warn" | grep -E "→|digest" | sed 's/^/    /'
 done
 echo "── wires ──"
 OUT=${WIRES:-demo/commission-cast-wires.faithnet.json} npx tsx scripts/mint-cast-wires.mts 2>&1 | grep -v "npm warn" | grep -E "wire signed|✓"
 echo "── config ──"
-node -e "const n=require('./$NOTE'); console.log('COMMISSION_CAST = \"' + n.cast.map(c=>c.role+'='+c.name+'@'+c.custodian).join(',') + '\"')"
+node -e "const n=require('./$NOTE'); console.log('$CAST_VAR = \"' + n.cast.map(c=>c.role+'='+c.name+'@'+c.custodian).join(',') + '\"')"

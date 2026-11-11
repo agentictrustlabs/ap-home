@@ -51,7 +51,7 @@ const SESSION_KEY = (process.env.HOUSE_SESSION_KEY ?? '0x4A99377a047FB39e2AcBBF1
 const argv = process.argv.slice(2);
 const arg = (n: string, d?: string) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1]! : d; };
 const NOTE = arg('note', 'demo/commission-cast.faithnet.json')!;
-const OUT = arg('out', NOTE.replace('.faithnet.json', '-messaging.faithnet.json'))!;
+const OUT = arg('out', NOTE.replace(/(\.faithnet(\.gen4)?)\.json$/, '-messaging$1.json'))!;
 const DAYS = Number(arg('days', '90'));
 const ONLY = arg('only');
 const PEOPLE = ['alice', 'bob', 'carol', 'dave', 'elena', 'nathan', 'david'];

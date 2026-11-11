@@ -37,7 +37,7 @@ const MCP_SERVER_ID = (process.env.VAULT_SERVER_ID ?? '').trim() || 'demo-mcp';
 const argv = process.argv.slice(2);
 const arg = (n: string, d?: string) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1]! : d; };
 const NOTE = arg('note', 'demo/greeley-cast.faithnet.json')!;
-const OUT = arg('out', NOTE.replace('.faithnet.json', '-messaging.faithnet.json'))!;
+const OUT = arg('out', NOTE.replace(/(\.faithnet(\.gen4)?)\.json$/, '-messaging$1.json'))!;
 const CLUB_ARG = arg('club');
 const HOST = arg('host', 'alice')!;
 const DAYS = Number(arg('days', '90'));
