@@ -11,6 +11,9 @@ import { AgentAccountClient, buildExecuteCallData } from '@agenticprimitives/age
 import { buildDeclareAgentTypeCalls } from '@agenticprimitives/agent-naming';
 import { createPublicClient, decodeEventLog, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
+// Addresses default from the pinned deployment record (DEPLOYMENT, default faithchain), never a hard-coded generation (spec 445).
+const DEP = getDeployments((process.env.DEPLOYMENT ?? 'faithchain') as never) as unknown as Record<string, `0x${string}`>;
 
 const arg = (k: string): string | undefined => { const i = process.argv.indexOf(`--${k}`); return i >= 0 ? process.argv[i + 1] : undefined; };
 const by = arg('by'); const agent = (arg('agent') ?? '').toLowerCase() as Address; const type = arg('type') as 'treasury' | 'service' | 'person' | 'org' | undefined; const display = arg('display'); const dry = process.argv.includes('--dry-run');
@@ -21,8 +24,8 @@ const relayFile = (process.env.RELAY_PRIVATE_KEY_FILE ?? '').replace(/^~/, proce
 const relayKey = (process.env.RELAY_PRIVATE_KEY ?? (relayFile ? readFileSync(relayFile, 'utf8').trim() : '')) as Hex;
 if (!/^0x[0-9a-fA-F]{64}$/.test(relayKey)) { console.error('RELAY_PRIVATE_KEY(_FILE) is required'); process.exit(1); }
 const CHAIN_ID = Number(process.env.CHAIN_ID ?? 34348);
-const ENTRY_POINT = '0xf7855250B3363AB7649B10957d8908A9AFcdD4B5' as Address; const FACTORY = '0x464eEe7518c3c97DA570592481329E0627E9a3B8' as Address;
-const PROFILE_RESOLVER = (process.env.PROFILE_RESOLVER ?? '0xB03F7C06ad3274F584AB72794406D639c02A45e1') as Address; const PAYMASTER = (process.env.PAYMASTER ?? '0xbd93fEC6910ffD74F14709188b5a9B6C6965b2a7') as Address;
+const ENTRY_POINT = DEP.entryPoint as Address; const FACTORY = DEP.agentAccountFactory as Address;
+const PROFILE_RESOLVER = (process.env.PROFILE_RESOLVER ?? DEP.agentProfileResolver) as Address; const PAYMASTER = (process.env.PAYMASTER ?? DEP.smartAgentPaymaster) as Address;
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 200) }; } };
 const signin = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: by, client_id: 'demo-jp' }) }));
 const token: string = signin.homeSession; if (!token) { console.error(`no session for ${by} at ${HOME}`); process.exit(1); }
