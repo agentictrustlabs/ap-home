@@ -9674,8 +9674,9 @@ app.post('/custody/oidc/sign-site-delegation', async (c) => {
   if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
   if (
     !c.env.DELEGATION_MANAGER || !c.env.TIMESTAMP_ENFORCER || !c.env.VALUE_ENFORCER ||
-    !c.env.ALLOWED_TARGETS_ENFORCER || !c.env.AGENT_RELATIONSHIP || !c.env.AGENT_NAME_REGISTRY ||
-    !c.env.PERMISSIONLESS_SUBREGISTRY
+    // PERMISSIONLESS_SUBREGISTRY is optional: the wire's targets come from oversightMintTargets, which names it only
+    // where a deployment still configures one (a generation-4 chain has none — `.impact` retired, spec 445).
+    !c.env.ALLOWED_TARGETS_ENFORCER || !c.env.AGENT_RELATIONSHIP || !c.env.AGENT_NAME_REGISTRY
   ) {
     return c.json({ ok: false, error: 'delegation_env_not_configured' }, 503);
   }

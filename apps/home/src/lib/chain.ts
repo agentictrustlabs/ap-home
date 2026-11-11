@@ -176,7 +176,10 @@ export const OVERSIGHT_CONTRACTS: OversightContracts = {
   valueEnforcer: CONTRACTS.valueEnforcer,
   agentRelationship: CONTRACTS.agentRelationship,
   agentNameRegistry: CONTRACTS.agentNameRegistry,
-  permissionlessSubregistry: CONTRACTS.permissionlessSubregistry,
+  // The untyped legacy subregistry is ABSENT on a generation-4 chain (`.impact` retired 2026-11-10; the manifest has no
+  // `permissionlessSubregistry`), and `addr()` reads an absent key as the zero address — which is truthy, so it would be
+  // minted as a third target and expected by the recogniser. Absent means absent.
+  permissionlessSubregistry: /^0x0{40}$/i.test(CONTRACTS.permissionlessSubregistry) ? undefined : CONTRACTS.permissionlessSubregistry,
 };
 
 /** spec 346 — per-suffix PermissionlessSubregistry map (`me org team svc workspace treasury registry`), present only on

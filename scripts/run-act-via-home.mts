@@ -102,4 +102,17 @@ if (!rep || (rep.kind !== 'done' && rep.kind !== 'answer')) fail(`${TOOL} did no
 const finished = rep as Reply;
 console.log(`\n✓ ${TOOL} → ${finished.kind}: ${String(finished.text ?? '').slice(0, 300)}`);
 console.log(JSON.stringify(finished.result ?? {}).slice(0, 1500));
+// An invitation is recorded in the organization's vault by the Home after `done` (apps/home/src/home/ask-record.ts
+// recordInvitation — the private half the invitee's directory reads); a headless run must do the same, or the invitee
+// is told "this organization has not authorized you to join".
+if (TOOL === 'organization.membership.invite') {
+  const inv = (finished.result ?? {}) as { org?: string; invitee?: string; memberAccessDelegation?: unknown; facets?: Record<string, unknown>; relationshipOffer?: unknown };
+  if (!inv.org || !inv.invitee || !inv.memberAccessDelegation) fail(`invite finished without a member-access grant to record: ${JSON.stringify(inv).slice(0, 300)}`);
+  const rec = await fetch(`${HOME}/connect/org-invite/agent`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}` },
+    body: JSON.stringify({ org: inv.org!.toLowerCase(), agent: inv.invitee!.toLowerCase(), memberAccessDelegation: inv.memberAccessDelegation, ...(inv.facets ?? {}), ...(inv.relationshipOffer ? { relationshipOffer: inv.relationshipOffer } : {}) }),
+  });
+  if (!rec.ok) fail(`the invitation was issued but recording it in the organization's vault failed: HTTP ${rec.status} ${(await rec.text()).slice(0, 200)}`);
+  console.log('  invitation recorded in the organization\'s vault');
+}
 if (OUT) { writeFileSync(OUT, JSON.stringify({ tool: TOOL, args: ARGS, result: finished.result ?? null, at: new Date().toISOString() }, null, 2) + '\n', { mode: 0o600 }); console.log(`written ${OUT}`); }
