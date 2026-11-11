@@ -13,7 +13,7 @@
  * Revoke on chain like any delegation of the agent's; re-run after a rotation (spec 410 §1 re-approves standing wires).
  */
 import { readdirSync, readFileSync } from 'node:fs';
-import { buildCaveat, encodeAllowedMethodsTerms, encodeTimestampTerms, hashDelegation, ROOT_AUTHORITY, type Delegation } from '@agenticprimitives/delegation';
+import { buildCaveat, encodeAllowedMethodsTerms, encodeAllowedTargetsTerms, encodeTimestampTerms, hashDelegation, ROOT_AUTHORITY, type Delegation } from '@agenticprimitives/delegation';
 import { skillSelector } from '@agenticprimitives/a2a';
 import { CHAIN_ID, CONTRACTS } from '../apps/home/src/lib/chain';
 import { toWire } from '../apps/home/src/lib/delegation';
@@ -60,6 +60,8 @@ const d: Delegation = {
   caveats: [
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms([skillSelector(HARNESS_READ_SKILL)])),
+    // RUN-9 (spec 445): a session wire names its target — the host's own agent — or every verifier refuses it.
+    buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([who.address as `0x${string}`])),
   ],
   salt, signature: '0x',
 };
