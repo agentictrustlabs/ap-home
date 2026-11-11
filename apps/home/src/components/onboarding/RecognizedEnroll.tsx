@@ -414,9 +414,24 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         before, and `resolveWorkspaceGovernor` says so once in the console.
       */
       if (enroll.template === 'workspace-member-invite') {
-        if (!enroll.grantOrg || !enroll.member) return fail('This invitation names no workspace or member.');
+        if (!enroll.grantOrg || (!enroll.member && !enroll.memberEmail)) return fail('This invitation names no workspace or member.');
         if (!token) return fail('Your Home session is needed to invite into a workspace.');
         const governed = await resolveWorkspaceGovernor(token, enroll.grantOrg, home.address);
+        // BY EMAIL (2026-11-11): someone with no Home yet. The member is the person agent that email's Home WILL be —
+        // predicted by the governor's steward (`/connect/org-invite/predict`, the derivation the email sign-in runs) —
+        // and everything below grants to that address, as for anyone named by address. It activates only if that home
+        // deploys: a person who signs in some other way has a different agent and is invited again by address.
+        if (!enroll.member && enroll.memberEmail && governed) {
+          setGrantProgress({ step: 1, total: 3, label: `Finding the account ${enroll.memberEmail} will have…` });
+          const pr = await fetch('/connect/org-invite/predict', {
+            method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+            body: JSON.stringify({ org: governed.governor, email: enroll.memberEmail }),
+          });
+          const pb = (await pr.json().catch(() => ({}))) as { ok?: boolean; agent?: string; error?: string };
+          if (!pr.ok || !pb.ok || !pb.agent || !/^0x[0-9a-fA-F]{40}$/.test(pb.agent)) return fail(pb.error ?? `the invitee's account could not be worked out (HTTP ${pr.status})`);
+          enroll.member = pb.agent.toLowerCase() as Address;
+        }
+        if (!enroll.member) return fail('This invitation names no member.');
         // A LEGACY WORKSPACE IS REFUSED HERE, NOT AT THE FAR END. The server records membership on organizations
         // only, so an invitation into a workspace with no governor is one nobody can accept; stashing it would
         // fail the invitee later, with no mention of why. The host is told what to set up, in the words every

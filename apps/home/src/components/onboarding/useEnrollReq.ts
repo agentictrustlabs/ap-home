@@ -46,6 +46,9 @@ export interface EnrollReq {
   purpose?: string; // org_create: app-level purpose tag (e.g. jp-adopter-org) — ADR-0025
   grantOrg?: Address; // org_create: a broker org SA to also grant scoped read (spec 246)
   member?: Address; // workspace-member-invite: the person SA being granted into the workspace (P4)
+  /** workspace-member-invite BY EMAIL, for someone with no Home yet: the Home predicts the person agent that email's
+   *  Home will deploy to (`/connect/org-invite/predict`, the derivation the email sign-in performs) and invites THAT. */
+  memberEmail?: string;
   /** workspace-member-invite (spec 427): the ROLE the invitation offers — a snapshot of the organization's own role
    *  definition (ids and words only; anything else on it is refused when it is parsed, and again by the server).
    *  `roleOfferRaw` is the parameter as it arrived, so a ceremony that is resumed carries the same bytes. */
@@ -126,6 +129,7 @@ export function parseEnrollReq(): EnrollReq | null {
       purpose: p.get('org_purpose') ?? undefined,
       grantOrg: (p.get('grant_org') as Address) ?? undefined,
       member: (p.get('member') as Address) ?? undefined,
+      memberEmail: /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p.get('member_email') ?? '') ? (p.get('member_email') as string).trim().toLowerCase() : undefined,
       ...roleOfferFromParam(p.get('role_offer')),
       appLink: sameOriginLink(p.get('app_link'), redirectUri),
       then: thenStep(p.get('then')),

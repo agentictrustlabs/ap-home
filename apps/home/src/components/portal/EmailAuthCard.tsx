@@ -20,7 +20,7 @@
 // broken one in the authenticator (stable userHandle per (rpId, label)). Subdomain-gated because
 // passkeys are RP-scoped (spec 229 P5): a key created here is only findable on THIS host, so the
 // offer shows only where the member will return.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSession } from '../../context/session';
 import { WorkingBar } from '../onboarding/WorkingBar';
 import { secureHomeNoName, activateVault, signHashFor } from '../../home/onboarding';
@@ -46,10 +46,17 @@ function passkeyOfferHost(homeName: string | null | undefined): boolean {
   return !home || home === label;
 }
 
-export function EmailAuthCard({ onLinked }: { /** Called with the verified address/number once it is LINKED to this home (spec 422 §3.3 records it as a channel). */ onLinked?: (value: string) => void }) {
+export function EmailAuthCard({ onLinked, initialEmail, autoStart }: {
+  /** Called with the verified address/number once it is LINKED to this home (spec 422 §3.3 records it as a channel). */
+  onLinked?: (value: string) => void;
+  /** The address an app already knows (an emailed invitation, `login_hint`): filled in for the person. */
+  initialEmail?: string;
+  /** Send the code at once, so the person sees only the code step (the invitation's "confirm your email"). */
+  autoStart?: boolean;
+}) {
   const { session, openSession } = useSession();
   const [step, setStep] = useState<'email' | 'code' | 'existing-home' | 'passkey-offer'>('email');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(initialEmail ?? '');
   const [otp, setOtp] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -80,6 +87,15 @@ export function EmailAuthCard({ onLinked }: { /** Called with the verified addre
         : `We sent a 6-digit code to ${email.trim()}.`);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
+
+  // An invitation's address: send its code once, on arrival.
+  const autoSent = useRef(false);
+  useEffect(() => {
+    if (!autoStart || autoSent.current || !initialEmail || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(initialEmail)) return;
+    autoSent.current = true;
+    void start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, initialEmail]);
 
   /** Open the session + seed the verified email (the shared tail of every issued path). */
   const finishSignIn = async (token: string) => {

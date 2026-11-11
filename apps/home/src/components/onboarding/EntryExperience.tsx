@@ -828,14 +828,18 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
   // self-serve lane below has no app asking on anyone's behalf, so it keeps every method, and
   // `SocialConnect` is shared by both branches which is why this guard is on `enrollApi` rather
   // than on the list alone. An absent list offers everything, as every uncurated client does.
-  const curated = enrollApi ? signInMethods : undefined;
+  // AN EMAILED INVITATION (2026-11-11): the app sends the address it invited as `login_hint`. That person confirms THAT
+  // email and nothing else — the code is sent on arrival, so what they see is one validation step. Their invitation
+  // was granted to the account this email's Home will have, so another way in would not be the invited account.
+  const hintedEmail = (() => { const h = enrollApi?.enroll?.loginHint?.trim().toLowerCase() ?? ''; return emailEnabled && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(h) ? h : ''; })();
+  const curated = enrollApi ? (hintedEmail ? (['email'] as const) : signInMethods) : undefined;
   const offers = (m: 'social' | 'email' | 'phone' | 'passkey' | 'name') => !curated || curated.includes(m);
   // Exactly one method, and it is email: skip the reveal button and show the field itself.
   const soleMethod = curated?.length === 1 && curated[0] === 'email';
   return (
     <Shell compact={enroll || !!appRequest}>
       <BrandShield size={enroll || appRequest ? 40 : 56} />
-      <h1 className="onboarding-h1">{appRequest ? 'Confirm it’s you' : enroll && appName ? `Continue to ${appName}` : whitelabel.copy.arrivalTitle}</h1>
+      <h1 className="onboarding-h1">{appRequest ? 'Confirm it’s you' : hintedEmail ? 'Confirm your email' : enroll && appName ? `Continue to ${appName}` : whitelabel.copy.arrivalTitle}</h1>
       <p className="onboarding-sub">
         {appRequest
           ? appRequest.act === 'profile'
@@ -866,7 +870,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
           )}
           {offers('email') && emailEnabled && (showEmail || soleMethod) && (
             <div style={{ margin: '.4rem 0 .2rem' }}>
-              <EmailAuthCard />
+              <EmailAuthCard {...(hintedEmail ? { initialEmail: hintedEmail, autoStart: true } : {})} />
             </div>
           )}
           {offers('phone') && phoneEnabled && (
