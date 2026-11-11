@@ -111,9 +111,9 @@ custom_domain = true
 
 [env.impact-agent.vars]
 CHAIN_ID = "34348"
-ENTRY_POINT = "0xf7855250B3363AB7649B10957d8908A9AFcdD4B5"
-DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
-UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"
+ENTRY_POINT = "0xaF02Ff118442DfD4e98B9Ffc2392647653B72411"
+DELEGATION_MANAGER = "0x80Cb228891D354F466E12a93A1726BFE740f9904"
+UNIVERSAL_SIGNATURE_VALIDATOR = "0x21ea8C741c7496B70aE64efbd763967cD9912C30"
 SA_BUDGET_LIMIT_UNITS = "10"
 EDGE_ALLOWED_ORIGINS = "https://impact-agent.me,https://www.impact-agent.me,https://*.impact-agent.me,https://imb-home.vercel.app,https://explorer.faithnet.io,https://demo-bible-ontology-faithnet.richardpedersen3.workers.dev,http://localhost:5175,http://localhost:8795"
 
