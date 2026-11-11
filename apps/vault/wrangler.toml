@@ -339,6 +339,7 @@ workers_dev = true
 crons = ["17 4 * * *"]   # daily JTI-ledger prune (src/index.ts pruneExpiredJtis)
 
 [env.isl-1.vars]
+VAULT_KEY_SERVER_DELEGATE = "0xfFEc2E26F6dA9eEfDeB71C6Bb7fF4ea83dD75232"
 AKCS_TENANT_ID = "isl-1"
 AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"
 MCP_AUDIENCE = "urn:mcp:server:person"
