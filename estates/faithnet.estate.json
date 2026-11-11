@@ -53,7 +53,7 @@
     "ORCHESTRATION_GEMINI_STRONG_MODEL": "gemini-3.1-pro-preview",
     "ORCHESTRATION_GROQ_TPM": "8000",
     "ORCHESTRATION_MODEL": "claude-haiku-5-5",
-    "WARM_AGENTS": "0x1dba4a27c53d7babda99513080223fb3bfc4bad1,0x8e32c713f44c7747d97a589522806a8e1dd810fb",
+    "WARM_AGENTS": "0x3cec0ed189bfc688072dacf689f689f350a03ed1,0xdd38a35cad4fb6b48be4759263a325836886486b",
     "ORCHESTRATION_LLM": "gemini,anthropic",
     "ISSUANCE_EVIDENCE_ISSUER": "https://presentation-release.faithnet.internal",
     "ISSUANCE_EVIDENCE_AUDIENCE": "akcs-pilot-evidence",
