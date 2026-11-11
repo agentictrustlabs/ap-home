@@ -328,3 +328,48 @@ class_name = "SmartAgentBudgetDO"
 [[env.test-three.migrations]]
 tag = "v1"
 new_sqlite_classes = ["SmartAgentBudgetDO"]
+
+# ── isl-1 (spec 441) — stamped by scripts/estate-oneclick from [env.faithnet]. Worker names, storage ids and
+# hosts are this estate's own; the town baseline is the sibling's. Do not hand-edit the derived vars.
+[env.isl-1]
+name = "isl-1-vault"
+workers_dev = true
+
+[env.isl-1.triggers]
+crons = ["17 4 * * *"]   # daily JTI-ledger prune (src/index.ts pruneExpiredJtis)
+
+[env.isl-1.vars]
+AKCS_TENANT_ID = "isl-1"
+AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"
+MCP_AUDIENCE = "urn:mcp:server:person"
+ESTATE_ID = "isl-1"
+UNIVERSAL_SIGNATURE_VALIDATOR = "0x0B4B34b21a4E396489344cDFEe1d15F3EDE7AE4E"
+DELEGATION_MANAGER = "0x3BBeCcC7a52E1CE04a3BF7E7404D3BCBF566C490"
+TIMESTAMP_ENFORCER = "0x5A11D8ff4E5Ef341c66C98dFD2441b5858d8e293"
+ALLOWED_TARGETS_ENFORCER = "0x8421F81d4F5f7f64F2e518d8b2a12ef4C1d11088"
+ALLOWED_METHODS_ENFORCER = "0x2d1C7730D29Ba8aEE1D02f59eF0BBE88b439560e"
+VALUE_ENFORCER = "0x147Bfc8736cC01566896442dac46499987C21E0d"
+CHAIN_ID = "34348"
+DEMO_OAUTH_MINT_ENABLED = "false"
+DEMO_VAULT_PROVISION_ENABLED = "true"
+DEMO_VAULT_PROVISION_SKIP_PROOF = "false"
+DEMO_NATIVE_MCP_ENABLED = "true"
+SA_BUDGET_LIMIT_UNITS = "50000"
+STAGE2_VERIFIED_LIMIT = "600"
+DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
+A2A_KMS_BACKEND = "agentic-kms"
+AKCS_BASE_URL = "https://kms.faithnet.io"
+
+[[env.isl-1.d1_databases]]
+binding = "DB"
+database_name = "isl-1-db"
+database_id = "__D1_DB__"
+migrations_dir = "migrations"
+
+[[env.isl-1.durable_objects.bindings]]
+name = "SA_BUDGET"
+class_name = "SmartAgentBudgetDO"
+
+[[env.isl-1.migrations]]
+tag = "v1"
+new_sqlite_classes = ["SmartAgentBudgetDO"]

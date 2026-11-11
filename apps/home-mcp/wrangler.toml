@@ -181,3 +181,26 @@ CLIENT_ID_ACT = "home-mcp-act"
 ACT_CLIENT_IDS = ""
 ACT_REDIRECT_URIS = "https://agent.meta.ai/api/hatch/oauth/callback"
 DEMO_CONNECT_ENABLED = "true"
+
+# ── isl-1 (spec 441) — stamped by scripts/estate-oneclick from [env.faithnet]. Worker names, storage ids and
+# hosts are this estate's own; the town baseline is the sibling's. Do not hand-edit the derived vars.
+[env.isl-1]
+name = "isl-1-home-mcp"
+workers_dev = true
+account_id = "5da2feaa56593839672948e16c6e809d"
+
+[[env.isl-1.durable_objects.bindings]]
+name = "STORE"
+class_name = "HomeMcpStoreDO"
+
+[env.isl-1.vars]
+HOME_ORIGIN = "https://isl-1-home.vercel.app"
+BROKER_JWKS_URL = "https://isl-1-home.vercel.app/jwks"
+A2A_ORIGIN = "https://isl-1-runtime.richardpedersen3.workers.dev"
+CHAIN_ID = "34348"
+DELEGATION_MANAGER = "0x3BBeCcC7a52E1CE04a3BF7E7404D3BCBF566C490"
+CLIENT_ID = "home-mcp"
+CLIENT_ID_ACT = "home-mcp-act"
+ACT_CLIENT_IDS = ""
+ACT_REDIRECT_URIS = "https://agent.meta.ai/api/hatch/oauth/callback"
+DEMO_CONNECT_ENABLED = "true"
