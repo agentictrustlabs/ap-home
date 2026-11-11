@@ -1382,6 +1382,8 @@ workers_dev = true
 binding = "AI"
 
 [env.isl.vars]
+AKCS_INTERACTIONS_KEY_ID = "01a1cb78-3712-7282-bc3c-3fe4cb061428"
+AKCS_RELAY_KEY_ID = "01a1cb78-33df-7202-b31c-b24453b47b3b"
 ESTATE_ID = "isl"
 AKCS_TENANT_ID = "isl"
 BROKER_ISS = "https://isl-home-lovat.vercel.app"
