@@ -13,7 +13,9 @@
     "home"
   ],
   "notes": [],
-  "operatorNotes": [],
+  "operatorNotes": [
+    "Register isl-1.estate: in agenticprimitives/packages/contracts, as the naming root's owner — ESTATE_LABEL=isl-1 ESTATE_AGENT=0xbb4897c080253354616daed677c11e7c57effeb0 forge script script/AddEstateName.s.sol:AddEstateName --rpc-url <faithchain rpc> --broadcast. Until then the estate works; its agent simply has no .estate name."
+  ],
   "vercelProjectId": "prj_ygTZNdbDJVPnmw6Fy6SdYa1xnTVY",
   "homeHost": "isl-1-home.vercel.app",
   "gatewayTokenHash": "aaa64dcb3e05f8ed4b59b13646c3f6b1c5cfbf77ec0bb5fb06362fe9cfce01cd",
