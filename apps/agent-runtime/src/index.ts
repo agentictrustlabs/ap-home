@@ -8508,7 +8508,10 @@ async function assertSubjectSaStable(env: Env, iss: string, sub: string, agent: 
   // resident's recorded account (from faithchain) stopped matching the derived one, and this check called it a rotated
   // root — "signing in again cannot fix it" — for people whose root never changed. The record is per chain now: a move
   // records a new account on the new chain; a rotated root on the SAME chain is still refused, which is what D-P0-1 guards.
-  const key = `oidc-sa:${env.CHAIN_ID}:${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+  // AND BY FACTORY (spec 445, 2026-11-11). A fresh contract generation on the SAME chain is the same kind of move: a new
+  // factory derives a new account for an unchanged root, and faithnet's generation-4 re-charter refused every social-login
+  // person with this error. A rotated root under the SAME (chain, factory) is still refused.
+  const key = `oidc-sa:${env.CHAIN_ID}:${String(env.AGENT_ACCOUNT_FACTORY ?? '').toLowerCase()}:${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
   const prior = await env.SUBJECT_SA_MAP.get(key);
   if (prior && prior.toLowerCase() !== agent.toLowerCase()) {
     return `this identity previously resolved to Smart Agent ${prior} but now derives ${agent}: the custody-derivation root (A2A_CUSTODY_ROOT_KEY) changed. It must NEVER rotate (D-P0-1) — refusing to route to a new, empty account.`;
