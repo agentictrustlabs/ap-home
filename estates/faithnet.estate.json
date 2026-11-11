@@ -57,7 +57,7 @@
     "ORCHESTRATION_LLM": "gemini,anthropic",
     "ISSUANCE_EVIDENCE_ISSUER": "https://presentation-release.faithnet.internal",
     "ISSUANCE_EVIDENCE_AUDIENCE": "akcs-pilot-evidence",
-    "READER_PASS": "{\"issuer\":\"0x00ff8ccc7c7145289c8a42fe8870ec5d8cd68774\",\"treasury\":\"0xdc3ef3d91ceb006099646e7cbb25cf74d747dcc6\",\"priceUnits\":\"1000000\",\"days\":30,\"demoFund\":true,\"audience\":\"https://scripture.faithnet.io\"}",
+    "READER_PASS": "{\"issuer\":\"0xcab776281f18151d7fcaec035d9b871769e2d6db\",\"treasury\":\"0xed3383cad2d7b95f29586d2037326b029ba82b69\",\"priceUnits\":\"1000000\",\"days\":30,\"demoFund\":true,\"audience\":\"https://scripture.faithnet.io\"}",
     "ORCHESTRATION_ANTHROPIC_STRONG_MODEL": "claude-sonnet-5-5",
     "READER_HUDDLE_PRINCIPAL": "0x5dd5f3db5085604b0f6a907bbb35ae645afd307f"
   }

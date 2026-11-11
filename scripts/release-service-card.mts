@@ -31,6 +31,7 @@
  *
  * Example: scripture-resolver.svc --by ruth --card-host scripture.faithnet.io
  */
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
 import { issueVaultRecordScopeDelegation, toWire } from '../apps/home/src/lib/delegation';
 import { MCP_SERVER_ID } from '../apps/home/src/lib/inbox-delivery';
 import { generateA2ACardSigningKey, signA2ACard, signedCardContentDigest, smartAgentCardBindingDigest } from '@agenticprimitives/agent-profile/a2a';
@@ -68,7 +69,7 @@ const mutation = (extra: Record<string, unknown> = {}) => ({ idempotencyKey: cry
 
 // ── the agent, by name, from the chain ────────────────────────────────────────────────────────────────
 const pub = createPublicClient({ transport: http(RPC) });
-const UR = (process.env.UNIVERSAL_RESOLVER ?? '0xF343054e046A4145ccae499ECB28197394eE0798') as Address;
+const UR = (process.env.UNIVERSAL_RESOLVER ?? (getDeployments((process.env.DEPLOYMENT ?? 'faithchain') as never) as unknown as Record<string, string>).agentNameUniversalResolver) as Address;
 const ACC = [
   { type: 'function', name: 'isCustodian', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'bool' }] },
 ] as const;

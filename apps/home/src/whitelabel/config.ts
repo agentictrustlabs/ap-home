@@ -861,8 +861,8 @@ const faithImpact: WhiteLabelConfig = {
       // service treasury, custodied by lbsb.svc). The reader redeems at access time (OPEN delegate).
       paymentConfig: {
         // Faithchain defaults. NEXT_PUBLIC_* overrides only if a deploy names the same treasury.
-        payee: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0xdc3ef3d91ceb006099646e7cbb25cf74d747dcc6') as `0x${string}`,
-        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0xdaE09066A2cc32f6203605619137dcF01A9B49Ae') as `0x${string}`,
+        payee: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0xed3383cad2d7b95f29586d2037326b029ba82b69') as `0x${string}`,
+        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0xAe86bE64FAeC447e58DE215787e400DaDDD0FC89') as `0x${string}`,
         maxAmountPerCharge: '60000', // 0.06 USDC — covers the largest tier (Plus); the UI picks the amount
         maxAggregate: '6000000',     // 6 USDC across the delegation's life
         maxRedemptionsPerWindow: 1000,
@@ -890,8 +890,8 @@ const faithImpact: WhiteLabelConfig = {
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       // Same Bible service treasury as the Explorer charge: lbsb-treasury.treasury.
       collectionConfig: {
-        treasury: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0xdc3ef3d91ceb006099646e7cbb25cf74d747dcc6') as `0x${string}`,
-        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0xdaE09066A2cc32f6203605619137dcF01A9B49Ae') as `0x${string}`,
+        treasury: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0xed3383cad2d7b95f29586d2037326b029ba82b69') as `0x${string}`,
+        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0xAe86bE64FAeC447e58DE215787e400DaDDD0FC89') as `0x${string}`,
         edition: 'lbsb',
         a2aBase: process.env.NEXT_PUBLIC_SCRIPTURE_A2A_BASE || 'https://demo-bible-a2a-production.richardpedersen3.workers.dev',
       },

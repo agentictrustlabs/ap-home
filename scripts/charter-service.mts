@@ -21,20 +21,35 @@
  */
 import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve as resolvePath } from 'node:path';
 import type { Address, Hex } from 'viem';
 
-const HOME = 'https://www.faithnet.me';
+const HOME = (process.env.HOME_URL ?? 'https://www.faithnet.me').replace(/\/$/, '');
 const CHAIN = 34348;
-const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
-const ENFORCERS = { delegationManager: DM, timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41', value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', payment: '0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1' } as const;
+// A2A_DIRECT=1 posts to the runtime at A2A_URL instead of the Home's /a2a rewrite, which answers 502 while a genesis
+// receipt is awaited (create-organization-via-home.mts, 2026-11-11). The origin stays the Home.
+const A2A_BASE = process.env.A2A_DIRECT ? (process.env.A2A_URL ?? 'https://a2a.faithnet.io').replace(/\/$/, '') : `${HOME}/a2a`;
+// Addresses from the pinned deployment record (DEPLOYMENT, default faithchain), never a generation's literals: the
+// generation-1 DelegationManager/enforcers here signed mandates the gen-4 runtime refuses (spec 445 estate reset).
+const DEP = getDeployments((process.env.DEPLOYMENT ?? 'faithchain') as never) as unknown as Record<string, Address>;
+const DM = DEP.delegationManager as Address;
+const ENFORCERS = { delegationManager: DM, timestamp: DEP.timestampEnforcer, allowedTargets: DEP.allowedTargetsEnforcer, allowedMethods: DEP.allowedMethodsEnforcer, value: DEP.valueEnforcer, payment: DEP.paymentEnforcer, digestBinding: DEP.digestBindingEnforcer } as const;
 
 const arg = (k: string): string | undefined => { const i = process.argv.indexOf(`--${k}`); return i >= 0 ? process.argv[i + 1] : undefined; };
 const PERSONA = arg('persona') ?? 'alice';
 const LABEL = arg('label');
 const UNDER = arg('under');                       // an org label, or absent ⇒ the person is the parent
+/**
+ * `--org <0x…>` parents the service under an organization that ALREADY EXISTS, by address. `--under <label>`
+ * resolves `<label>.org` and charters one when nothing resolves — which on a priced root (nothing is named at
+ * charter) creates a SECOND organization beside the real one. The address is the identity (ADR-0010); a name is
+ * a facet. `--org-name` is only the label written into the note and the Home's link.
+ */
+const ORG_ADDR = (arg('org') ?? '').toLowerCase();
+const ORG_NAME = arg('org-name');
 const NOTE = arg('note') ?? process.env.NOTE;
 const DRY = process.argv.includes('--dry-run');
 /**
@@ -53,8 +68,10 @@ const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1
 if (!LABEL) fail('--label <service-label> is required');
 if (!NOTE) fail('--note <path> is required (the operator note this writes)');
 if (!/^[a-z0-9][a-z0-9-]*$/.test(LABEL)) fail(`--label must be a name label: ${LABEL}`);
+if (ORG_ADDR && !/^0x[0-9a-f]{40}$/.test(ORG_ADDR)) fail(`--org must be an address: ${ORG_ADDR}`);
+if (ORG_ADDR && UNDER) fail('--org and --under are exclusive: name the organization by its address OR by a label to charter');
 
-const naming = new AgentNamingClient({ rpcUrl: 'https://a2a.faithnet.io/rpc', chainId: CHAIN, registry: '0x60E949D52660A9D4143ecB0fdA56c0457f20aED9', universalResolver: '0xF343054e046A4145ccae499ECB28197394eE0798' });
+const naming = new AgentNamingClient({ rpcUrl: 'https://a2a.faithnet.io/rpc', chainId: CHAIN, registry: DEP.agentNameRegistry, universalResolver: DEP.agentNameUniversalResolver });
 
 /**
  * THE CREDENTIAL THAT WILL CUSTODY WHAT IS CHARTERED — the persona's own EOA, the one their Home holds.
@@ -63,7 +80,7 @@ const naming = new AgentNamingClient({ rpcUrl: 'https://a2a.faithnet.io/rpc', ch
  * address is ever printed; a private key in either file is none of this script's business.
  */
 const custodianOf = (persona: string): string => {
-  for (const p of ['demo/personas.local.json', 'demo/personas.json']) {
+  for (const p of [process.env.ROSTER ?? '', 'demo/personas.local.json', 'demo/personas.json'].filter(Boolean)) {
     try {
       const roster = JSON.parse(readFileSync(resolvePath(p), 'utf8')) as Record<string, { eoaAddress?: string }>;
       const a = roster[persona]?.eoaAddress?.toLowerCase();
@@ -86,7 +103,7 @@ const svcName = `${LABEL}.svc`;
 const already = (await naming.resolveName(svcName).catch(() => null))?.toLowerCase() as Address | null;
 console.log(`── ${svcName} ──`);
 console.log(`  persona    ${PERSONA}`);
-console.log(`  parent     ${UNDER ? `${UNDER}.org (chartered under the persona)` : `${PERSONA} (the person — no organization)`}`);
+console.log(`  parent     ${ORG_ADDR ? `${ORG_NAME ?? ORG_ADDR} ${ORG_ADDR} (an existing organization)` : UNDER ? `${UNDER}.org (chartered under the persona)` : `${PERSONA} (the person — no organization)`}`);
 console.log(`  custodian  ${CUSTODIAN}`);
 console.log(`  note       ${NOTE}`);
 console.log(`  on chain   ${already ? `ALREADY ${already} — nothing to buy` : 'available — the charter does NOT buy it (priced root); the agent is deployed unnamed'}`);
@@ -96,10 +113,10 @@ const who = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST',
 if (!who?.agent || !who?.homeSession) fail(`${PERSONA} could not sign in at ${HOME}: ${JSON.stringify(who).slice(0, 200)}`);
 const ME = String(who.agent).toLowerCase() as Address;
 console.log(`  ${PERSONA} → ${ME}`);
-const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
+const csrfRes = await fetch(`${A2A_BASE}/auth/csrf`, { headers: { origin: HOME } });
 const csrf = (await j(csrfRes)) as { token?: string };
 const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0], 'x-csrf-token': csrf.token ?? '' };
-const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
+const post = async (path: string, body: unknown) => j(await fetch(`${A2A_BASE}${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
 const sign = async (digest: Hex): Promise<Hex> => { const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${who.homeSession}` }, body: JSON.stringify({ digest }) })); if (!b.signature) throw new Error(`persona-sign: ${JSON.stringify(b).slice(0, 160)}`); return b.signature; };
 /** What a charter hands back: the agent it deployed, and the stewardship wire that makes the parent its steward. */
 interface CharterResult { agent?: Address; name?: string; kind?: string; parent?: Address; person?: Address; stewardshipDelegation?: unknown }
@@ -174,7 +191,11 @@ const settle = async (name: string): Promise<Address | null> => {
 // ── the parent: an organization if one was named, otherwise the person themselves ──
 let parent: Address = ME;
 let parentName = PERSONA;
-if (UNDER) {
+if (ORG_ADDR) {
+  parent = ORG_ADDR as Address;
+  parentName = ORG_NAME ?? ORG_ADDR;
+  console.log(`  parent is the existing organization ${parentName} → ${parent} (nothing chartered for it)`);
+} else if (UNDER) {
   parentName = `${UNDER}.org`;
   const org = (await naming.resolveName(parentName).catch(() => null))?.toLowerCase() as Address | null;
   if (org) { parent = org; console.log(`  ${parentName} already resolves → ${org}`); }
@@ -216,7 +237,7 @@ else {
 const note: Record<string, unknown> = existsSync(NOTE) ? JSON.parse(readFileSync(NOTE, 'utf8')) : { chainId: CHAIN };
 const prior = (note.service ?? {}) as Record<string, unknown>;
 note.service = { ...prior, name: svcName, sa: svc, charteredUnder: parentName, custodian: CUSTODIAN, named };
-if (UNDER) note.org = { name: parentName, sa: parent, steward: PERSONA };
+if (UNDER || ORG_ADDR) note.org = { name: parentName, sa: parent, steward: PERSONA };
 else { delete note.org; note.charteredBy = { persona: PERSONA, sa: ME }; }
 note.charteredAt = (note.charteredAt as string | null) ?? new Date().toISOString();
 writeFileSync(NOTE, JSON.stringify(note, null, 2) + '\n');
@@ -234,7 +255,7 @@ writeFileSync(NOTE, JSON.stringify(note, null, 2) + '\n');
 // idempotent (it checks `is-bound` first), so a re-charter costs nothing.
 if (svc && BIND_VAULT) {
   console.log(`── ${svcName}'s vault key ──`);
-  const bound = spawnSync('npx', ['tsx', 'scripts/bind-vault-key.mts', PERSONA, svc], { encoding: 'utf8' });
+  const bound = spawnSync('npx', ['tsx', 'scripts/bind-vault-key.mts', PERSONA, svc], { encoding: 'utf8', env: { ...process.env, HOME_URL: HOME } });
   const said = `${bound.stdout ?? ''}${bound.stderr ?? ''}`.split('\n').filter((l) => l.trim() && !l.startsWith('npm warn')).join('\n  ');
   console.log(`  ${said || 'bind-vault-key said nothing'}`);
   if (bound.status !== 0) console.log(`  ✗ the vault key is NOT bound — the agent's records stay fail-closed until it is`);
@@ -265,7 +286,9 @@ if (svc) {
     ? `  ✗ the Home would not list it: ${saved.error}`
     : `  ✓ listed under ${PERSONA} (kind service)`);
   // THE STEWARD WIRE IS ITS OWN CEREMONY, and the link is not usable without it.
-  const wire = spawnSync('npx', ['tsx', 'scripts/record-service-stewardship.mts'], { encoding: 'utf8', env: { ...process.env, NOTE: NOTE!, BY: PERSONA, FORCE: '1' } });
+  // An EXISTING organization keeps the stewardship wire its own ceremony approved: SERVICE_ONLY mints the service's
+  // wire alone, so a charter under it never replaces the org's approved-digest wire with a key-signed one.
+  const wire = spawnSync('npx', ['tsx', 'scripts/record-service-stewardship.mts'], { encoding: 'utf8', env: { ...process.env, HOME_URL: HOME, NOTE: NOTE!, BY: PERSONA, FORCE: '1', ...(ORG_ADDR ? { SERVICE_ONLY: '1' } : {}) } });
   const wireSaid = `${wire.stdout ?? ''}${wire.stderr ?? ''}`.split('\n').filter((l) => l.trim() && !l.startsWith('npm warn')).join('\n  ');
   console.log(`  ${wireSaid || 'record-service-stewardship said nothing'}`);
   if (wire.status !== 0) console.log(`  ✗ no steward wire — steward-gated calls at this agent (assign a playbook, enable its assistant) will refuse`);
