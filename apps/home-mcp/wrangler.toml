@@ -53,7 +53,7 @@ BROKER_JWKS_URL = "https://www.faithnet.me/jwks"
 A2A_ORIGIN = "https://a2a.faithnet.io"
 # Spec 410 §1.2 — the estate the ask-as-me wire is hashed on (faithchain), for the wire refresh after a rotation.
 CHAIN_ID = "34348"
-DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
+DELEGATION_MANAGER = "0x3BBeCcC7a52E1CE04a3BF7E7404D3BCBF566C490"
 # The Home MCP's OWN registration at the Home (`whitelabel.relyingApps`); its key's address is the delegate there.
 CLIENT_ID = "home-mcp"
 # Spec 397 §11 — the Home's client for the ACT template (`home-mcp-act`); its delegate is HOME_MCP_ACT_KEY's address.
