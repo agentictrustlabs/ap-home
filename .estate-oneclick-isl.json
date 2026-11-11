@@ -4,10 +4,12 @@
     "declare",
     "workers-config",
     "cloud-resources",
-    "key-vault"
+    "key-vault",
+    "chain-access"
   ],
   "notes": [],
   "operatorNotes": [],
   "vercelProjectId": "prj_DkaK17b0HyIrxmSB4zrhdGWRAUpR",
-  "homeHost": "isl-home-lovat.vercel.app"
+  "homeHost": "isl-home-lovat.vercel.app",
+  "gatewayTokenHash": "4ef2db5d833a24060173f5632803b82fa61806f5c13944816f9402735d2168e1"
 }
