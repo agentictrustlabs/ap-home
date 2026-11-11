@@ -15,7 +15,8 @@
   ],
   "notes": [],
   "operatorNotes": [
-    "Register isl-1.estate: in agenticprimitives/packages/contracts, as the naming root's owner — ESTATE_LABEL=isl-1 ESTATE_AGENT=0xbb4897c080253354616daed677c11e7c57effeb0 forge script script/AddEstateName.s.sol:AddEstateName --rpc-url <faithchain rpc> --broadcast. Until then the estate works; its agent simply has no .estate name."
+    "Register isl-1.estate: in agenticprimitives/packages/contracts, as the naming root's owner — ESTATE_LABEL=isl-1 ESTATE_AGENT=0xbb4897c080253354616daed677c11e7c57effeb0 forge script script/AddEstateName.s.sol:AddEstateName --rpc-url <faithchain rpc> --broadcast. Until then the estate works; its agent simply has no .estate name.",
+    "Naming gate: run scripts/add-naming-gate.mts --estate isl-1 (not in the public repo yet), then set NAMING_GATE_PRIVATE_KEY on the isl-1-home Vercel project. Until then its people can use the estate but not buy .me names from its Home."
   ],
   "vercelProjectId": "prj_ygTZNdbDJVPnmw6Fy6SdYa1xnTVY",
   "homeHost": "isl-1-home.vercel.app",
