@@ -71,7 +71,12 @@ const has = (sa: string) => orgs.some((o) => o.orgAgent.toLowerCase() === sa.toL
 const FORCE = process.env.FORCE === '1';
 // An org and the service under it (ligonier), or a service chartered straight under the person (the coach).
 const orgName = note.org ? (note.org.name ?? note.org.label ?? 'organization') : '';
-const agents: Array<[Address, string, string, Address]> = note.org && note.service
+// SERVICE_ONLY=1: the organization already holds its steward's approved wire (its own create ceremony, or
+// record-co-stewardship.mts) — mint the service's wire only, under that organization as parent.
+const SERVICE_ONLY = process.env.SERVICE_ONLY === '1';
+const agents: Array<[Address, string, string, Address]> = note.org && note.service && SERVICE_ONLY
+  ? [[note.service.sa, note.service.name, 'service', note.org.sa]]
+  : note.org && note.service
   ? [[note.org.sa, orgName, 'org', ME], [note.service.sa, note.service.name, 'service', note.org.sa]]
   : note.org
     ? [[note.org.sa, orgName, 'org', ME]]                            // an organization alone (spec 444: the org that issues)
