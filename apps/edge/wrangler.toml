@@ -242,3 +242,38 @@ service = "test-three-vault"
 [[env.test-three.services]]
 binding = "A2A"
 service = "test-three-runtime"
+
+# ── isl (spec 441) — stamped by scripts/estate-oneclick from [env.faithnet]. Worker names, storage ids and
+# hosts are this estate's own; the town baseline is the sibling's. Do not hand-edit the derived vars.
+[env.isl]
+name = "isl-edge"
+workers_dev = true
+
+[env.isl.vars]
+EDGE_ALLOWED_ORIGINS = "https://isl-home-lovat.vercel.app,https://*.isl-home-lovat.vercel.app,http://localhost:5175,http://127.0.0.1:5175,http://localhost:8795"
+CHAIN_ID = "34348"
+ENTRY_POINT = "0x107060f796bdf2495C6Ce9074ED49fe785bfFE0b"
+DELEGATION_MANAGER = "0x3BBeCcC7a52E1CE04a3BF7E7404D3BCBF566C490"
+UNIVERSAL_SIGNATURE_VALIDATOR = "0x0B4B34b21a4E396489344cDFEe1d15F3EDE7AE4E"
+SA_BUDGET_LIMIT_UNITS = "10"
+
+[[env.isl.durable_objects.bindings]]
+name = "SA_BUDGET"
+class_name = "SmartAgentBudgetDO"
+
+[[env.isl.migrations]]
+tag = "v1"
+new_sqlite_classes = ["SmartAgentBudgetDO"]
+
+[[env.isl.ratelimits]]
+name = "EDGE_LIMITER"
+namespace_id = "26402"
+simple = { limit = 120, period = 60 }
+
+[[env.isl.services]]
+binding = "MCP"
+service = "isl-vault"
+
+[[env.isl.services]]
+binding = "A2A"
+service = "isl-runtime"
