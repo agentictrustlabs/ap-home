@@ -51,10 +51,13 @@ const j = async (r: Response) => { const t = await r.text(); try { return JSON.p
 const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: BY, client_id: 'demo-web' }) }));
 const session = String(si.homeSession ?? ''); const ME = String(si.agent ?? '').toLowerCase() as Address;
 if (!session || !/^0x[0-9a-f]{40}$/.test(ME)) fail(`no session for ${BY} at ${HOME}: ${JSON.stringify(si).slice(0, 200)}`);
-const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
+// A2A_DIRECT=1 talks to the runtime at A2A_URL instead of through the Home's /a2a rewrite: the genesis step waits on
+// its userOp receipt, and Vercel's external rewrite answers 502 ROUTER_EXTERNAL_TARGET_ERROR first (2026-11-11).
+const A2A_BASE = process.env.A2A_DIRECT ? (process.env.A2A_URL ?? 'https://a2a.faithnet.io').replace(/\/$/, '') : `${HOME}/a2a`;
+const csrfRes = await fetch(`${A2A_BASE}/auth/csrf`, { headers: { origin: HOME } });
 const csrf = (await j(csrfRes)) as { token?: string };
 const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0] ?? '', 'x-csrf-token': csrf.token ?? '' };
-const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
+const post = async (path: string, body: unknown) => j(await fetch(`${A2A_BASE}${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
 const sign = async (digest: Hex): Promise<Hex> => { const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}` }, body: JSON.stringify({ digest }) })); if (!b.signature) fail(`persona-sign: ${JSON.stringify(b).slice(0, 160)}`); return b.signature as Hex; };
 type Reply = { kind?: string; error?: string; text?: string; runRef?: string; resumeToken?: string; requirement?: MandateRequirementV1; delegator?: Address; delegate?: Address; alsoApprove?: Array<{ digest: Hex }>; prompt?: { kind?: string; prompt?: string; fields?: unknown; digest?: Hex; signer?: string; payload?: unknown; stepRef?: string }; result?: Record<string, unknown> };
 

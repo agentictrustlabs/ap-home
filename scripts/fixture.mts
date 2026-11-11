@@ -89,7 +89,7 @@ export const FAITHNET_FIXTURE: GateFixtureV1 = {
   homeMcp: 'https://home-mcp.faithnet.io',
   vaultServerId: 'demo-mcp',
   people: { steward: 'alice', member: 'bob', member2: 'carol', outsider: 'dave', payeeOwner: 'nathan', invitee: 'david' },
-  org: { name: 'Missio Nexus', handle: 'missio-nexus.org', agent: '0x3b99f2b452766de5df0dbcdfc676f27257151333' },
+  org: { name: 'Missio Nexus', handle: 'missio-nexus.org', agent: '0xc8fdea2005dc965894c024a24868a9c12ed1760f' },
   workspace: { handle: 'alicefield.workspace', agent: '0xee11DFB02e4a02630bE512886305DF5C68Fd682c' },
   peerOrg: { handle: 'globalchurch.org' },
   treasuries: { own: 'alice3.treasury', ownOther: 'alice2.treasury', payee: 'nathan.treasury' },
