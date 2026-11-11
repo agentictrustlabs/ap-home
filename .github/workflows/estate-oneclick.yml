@@ -119,6 +119,8 @@ jobs:
           BUILD_STATE_SECRET: ${{ secrets.BUILD_STATE_SECRET }}
           AGENTIC_CONTRACTS_DIR: ${{ vars.AGENTIC_CONTRACTS_DIR }}
           ESTATE_ROOT_OWNER_KEY: ${{ secrets.ESTATE_ROOT_OWNER_KEY }}
+          # Pays a few cents of chain coin to each new estate's own relay key, so it can create its agents.
+          ESTATE_FUNDER_PRIVATE_KEY: ${{ secrets.ESTATE_FUNDER_PRIVATE_KEY }}
           TOWN_RPC_URL: ${{ secrets.TOWN_RPC_URL }}
           # The owner's only: the build key file the createestate page gave them.
           ESTATE_BUILD_KEY: ${{ secrets.ESTATE_BUILD_KEY }}

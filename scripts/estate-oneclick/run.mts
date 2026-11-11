@@ -29,7 +29,7 @@
 // --dry-run runs every step against a RECORDING shell and HTTP client: files are written exactly as for real, cloud
 // commands are recorded instead of run, and the plan they make is printed. It is how the build is tested.
 
-import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { randomBytes, createHash, generateKeyPairSync } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -219,6 +219,32 @@ const wrangler = (args: string[], o: Parameters<Ctx['sh']>[2] = {}) => ctx.sh('n
 const townWrangler = (args: string[], o: Parameters<Ctx['sh']>[2] = {}) => ctx.sh('npx', ['-y', 'wrangler@4', ...args], o);
 const putSecret = (app: App, name: string, value: string) => wrangler(['secret', 'put', name, '--env', request.id, '-c', TOML_PATHS[app]], { input: value, secret: true });
 // From the Worker's own folder: a stamped `[env.<id>.build]` command (the runtime's vault preflight) runs relative to it.
+/**
+ * Make the estate's relay key and give it enough of the chain's coin to create its two service agents. Gas on
+ * faithchain is nearly free, but a key with NO balance is refused ("Upfront cost exceeds account balance", which
+ * viem reports as `Method "eth_estimateGas" is not supported`). The key goes to `file` (0600) for bootstrap-estate.
+ */
+async function fundNewRelay(funderKey: string, rpcUrl: string, file: string): Promise<void> {
+  const { createPublicClient, createWalletClient, http, formatEther } = await import('viem');
+  const { generatePrivateKey, privateKeyToAccount } = await import('viem/accounts');
+  const relay = generatePrivateKey();
+  writeFileSync(file, relay, { mode: 0o600 });
+  const relayAddr = privateKeyToAccount(relay).address;
+  const funder = privateKeyToAccount(funderKey as `0x${string}`);
+  const pc = createPublicClient({ transport: http(rpcUrl) });
+  const fees = await pc.estimateFeesPerGas().catch(async () => ({ maxFeePerGas: await pc.getGasPrice() }));
+  const perGas = (fees as { maxFeePerGas?: bigint; gasPrice?: bigint }).maxFeePerGas ?? (fees as { gasPrice?: bigint }).gasPrice ?? 0n;
+  // The relay also pays for the custody hand-over and the estate agent later: budget ~10 transactions of 6M gas.
+  const need = perGas * 60_000_000n;
+  if (need === 0n) return;
+  const have = await pc.getBalance({ address: funder.address });
+  if (have < need * 2n) throw new Error(`the town's funder ${funder.address} has ${formatEther(have)} — top it up on ${TOWN.chain.name} (each estate needs about ${formatEther(need)})`);
+  const wallet = createWalletClient({ account: funder, transport: http(rpcUrl) });
+  const hash = await wallet.sendTransaction({ account: funder, to: relayAddr, value: need, chain: null });
+  await pc.waitForTransactionReceipt({ hash });
+  console.log(`  funded the estate's relay ${relayAddr} with ${formatEther(need)} from ${funder.address}`);
+}
+
 /** A Worker's brand-new workers.dev address takes a little while to answer after its first deploy. Wait for 200. */
 async function waitForHealth(url: string): Promise<void> {
   for (let i = 0; i < 36; i++) {
@@ -474,7 +500,21 @@ const steps: Record<string, Step> = {
     run: async () => {
       if (!existsSync(LOCAL)) {
         if (!chainToken && !DRY) throw new Error('no chain token — re-run from chain-access');
-        ctx.sh('npx', ['tsx', 'scripts/bootstrap-estate.mts', '--estate', request.id], { env: { CHAIN_APP_TOKEN: chainToken ?? 'dry' } });
+        // On a chain that charges gas, the key that pays for the two agents must hold a little coin. That key is the
+        // estate's OWN relay key (bootstrap saves it as A2A_MASTER_PRIVATE_KEY), so it is made here, fresh, funded by
+        // the town's funder key, and handed to bootstrap — never a key shared between estates.
+        const boot = ['tsx', 'scripts/bootstrap-estate.mts', '--estate', request.id];
+        const relayFile = `.estate-${request.id}.relay.local`;
+        const funder = process.env.ESTATE_FUNDER_PRIVATE_KEY;
+        try {
+          if (funder && !DRY) {
+            await fundNewRelay(funder, `${GATEWAY}/?k=${chainToken}`, relayFile);
+            boot.push('--deploy-key-file', relayFile);
+          }
+          ctx.sh('npx', boot, { env: { CHAIN_APP_TOKEN: chainToken ?? 'dry' } });
+        } finally {
+          rmSync(relayFile, { force: true });
+        }
         // THE MOMENT THE CUSTODY ROOT EXISTS, it is checkpointed — before anything else in this step can fail, and the
         // build stops if the site does not confirm it. A runner thrown away now would otherwise take the only copy.
         await mustCheckpoint('agents');
