@@ -54,6 +54,9 @@ UNIVERSAL_SIGNATURE_VALIDATOR = "0x3bc65655d4b6fb57731A256fcd47Db2F8Fe36907"
 name = "demo-mcp-faithnet"
 workers_dev = true
 
+[env.faithnet.triggers]
+crons = ["17 4 * * *"]   # daily JTI-ledger prune (src/index.ts pruneExpiredJtis)
+
 [env.faithnet.vars]
 AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"  # spec 441 posture — matches the runtime; the vault states it too
 UNIVERSAL_SIGNATURE_VALIDATOR = "0x0B4B34b21a4E396489344cDFEe1d15F3EDE7AE4E"
@@ -123,6 +126,9 @@ custom_domain = true
 [env.impact-agent]
 name = "imb-vault"
 workers_dev = true
+
+[env.impact-agent.triggers]
+crons = ["17 4 * * *"]   # daily JTI-ledger prune (src/index.ts pruneExpiredJtis)
 
 # ── REAL DNS FOR THIS ESTATE (2026-10-13) ─────────────────────────────────────────────────────────────
 # impact-agent was stood up on `workers.dev` and `imb-home.vercel.app` (`docs/runbooks/new-estate.md` §0: "A zone

@@ -2438,4 +2438,24 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
-export default app;
+/** Spec 445 follow-up — the JTI replay ledger (`token_usage`) only protects a token while it is valid (delegation tokens
+ *  live at most an hour), yet nothing ever deleted a row: faithnet's D1 reached its 10 GB cap (4.1M rows) and every vault
+ *  write failed. A daily, bounded prune of rows older than two days. Audit rows are NOT touched — their retention is a
+ *  policy decision, not housekeeping. */
+export async function pruneExpiredJtis(db: D1Database, batches = 20, batch = 50_000): Promise<number> {
+  let total = 0;
+  for (let i = 0; i < batches; i++) {
+    const r = await db.prepare(`DELETE FROM token_usage WHERE rowid IN (SELECT rowid FROM token_usage WHERE first_seen < datetime('now','-2 days') LIMIT ?)`).bind(batch).run();
+    const n = Number(r.meta?.changes ?? 0);
+    total += n;
+    if (n < batch) break;
+  }
+  return total;
+}
+
+export default {
+  fetch: app.fetch,
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(pruneExpiredJtis(env.DB).then((n) => console.log(`[vault] pruned ${n} expired JTI rows`)).catch((e: unknown) => console.error('[vault] JTI prune failed', e)));
+  },
+};
