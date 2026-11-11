@@ -1927,9 +1927,21 @@ async function createManagedAgentSocial(
   // The KMS path used to drop it here and the worker defaulted to the legacy root: the form offered
   // ".org" and produced `<label>.impact`, an agent with no declared type (2026-08-31).
   const typed = typedTldForKind(input.kind);
-  const wantName = !!input.label && input.label.trim().length >= 3;
+  const labelGiven = !!input.label && input.label.trim().length >= 3;
+  // A PAID ending (ap-town spec 431) registers nothing in the deploy: the worker refuses the label with `priced_root`.
+  // As on the device path above, the agent deploys NAMELESS and its name is BOUGHT next (`buyNameForNewAgent`), unless
+  // the caller buys it itself (`nameLater`). Until 2026-11-11 this path sent the label anyway, so a social session's
+  // `workspace-create` chartered `<label>.org` and then failed at `<label>.workspace` ("priced_root").
+  const pricedKind = !!typed && isPricedTld(typed.tld) && !!NAMING_COIN;
+  const wantName = labelGiven && !pricedKind && !input.nameLater;
+  const buyAfterDeploy = labelGiven && pricedKind && !input.nameLater;
   let label: string | undefined;
   let node: Hex | undefined;
+  if (buyAfterDeploy) {
+    onStep?.('Checking that name…');
+    const r = await resolveExactName(input.label!, typed?.tld);
+    if (!r.ok) return r; // taken or protected: refused BEFORE anything is deployed
+  }
   if (wantName) {
     onStep?.('Checking that name…');
     const r = await resolveExactName(input.label!, typed?.tld);
@@ -1954,7 +1966,7 @@ async function createManagedAgentSocial(
     return { ok: false, error: [b.error, b.detail].filter(Boolean).join(' — ') || `create failed (HTTP ${res.status})` };
   }
   const child = b.agent;
-  const name = b.name ?? '';
+  let name = b.name ?? '';
 
   onStep?.('Saving to your private vault…');
   const credential = buildRelatedAgentCredential({
@@ -1974,6 +1986,13 @@ async function createManagedAgentSocial(
   if (!save.ok) {
     const e = (await save.json().catch(() => ({}))) as { error?: string };
     return { ok: false, error: `agent deployed${name ? ` (${name})` : ''} but saving the link failed: ${e.error ?? save.status}` };
+  }
+  // The bought name, after the link exists (buyNameForNewAgent merges `orgName` onto it).
+  if (buyAfterDeploy) {
+    const { buyNameForNewAgent } = await import('./home/charter-name');
+    const bought = await buyNameForNewAgent({ agent: child, label: input.label!, kind: input.kind, parent: input.parent, person: input.person, via: input.via, token: sessionToken }, onStep);
+    if (!bought.ok) return { ok: false, error: `the ${input.kind} ${child} exists, but buying its name failed: ${'error' in bought ? bought.error : 'refused'}` };
+    name = bought.name;
   }
   requestReindex([child]); // auto-index: the new managed agent (treasury/org, Google path) appears now
   // Creator = first member (same as the device-credential path): C_sub signs, zero prompts.

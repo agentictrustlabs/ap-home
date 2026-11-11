@@ -39,6 +39,15 @@ describe('typed suffix reaches the server on every social claim path', () => {
     expect(f).toContain('tld: typed?.tld');
   });
 
+  it('createManagedAgentSocial deploys a PRICED kind nameless and buys its name after (2026-11-11)', () => {
+    // A social workspace-create chartered `<label>.org`, then sent `<label>.workspace` to the worker as a label and
+    // was refused `priced_root`. A priced ending is bought after the deploy, as on the device path.
+    const f = fn('createManagedAgentSocial');
+    expect(f).toContain('isPricedTld(typed.tld)');
+    expect(f).toContain('const wantName = labelGiven && !pricedKind && !input.nameLater');
+    expect(f).toContain('buyNameForNewAgent(');
+  });
+
   it('nameManagedAgentSocial resolves and sends the kind’s suffix', () => {
     const f = fn('nameManagedAgentSocial');
     expect(f).toContain('typedTldForKind(input.kind)');

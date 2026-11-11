@@ -31,6 +31,7 @@ import {
   isAgentDeployed,
   derivePasskeySa,
   createManagedAgent,
+  listManagedAgents,
   invalidateRelatedOrgs,
   AUD,
   type SignHash,
@@ -924,11 +925,27 @@ export async function createGovernedWorkspace(
   const step = (n: number, label: string, hint?: string) => say?.({ step: n, total, label, ...(hint ? { hint } : {}) });
 
   // 1. THE ORGANIZATION FIRST. Its progress is org-create's own, re-stepped under this ceremony's count.
-  step(1, 'Creating the organization that will govern it…', 'This is the longer step — hang tight.');
-  const org = await createOrganization(home, name, delegate, via, auth, {
+  // A RETRY RESUMES. A ceremony that chartered `<label>.org` and then failed at the workspace leaves the person
+  // stewarding an organization that governs nothing; asking again with the same name would try to charter the
+  // organization a second time and fail on its own name. So an organization of exactly that name, stewarded by this
+  // person and governing no workspace, is connected (org-create's select-existing road: the same grants, no deploy)
+  // instead of chartered again. Anything else — a different name, one that already governs a workspace — is untouched.
+  const existingGovernor = await (async (): Promise<Address | undefined> => {
+    try {
+      const agents = await listManagedAgents(token, 'any');
+      const want = `${nameLabel(name)}.org`.toLowerCase();
+      const org = agents.find((a) => a.kind === 'org' && (a.relationship ?? 'steward') === 'steward' && (a.name ?? '').toLowerCase() === want);
+      if (!org) return undefined;
+      const governs = agents.some((a) => a.kind === 'workspace' && (a.parent ?? '').toLowerCase() === org.agent.toLowerCase());
+      return governs ? undefined : org.agent;
+    } catch { return undefined; }
+  })();
+  step(1, existingGovernor ? 'Connecting the organization you already created…' : 'Creating the organization that will govern it…', existingGovernor ? undefined : 'This is the longer step — hang tight.');
+  const org = await createOrganization(home, existingGovernor ? `${nameLabel(name)}.org` : name, delegate, via, auth, {
     purpose,
     requestedBy: opts.requestedBy,
     grantOrg: opts.grantOrg,
+    ...(existingGovernor ? { existingOrg: existingGovernor } : {}),
     onProgress: (p) => step(1, p.label, p.hint),
   });
   if (!org.ok) return { ok: false, error: `the organization could not be created, so no workspace was: ${org.error}` };
