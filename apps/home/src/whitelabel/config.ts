@@ -478,6 +478,36 @@ const faithImpact: WhiteLabelConfig = {
           'https://field-a2a-production.richardpedersen3.workers.dev',
       },
     },
+    // isl-workbench — the ISL evaluation workbench (agentictrustlabs isl-discovery-harness, apps/isl-eval-workbench),
+    // a web app over the ISL WORKSPACE AGENT (`isl.workspace`, kind service, serviceRole workspace, governed by `isl.org`)
+    // whose A2A door is isl-a2a and whose data sits in the ISL MCP behind it — the Field shape. Readers are members of
+    // `isl.org`; the person who creates the workspace custodies it and stewards it. `service-agent-wire` authorizes the
+    // door's AKCS key as the workspace's DELEGATE (never its identity). `ask-as-me` and `ask_delegate` are added once
+    // that key exists (its address must equal the door's signer). Until the workbench switches to this client it signs
+    // in as `skills-app`, whose list also carries the workbench's URI.
+    {
+      client_id: 'isl-workbench',
+      remembered_consent: 'on',
+      name: 'ISL evaluation workbench',
+      redirect_uris: [
+        'https://isl-workbench.faithnet.io/',
+        'http://localhost:5197/',
+        'http://127.0.0.1:5197/',
+      ],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: [
+        'site-login',
+        'org-create',
+        'workspace-create',
+        'workspace-member-invite',
+        'workspace-join',
+        'service-agent-wire',
+      ],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      serviceAgentConfig: {
+        a2aBase: process.env.NEXT_PUBLIC_ISL_A2A_BASE || 'https://isl-a2a.faithnet.io',
+      },
+    },
     // gather-app — Gather27 (agentictrustlabs/engage apps/gather27-*). Find a group near you;
     // invite-driven host onboarding; events live in the host org vault. Login-grade connect via
     // the Personal Home.
