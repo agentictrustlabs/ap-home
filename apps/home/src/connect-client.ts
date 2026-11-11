@@ -1728,7 +1728,13 @@ export async function createManagedAgent(
   // EXACTLY (MAM-D4, no suffix); otherwise the agent deploys NAMELESS and can be named later
   // (nameManagedAgent). A nameless agent is fully functional — the SA address is the canonical id
   // (ADR-0010); the name is just an optional public facet.
-  const wantName = !!input.label && input.label.trim().length >= 3;
+  // A PAID ending (ap-town spec 431, generation 4: every typed root is priced) registers nothing in the deploy batch —
+  // the free-subregistry commit/reveal reverts `NotAuthorized()` there (clubs at gamenight, 2026-11-11). Such a name
+  // is BOUGHT after the deploy (`buyNameForNewAgent`), unless the caller said it buys the name itself (`nameLater`).
+  const labelGiven = !!input.label && input.label.trim().length >= 3;
+  const pricedKind = (() => { const t = typedTldForKind(input.kind); return !!t && isPricedTld(t.tld) && !!NAMING_COIN; })();
+  const wantName = labelGiven && !pricedKind && !input.nameLater;
+  const buyAfterDeploy = labelGiven && pricedKind && !input.nameLater;
   let claimCalls: ContractCall[] = [];
   let claimReveal: ContractCall[] = [];
   let name = '';
@@ -1779,6 +1785,12 @@ export async function createManagedAgent(
   {
     const fin = await finishNameClaim(child, signHash, claimReveal, onStep, 1n);
     if (!fin.ok) return { ok: false, error: fin.error };
+  }
+  if (buyAfterDeploy) {
+    const { buyNameForNewAgent } = await import('./home/charter-name');
+    const bought = await buyNameForNewAgent({ agent: child, label: input.label!, kind: input.kind, parent: input.parent, person: input.person, via: input.via, token: sessionToken }, onStep);
+    if (!bought.ok) return { ok: false, error: `the ${input.kind} ${child} exists, but buying its name failed: ${'error' in bought ? bought.error : 'refused'}` };
+    name = bought.name;
   }
 
   // ADR-0025: private, self-issued related-agent credential (unsigned — proofHash anchors integrity,
