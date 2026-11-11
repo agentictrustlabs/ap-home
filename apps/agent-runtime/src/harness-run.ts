@@ -906,6 +906,10 @@ export interface TeamGenesisDeps {
   userOpHash(userOp: GenesisUserOpJson): Promise<Hex>;
   /** Has the child already been deployed? (a resume after success is a no-op) */
   isDeployed(child: Address): Promise<boolean>;
+  /** Does the child's ERC-1271 accept this wire's approved-hash (`0x03`) signature — i.e. did its genesis approve it?
+   *  A second ask for an existing child rebuilds the stewardship wire from THAT ask's mandate window, which is a
+   *  different wire from the one the genesis approved; handing it back unapproved made the steward a non-steward. */
+  isApproved?(child: Address, wire: DelegationWireV1): Promise<boolean>;
   /** Submit the signed genesis, sponsored. Throws on an inner revert. */
   submit(userOp: GenesisUserOpJson): Promise<{ txHash: Hex }>;
 }
@@ -978,7 +982,10 @@ export function childAgentCreateInvoker(genesis: TeamGenesisDeps, env: HarnessEn
       // A resume of a settled create still provisions: the genesis's approveHash calls are on chain, the
       // wires rebuild deterministically, and a team that exists without its planes is the broken state.
       const planes = g.planes && genesis.provisionPlanes ? await genesis.provisionPlanes(g.child, g.planes).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })) : null;
-      return { agent: g.child, name: g.name, kind: recordedKind(noun, parent, person), parent, custodian: credential, person, stewardshipDelegation: g.stewardship, alreadyCreated: true, ...(planes && !planes.ok ? { planesError: planes.error } : {}), ...(g.nameLater ? { nameLater: true, label, tld: g.tld ?? tld } : {}) };
+      // Only a wire the child actually approved is stewardship; a rebuilt one it never approved is returned as absent,
+      // by name, so the Home keeps the steward's existing wire instead of replacing it with one that does not verify.
+      const approved = genesis.isApproved ? await genesis.isApproved(g.child, g.stewardship as DelegationWireV1).catch(() => false) : true;
+      return { agent: g.child, name: g.name, kind: recordedKind(noun, parent, person), parent, custodian: credential, person, ...(approved ? { stewardshipDelegation: g.stewardship } : { stewardshipStale: true }), alreadyCreated: true, ...(planes && !planes.ok ? { planesError: planes.error } : {}), ...(g.nameLater ? { nameLater: true, label, tld: g.tld ?? tld } : {}) };
     }
     // Taken by someone ELSE — the child this ask derives is not there yet, so the name is not ours.
     const holder = await genesis.resolveName(name);

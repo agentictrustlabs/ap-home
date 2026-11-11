@@ -6627,6 +6627,12 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
       const code = await pub().getBytecode({ address: child }).catch(() => undefined);
       return !!code && code !== '0x';
     },
+    async isApproved(child, w) {
+      const d = { ...(w as unknown as Delegation), salt: BigInt((w as unknown as { salt: string | bigint }).salt) } as Delegation;
+      const hash = hashDelegation(d, Number(env.CHAIN_ID), env.DELEGATION_MANAGER as Address);
+      const magic = (await pub().readContract({ address: child, abi: [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }] as const, functionName: 'isValidSignature', args: [hash, '0x03'] })) as Hex;
+      return magic.toLowerCase() === '0x1626ba7e';
+    },
     async provisionPlanes(child, planesIn) {
       const planes = planesIn as GenesisPlaneWires;
       const wire = (d: { wire: { salt: bigint } }) => ({ ...(d.wire as object), salt: d.wire.salt.toString() });
