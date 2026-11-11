@@ -15,8 +15,8 @@ RUN npm install --omit=dev --no-audit --no-fund --no-package-lock viem@^2.52.2 @
  && ln -s /host/node_modules/.bin/claude-code-acp /usr/local/bin/claude-code-acp
 # LAYER 2 (per kit change, small): the kit, FROM NPM at the exact versions this repository pins (ap-home is a consumer —
 # there is no workspace to pack; Ring 0 built ./tarballs from its own packages). Bump with the coherent set.
-ARG RUNTIME_MEMBER_VERSION=0.0.0-alpha.28
-ARG ACP_VERSION=0.0.0-alpha.24
+ARG RUNTIME_MEMBER_VERSION=0.0.0-alpha.29
+ARG ACP_VERSION=0.0.0-alpha.25
 RUN npm install --omit=dev --no-audit --no-fund --no-package-lock @agenticprimitives/runtime-member@$RUNTIME_MEMBER_VERSION @agenticprimitives/acp@$ACP_VERSION 2>&1 | tail -2 \
  && printf '#!/bin/sh\nexec node /host/node_modules/@agenticprimitives/acp/bin/acp-stub-agent.mjs "$@"\n' > /usr/local/bin/acp-stub-agent && chmod +x /usr/local/bin/acp-stub-agent \
  && ln -sf /host/node_modules/.bin/ap-runtime /usr/local/bin/ap-runtime
