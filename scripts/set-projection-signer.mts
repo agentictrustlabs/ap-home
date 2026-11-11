@@ -13,6 +13,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { AgentAccountClient, buildExecuteCallData } from '@agenticprimitives/agent-account';
 import { createPublicClient, decodeEventLog, encodeFunctionData, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
+// Addresses default from the pinned deployment record (DEPLOYMENT, default faithchain), never a hard-coded generation:
+// a generation-1 literal here kept chartering against a factory the estate had left (spec 445 estate reset, 2026-11-11).
+const DEP = getDeployments((process.env.DEPLOYMENT ?? 'faithchain') as never) as unknown as Record<string, `0x${string}`>;
 
 const args = process.argv.slice(2);
 const flag = (n: string) => (args.includes(`--${n}`) ? args[args.indexOf(`--${n}`) + 1] : undefined);
@@ -25,10 +29,10 @@ const env = Object.fromEntries(readFileSync(file, 'utf8').split('\n').filter((l)
 const RPC = env.RPC_URL; const relay = env.A2A_MASTER_PRIVATE_KEY as Hex; const interactions = env.A2A_INTERACTIONS_SESSION_PRIVATE_KEY as Hex;
 if (!RPC || !relay || !interactions) { console.error(`${file} does not carry RPC_URL + the relay and interactions keys`); process.exit(1); }
 const CHAIN_ID = Number(env.CHAIN_ID ?? 34348);
-const ENTRY_POINT = '0xf7855250B3363AB7649B10957d8908A9AFcdD4B5' as Address;
-const FACTORY = '0x464eEe7518c3c97DA570592481329E0627E9a3B8' as Address;
-const PROFILE_RESOLVER = (env.PROFILE_RESOLVER ?? '0xB03F7C06ad3274F584AB72794406D639c02A45e1') as Address;
-const PAYMASTER = (env.PAYMASTER ?? '0xbd93fEC6910ffD74F14709188b5a9B6C6965b2a7') as Address;
+const ENTRY_POINT = DEP.entryPoint as Address;
+const FACTORY = DEP.agentAccountFactory as Address;
+const PROFILE_RESOLVER = (env.PROFILE_RESOLVER ?? DEP.agentProfileResolver) as Address;
+const PAYMASTER = (env.PAYMASTER ?? DEP.smartAgentPaymaster) as Address;
 const ATL_PROJECTION_SIGNER = keccak256(toBytes('atl:projectionSigner'));
 const RESOLVER_ABI = [
   { type: 'function', name: 'isRegistered', stateMutability: 'view', inputs: [{ name: 'agent', type: 'address' }], outputs: [{ type: 'bool' }] },

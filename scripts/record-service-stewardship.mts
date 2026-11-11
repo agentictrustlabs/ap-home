@@ -36,7 +36,11 @@ const auth = { 'content-type': 'application/json', authorization: `Bearer ${alic
 const sign = async (digest: Hex): Promise<Hex> => { const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: auth, body: JSON.stringify({ digest }) })); if (!b.signature) throw new Error(`persona-sign: ${JSON.stringify(b).slice(0, 160)}`); return b.signature; };
 
 const validUntil = Math.floor(Date.now() / 1000) + DAYS * 86_400;
-const targets = [CONTRACTS.agentRelationship, CONTRACTS.agentNameRegistry, CONTRACTS.permissionlessSubregistry] as Address[];
+// The Home's own oversight targets (apps/home/src/lib/chain.ts OVERSIGHT_CONTRACTS): a generation-4 chain has NO legacy
+// `permissionlessSubregistry`, and absent means absent — an undefined target cannot be encoded, and a zero one would be
+// minted where the Home's recogniser expects none.
+const targets = [CONTRACTS.agentRelationship, CONTRACTS.agentNameRegistry, CONTRACTS.permissionlessSubregistry]
+  .filter((a): a is string => typeof a === 'string' && !/^0x0{40}$/i.test(a)) as Address[];
 async function stewardshipWire(agent: Address): Promise<Record<string, unknown>> {
   const salt = BigInt(toHex(crypto.getRandomValues(new Uint8Array(16))));
   const d: Delegation = {

@@ -18,19 +18,23 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { buildCaveat, encodeAllowedMethodsTerms, encodeAllowedTargetsTerms, encodeTimestampTerms, hashDelegation, ROOT_AUTHORITY, type Delegation } from '@agenticprimitives/delegation';
 import { createPublicClient, hashMessage, http, toFunctionSelector, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
+// Addresses default from the pinned deployment record (DEPLOYMENT, default faithchain), never a hard-coded generation:
+// a generation-1 literal here kept chartering against a factory the estate had left (spec 445 estate reset, 2026-11-11).
+const DEP = getDeployments((process.env.DEPLOYMENT ?? 'faithchain') as never) as unknown as Record<string, `0x${string}`>;
 
 const arg = (k: string): string | undefined => { const i = process.argv.indexOf(`--${k}`); return i >= 0 ? process.argv[i + 1] : undefined; };
 const agent = (arg('agent') ?? '').toLowerCase() as Address;
 const delegate = (arg('delegate') ?? '').toLowerCase() as Address;
-const registry = (arg('registry') ?? '0xb4E116F5C6915a4f1e649E0877e4a0A7a1c1147b').toLowerCase() as Address;
+const registry = (arg('registry') ?? DEP.estateProjectionRegistry).toLowerCase() as Address;
 const days = Number(arg('days') ?? 90); const out = arg('out'); const persona = arg('persona'); const home = arg('home'); const by = arg('by');
 if (!/^0x[0-9a-f]{40}$/.test(agent) || !/^0x[0-9a-f]{40}$/.test(delegate) || !out) { console.error('usage: issue-anchoring-wire.mts --agent 0x<registry agent> --delegate 0x<the projector key> --out <file> [--registry 0x…] [--days 90] [--persona <handle>]'); process.exit(1); }
 const RPC = process.env.RPC_URL ?? (() => { console.error('RPC_URL is required'); process.exit(1); })();
 const CHAIN_ID = Number(process.env.CHAIN_ID ?? 34348);
-const C = { delegationManager: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7', timestampEnforcer: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', allowedTargetsEnforcer: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethodsEnforcer: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41', universalSignatureValidator: '0xeDd56f500325D4701B9985A34e5Fa6EED6716137' } as const;
+const C = { delegationManager: DEP.delegationManager, timestampEnforcer: DEP.timestampEnforcer, allowedTargetsEnforcer: DEP.allowedTargetsEnforcer, allowedMethodsEnforcer: DEP.allowedMethodsEnforcer, universalSignatureValidator: DEP.universalSignatureValidator } as const;
 
 const envFile = process.env.CUSTODIAN_KEY_ENV_FILE ?? ''; const varName = process.env.CUSTODIAN_KEY_VAR ?? 'CUSTODIAN_PRIVATE_KEY';
-const fromRoster = persona ? ((JSON.parse(readFileSync('demo/personas.local.json', 'utf8')) as Record<string, { eoaPrivateKey?: string }>)[persona]?.eoaPrivateKey ?? '') : '';
+const fromRoster = persona ? ((JSON.parse(readFileSync(process.env.ROSTER ?? 'demo/personas.local.json', 'utf8')) as Record<string, { eoaPrivateKey?: string }>)[persona]?.eoaPrivateKey ?? '') : '';
 const custodianKey = (fromRoster || process.env.CUSTODIAN_PRIVATE_KEY || (envFile ? (new RegExp(`^${varName}=['"]?(0x[0-9a-fA-F]{64})`, 'm').exec(readFileSync(envFile, 'utf8'))?.[1] ?? '') : '')) as Hex;
 // The custodian signs where it lives: at its Home (a persona of that estate — the shape to prefer), or from a key here.
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t) as Record<string, unknown>; } catch { return { _raw: t.slice(0, 200) }; } };
