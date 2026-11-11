@@ -114,7 +114,7 @@ test('feature sweep: all of the Home', async ({ page }) => {
         if (/went wrong|AA31|too low|failed/i.test(b)) { record('org.create', false, b.slice(0, 160)); break; }
         if (new RegExp(orgName, 'i').test(b) && /ORGANIZATION|Custodied by you/i.test(b)) { created = true; break; }
       }
-      record('org.create', created, created ? `org "${orgName}.impact" created` : 'org did not appear');
+      record('org.create', created, created ? `org "${orgName}.org" created` : 'org did not appear');
     } else record('org.create', false, 'no org name input after reveal');
   } else record('org.create', false, 'no Organizations nav');
   await dump(page, '05-org-create');

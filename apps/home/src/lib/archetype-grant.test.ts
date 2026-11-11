@@ -117,7 +117,7 @@ describe('issueOrgConsultRoutingDelegation — archetype methods', () => {
   const ORG = '0x3333333333333333333333333333333333333333' as const;
   const KEY = '0x4444444444444444444444444444444444444444' as const;
   const methods = async (archetypes?: string[]) => {
-    const d = await issueOrgConsultRoutingDelegation(ORG, KEY, sign, undefined, archetypes);
+    const d = await issueOrgConsultRoutingDelegation(ORG, KEY, sign, undefined, archetypes, '0x5555555555555555555555555555555555555555');
     const amCav = d.caveats[2]!;
     return (decodeAbiParameters([{ type: 'bytes4[]' }], amCav.terms)[0] as readonly string[]).map((x) => x.toLowerCase());
   };

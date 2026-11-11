@@ -146,7 +146,7 @@ export function OrgChooser({
   const wantedSlug = toOrgLabel(defaultName ?? '');
   const likelyMatch =
     wantedSlug.length >= 3
-      ? orgs.find((o) => toOrgLabel(o.name.replace(/\.impact$/i, '')) === wantedSlug)
+      ? orgs.find((o) => toOrgLabel(o.name.split('.')[0] ?? '') === wantedSlug)
       : undefined;
 
   const go = () => {
@@ -218,7 +218,7 @@ export function OrgChooser({
         </p>
       )}
       {selected === 'new' && slug && (
-        <p className="onboarding-hint">Its handle will be <strong>{slug}.impact</strong> (not a website); apps will show it as <strong>{name.trim() || slug}</strong>.</p>
+        <p className="onboarding-hint">Its handle will be <strong>{slug}.org</strong> (not a website); apps will show it as <strong>{name.trim() || slug}</strong>.</p>
       )}
 
       {orgs.length > 0 && (

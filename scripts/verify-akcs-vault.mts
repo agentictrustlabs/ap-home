@@ -68,7 +68,7 @@ if (!prov.ok) throw new Error('provision failed');
 const salt = BigInt(toHex(crypto.getRandomValues(new Uint8Array(16))));
 const delegation: Delegation = {
   delegator: owner as `0x${string}`,
-  delegate: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as `0x${string}`,
+  delegate: realServerKey(info.serverKey),
   authority: ROOT_AUTHORITY,
   caveats: [buildVaultKeyUseCaveat({
     vaultId: String(info.serverId ?? '').trim() || 'demo-mcp', kmsKeyRef: prov.kmsKeyRef, resources: info.defaultResources,
@@ -124,3 +124,9 @@ if ((read as { data?: { marker?: string } }).data?.marker !== marker) {
   throw new Error('ROUND TRIP FAILED — the value written did not come back');
 }
 console.log(`\n✓ AKCS per-person vault KEK works end to end for ${handle}: provision → bind → wrap → unwrap.`);
+
+/** The vault's REAL delegate (spec 445): a vault-key authorization naming `0x…01` delegates to nobody. Refuse, never default. */
+function realServerKey(k: unknown): `0x${string}` {
+  if (typeof k !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(k) || /^0x0{39}[0-9a-f]$/i.test(k)) throw new Error('vault server-info names no real delegate (set VAULT_KEY_SERVER_DELEGATE on the vault) — refusing to bind to a placeholder');
+  return k as `0x${string}`;
+}

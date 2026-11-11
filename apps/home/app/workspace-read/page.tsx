@@ -3,7 +3,7 @@
 // chartered, signs that agent's A2A signing wire for `library.granted.read`. An app sends the member here the way it sends
 // them to /choose-treasury and /reader-pass, and the same gate runs first:
 //
-//   /workspace-read?client_id=…&redirect_uri=…&state=…&agent=0x…
+//   /workspace-read?client_id=…&redirect_uri=…&state=…&agent=0x…&publisher=0x…
 //
 //   enabled   ?read_wire=enabled&read_wire_hash=0x…&agent=0x…&state=…
 //   refused   ?read_wire_error=denied|not_custodian|not_service|failed&agent=0x…&state=…
@@ -92,7 +92,7 @@ function Body() {
   const go = async () => {
     setRun({ k: 'busy' });
     const deps = await workspaceReadDeps({ token: session.token, via: session.via, credential: (profile as { credential?: string } | null)?.credential, person: agentAddress as Address });
-    const r = await enableWorkspaceReadWire(deps, { agent: req.agent as Address, agentLabel: label, isService });
+    const r = await enableWorkspaceReadWire(deps, { agent: req.agent as Address, agentLabel: label, isService, publisher: req.publisher as Address });
     if (r.ok) leave({ hash: r.hash });
     else setRun({ k: 'failed', said: r.said, error: r.error });
   };
@@ -103,7 +103,7 @@ function Body() {
       <p className="onboarding-sub">
         {client.name ?? req.clientId} is asking. A publisher can grant {label} a read of a restricted work; to fetch it,
         {' '}{label} signs its request as itself. This signs one scoped, revocable authorization with your credential, as
-        {' '}{label}&rsquo;s custodian: its runtime may sign <code>library.granted.read</code> — and nothing else — for 180 days.
+        {' '}{label}&rsquo;s custodian: its runtime may sign <code>library.granted.read</code> — and nothing else — at that one publisher&rsquo;s agent ({req.publisher.slice(0, 8)}…{req.publisher.slice(-4)}), for 180 days.
         You can revoke it any time from {label}&rsquo;s Access page.
       </p>
       {run.k === 'failed' && <p role="alert" style={{ color: 'var(--color-danger, #b3261e)', wordBreak: 'break-word' }}>{run.said}</p>}

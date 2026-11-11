@@ -62,7 +62,7 @@ export default function MoveHomeHerePage() {
         {!minted ? (
           <div>
             <label style={{ display: 'block', fontSize: '.9rem' }}>Your agent (its name or address)
-              <input className="onboarding-input" value={who} onChange={(e) => { setWho(e.target.value); setAgent(null); }} placeholder="alice.impact or 0x…" />
+              <input className="onboarding-input" value={who} onChange={(e) => { setWho(e.target.value); setAgent(null); }} placeholder="alice.me or 0x…" />
             </label>
             {!agent ? (
               <button className="btn-primary" style={{ width: 'auto', marginTop: '.5rem' }} disabled={busy || !who.trim()} onClick={() => void resolve()}>{busy ? 'looking…' : 'Find my agent'}</button>

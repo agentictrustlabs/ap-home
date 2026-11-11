@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Vault } from '@agenticprimitives/vault';
-import { buildMountedGatewayDeps, unreachableWrapper } from '../src/gateway-mount.js';
+import { buildMountedGatewayDeps, mountedAuthenticator, unreachableWrapper } from '../src/gateway-mount.js';
 
 const VERDICT = {
   principal: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -82,5 +82,49 @@ describe('the mounted op mirrors the one it replaces', () => {
       new RegExp(`'${op.replace('.', '\\.')}':\\s*'([^']+)'`).exec(src)?.[1];
     expect(scope('gateway.inbox.get')).toBe(scope('inbox.get'));
     expect(scope('gateway.inbox.get')).toBe('vault:inbox.data');
+  });
+});
+
+// Spec 445 §3.4 (fabric audit DATA-3) — the gateway's ingress takes its caller from an injected authenticator
+// and nowhere else. No ingress op is mounted today (the one mounted op is a verdict-keyed read), so the port is
+// absent and every ingress is refused; this is the implementation an ingress op must inject when it climbs.
+describe('the mounted authenticator hands over what InteractionsDO admitted, and nothing from the request', () => {
+  const PRINCIPAL = '0xAAAAaaaaAAAAaaaaAAAAaaaaAAAAaaaaAAAAaaaa';
+  const ACTOR = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  const req = (body: unknown = {}) => new Request('https://do/x', { method: 'POST', body: JSON.stringify(body), headers: { 'x-principal': '0xcccccccccccccccccccccccccccccccccccccccc' } });
+
+  it('names this object as the principal, the admitted session as the actor, the op\'s tier', async () => {
+    const auth = mountedAuthenticator({ chainId: 84532, principal: PRINCIPAL, admitted: () => ({ actor: ACTOR, tier: 'communication' }) });
+    expect(await auth(req())).toEqual({ principal: `eip155:84532:${PRINCIPAL.toLowerCase()}`, actor: `eip155:84532:${ACTOR}`, tier: 'communication' });
+  });
+
+  it('ignores every identity the request itself carries', async () => {
+    const auth = mountedAuthenticator({ chainId: 84532, principal: PRINCIPAL, admitted: () => ({ actor: ACTOR, tier: 'execution-fast' }) });
+    const got = await auth(req({ principal: '0xdddddddddddddddddddddddddddddddddddddddd', actor: '0xdddddddddddddddddddddddddddddddddddddddd', tier: 'execution-orchestrated' }));
+    expect(got).toEqual({ principal: `eip155:84532:${PRINCIPAL.toLowerCase()}`, actor: `eip155:84532:${ACTOR}`, tier: 'execution-fast' });
+  });
+
+  it('refuses when the request was not admitted, and reads the admission at call time', async () => {
+    let admitted: { actor: string; tier: 'communication' } | null = null;
+    const auth = mountedAuthenticator({ chainId: 84532, principal: PRINCIPAL, admitted: () => admitted });
+    expect(await auth(req())).toBeNull();
+    admitted = { actor: ACTOR, tier: 'communication' };
+    expect(await auth(req())).not.toBeNull();
+    admitted = null;
+    expect(await auth(req())).toBeNull();
+  });
+
+  it('refuses a malformed actor, principal, tier or chain rather than guessing', async () => {
+    const ok = { actor: ACTOR, tier: 'communication' as const };
+    expect(await mountedAuthenticator({ chainId: 84532, principal: PRINCIPAL, admitted: () => ({ ...ok, actor: 'alice.me' }) })(req())).toBeNull();
+    expect(await mountedAuthenticator({ chainId: 84532, principal: 'calvary.org', admitted: () => ok })(req())).toBeNull();
+    expect(await mountedAuthenticator({ chainId: 84532, principal: PRINCIPAL, admitted: () => ({ ...ok, tier: 'admin' as never }) })(req())).toBeNull();
+    expect(await mountedAuthenticator({ chainId: 0, principal: PRINCIPAL, admitted: () => ok })(req())).toBeNull();
+  });
+
+  it('is absent from the mount unless an op supplies it — the gateway then refuses every ingress', () => {
+    expect(buildMountedGatewayDeps({ vault: fakeVault(), verify: async () => VERDICT }).authenticate).toBeUndefined();
+    const authenticate = mountedAuthenticator({ chainId: 84532, principal: PRINCIPAL, admitted: () => null });
+    expect(buildMountedGatewayDeps({ vault: fakeVault(), verify: async () => VERDICT, authenticate }).authenticate).toBe(authenticate);
   });
 });

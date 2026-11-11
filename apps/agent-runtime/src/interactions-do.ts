@@ -26,6 +26,8 @@ import { kinTermFor, householdRoleFor } from '@agenticprimitives/ontology';
 import { hashDelegation, decodeTimestampTerms, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, SESSION_AUDIENCE_ENFORCER, decodeSessionAudienceTerms, type Delegation, type VaultRecordScopeGrant, currentWireOf, LINEAGE_RECORD_PREFIX, type DelegationLineageV1 } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
 import { governorOf, WORKSPACE_GOVERNOR_RECORD } from '@agenticprimitives/context';
+import { oversightContractsFromEnv } from '@ap-home/shared';
+import { oversightShapeCheck } from '@ap-home/shared/oversight-check';
 import { buildMountedGatewayDeps } from './gateway-mount.js';
 import { countedOp, countVaultCall } from '@agenticprimitives/harness';
 import { loadPlaybook } from './playbook-aliases.js';
@@ -65,6 +67,7 @@ import {
   type ChannelV1,
   type ConsultProvenanceV1,
   type ConsultRosterRowV1,
+  type EligibleConsultMemberV1,
   type ContextRefV1,
   type ConversationDescriptorV1,
   type DirectoryListingV1,
@@ -86,7 +89,7 @@ import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-sco
 import { wrapSessionSignature } from '@agenticprimitives/a2a';
 // spec 341 §7 — the in-Worker marker, split off the custody secret.
 import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
-import { PAIRING_KEY, PAIRING_INDEX_KEY, PAIRING_TTL_MS, PAIRING_CAP, mintCode, parsePairingOptions, claim as pairingClaim, complete as pairingComplete, take as pairingTake, isExpired as pairingExpired, type PairingStateV1 } from './runtime-pairing.js';
+import { PAIRING_KEY, PAIRING_INDEX_KEY, PAIRING_TTL_MS, PAIRING_CAP, mintCode, parsePairingOptions, claim as pairingClaim, complete as pairingComplete, take as pairingTake, isExpired as pairingExpired, checkProof as pairingCheckProof, noteMiss as pairingNoteMiss, confirmationOf as pairingConfirmationOf, PAIRING_MISS_KEY, type PairingStateV1 } from './runtime-pairing.js';
 import { parseRuntimeHost, RUNTIME_HOST_KEY, RUNTIME_WAKES_KEY, RUNTIME_WAKE_PREFIX, RUNTIME_WAKES_CAP, type WakeReceiptV1 } from './runtime-wake.js';
 import type { A2aTransport } from '@agenticprimitives/a2a';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
@@ -97,7 +100,8 @@ import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hm
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
 import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, interactionsSessionKeyConfigured, fireEndeavorEventTriggers, afterEndeavorCommit, type Env, type IncomingDelegation } from './index.js';
 import { checkSessionWireShape } from '@agenticprimitives/a2a';
-import { SERVICE_SIGNING_WIRE_KEY, SERVICE_SIGNING_WIRE_SKILLS, serviceSigningWireError, wireCovering, type ServiceSigningWireRecord } from './agent-signing-wire.js';
+import { namedTargetOr } from './wire-target.js';
+import { SERVICE_SIGNING_WIRE_KEY, SERVICE_SIGNING_WIRE_SKILLS, serviceSigningWireError, serviceWireKey, serviceWireTarget, wireCovering, type ServiceSigningWireRecord } from './agent-signing-wire.js';
 import { handleEndeavorOp, reduceEventLog, coordinationEventsResource, COORDINATION_REQUESTS_RESOURCE, type CoordinationRequestsDocV1, type EndeavorOpDeps } from './endeavors.js';
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
 import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
@@ -223,8 +227,11 @@ const INBOX_ASSISTANT_READ_LIMIT = 8;
 // message/send + tasks/get digests as the org. A stored wire lives with its delegate service
 // (spec 322 §2); the KMS key itself never rests here. Clearing this key is the org-side routing
 // kill switch (the on-chain revocation is the authority kill at every member's gate).
+// ONE WIRE PER RECEIVING AGENT (spec 445 RUN-9, owner decision): a session wire is a credential only at an agent it names, so
+// the org's routing wire is minted PER TARGET (a consulted member's agent, an archetype host) and kept under that target.
 const ROUTING_ORG_WIRE_KEY = 'routing.orgWire';
-interface RoutingOrgWireRecord { wire: IncomingDelegation; hash: string; sessionKey: string; enabledBy: string; enabledAt: string }
+const orgWireKey = (target: string): string => `${ROUTING_ORG_WIRE_KEY}:${target.toLowerCase()}`;
+interface RoutingOrgWireRecord { target?: string; wire: IncomingDelegation; hash: string; sessionKey: string; enabledBy: string; enabledAt: string }
 
 // spec 341 §5.1b — the DO-custodied PERSON MESSAGING wire. Same shape and same reason as the org
 // consult wire above, for the other direction of the same problem: the Home is this person's control
@@ -1682,8 +1689,8 @@ export class InteractionsDO {
   }
 
   /** GATE-TIME listing verification (spec 322 §4): current + ERC-1271-proven + not tombstoned. */
-  private async memberName(grant: IncomingDelegation, principal: string, sessionSaCaip: string): Promise<string | null> {
-    const rows = await this.readDoc<IndexedListing[]>(grant, DIRECTORY_RESOURCE, []);
+  private async memberName(grant: IncomingDelegation, principal: string, sessionSaCaip: string, preRead?: IndexedListing[]): Promise<string | null> {
+    const rows = preRead ?? await this.readDoc<IndexedListing[]>(grant, DIRECTORY_RESOURCE, []);
     const me = sessionSaCaip.toLowerCase();
     const now = new Date().toISOString();
     const mine = rows.find((l) => l.listing.subject.toLowerCase() === me && isListingCurrent(l.listing, now));
@@ -1759,45 +1766,18 @@ export class InteractionsDO {
     return ok;
   }
 
-  private hasStewardshipShape(wire: IncomingDelegation): boolean {
-    // NEW-H2 — FAIL CLOSED on an unconfigured enforcer. If ALLOWED_TARGETS_ENFORCER is unset (wrangler
-    // binds "" for a placeholder var), the old `enforcer(c) === ''` matched ANY caveat with a missing/empty
-    // enforcer → a record-scoped member wire (with a blank-enforcer caveat) would pass as stewardship
-    // (member→steward escalation). A stewardship wire is unrecognizable without the real governance-targets
-    // address, so no address ⇒ no stewardship.
-    const targetEnforcer = (this.env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase();
-    if (!/^0x[0-9a-f]{40}$/.test(targetEnforcer)) return false;
-    const caveats = wire.caveats ?? [];
-    const enforcer = (c: { enforcer?: string }): string => (c.enforcer ?? '').toLowerCase();
-
-    // STEWARD-SHAPE-CONFUSION-1 — stewardship must be a POSITIVE identity, not "allowedTargets present ∧ no
-    // record-scope". Payment mandates ([payment, timestamp, allowedTargets, allowedMethods]) and A2A message
-    // grants ([timestamp, allowedTargets, allowedMethods]) ALSO carry allowedTargets and no record-scope, so
-    // the old negative test accepted any of them as a steward proof → member/outsider → steward escalation
-    // (the SEC-C1 hole reached through a different wire shape). The genuine steward/site wire
-    // (`buildSiteDelegation`/`siteCaveats`): carries NO allowedMethods and NO record-scope caveat, AND its
-    // allowedTargets terms pin the GOVERNANCE contracts (agentRelationship + agentNameRegistry + subregistry).
-    // A payment mandate targets an asset; an a2a grant targets the recipient agent — neither names the
-    // governance registries — and both add allowedMethods, so both are rejected here.
-    const methodsEnforcer = (this.env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
-    if (methodsEnforcer && caveats.some((c) => enforcer(c) === methodsEnforcer)) return false; // a2a grant / payment mandate
-    if (caveats.some((c) => enforcer(c) === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase())) return false; // data grant (SEC-C1)
-
-    const rel = (this.env.AGENT_RELATIONSHIP ?? '').toLowerCase();
-    const reg = (this.env.AGENT_NAME_REGISTRY ?? '').toLowerCase();
-    // Fail closed if we can't positively identify the governance targets (prod injects both; org-create
-    // already depends on them). No governance anchor ⇒ no stewardship.
-    if (!/^0x[0-9a-f]{40}$/.test(rel) || !/^0x[0-9a-f]{40}$/.test(reg)) return false;
-    const targetsCav = caveats.find((c) => enforcer(c) === targetEnforcer);
-    if (!targetsCav?.terms) return false;
-    let targets: string[];
-    try {
-      targets = (decodeAbiParameters([{ type: 'address[]' }], targetsCav.terms as Hex)[0] as readonly Address[]).map((a) => a.toLowerCase());
-    } catch { return false; }
-    // The site wire pins [agentRelationship, agentNameRegistry, subregistry]; require BOTH registries to be
-    // present so a wire whose allowedTargets name anything else (asset, agent SA, host endpoint) is not
-    // stewardship.
-    return targets.includes(rel) && targets.includes(reg);
+  /** Spec 445 (audit RUNC-1 / STEWARD-SHAPE-CONFUSION-1) — ONE definition of stewardship in this repository:
+   *  the package's positive check over the ontology's OVERSIGHT_DELEGATION, with the target set the minter uses
+   *  (`@ap-home/shared` oversight-targets). EVERY caveat must be allowedTargets · timestamp · value, each at
+   *  most once; the targets name both governance registries and nothing outside the declared set; the window is
+   *  current; the value is zero. A payment mandate, an A2A message grant, a data grant, an enforcer this estate
+   *  has never seen, an unconfigured enforcer or registry: not stewardship. The local test this replaces
+   *  excluded two known kinds (allowedMethods, record scope) and so admitted any future third.
+   *  SHAPE ONLY — `isSteward` runs `verifyWire` (signature + revocation) after it. */
+  private oversightShape: ReturnType<typeof oversightShapeCheck> | null = null;
+  private hasStewardshipShape(principal: string, sessionSa: string, wire: IncomingDelegation): Promise<boolean> {
+    this.oversightShape ??= oversightShapeCheck(oversightContractsFromEnv(this.env), { chainId: chainIdOf(this.env), delegationManager: this.env.DELEGATION_MANAGER });
+    return this.oversightShape({ org: principal, person: sessionSa, wire });
   }
 
   /** Organization-resource-access proof (SEC-H1): a presented org→member organizationResourceAccessDelegation wire — the ORG's
@@ -2023,6 +2003,82 @@ export class InteractionsDO {
     return { admitted: true, steward, listed: !!listingName, you };
   }
 
+  /**
+   * IS THIS AGENT A CURRENT MEMBER HERE — by the ORGANIZATION's own records (spec 445 §3.4, audit DATB-3).
+   *
+   * The same two tests this object's admission gate and `internal.member.recorded` apply: the spec-382
+   * membership record (`org.membership:member:<sa>`, re-checked on chain by `recordedMemberName`), else a
+   * current, ERC-1271-proven, non-tombstoned directory listing (`memberName`). One rule is added, and it only
+   * narrows: a membership record the organization stamped `endedAt` (left, or removed by a steward —
+   * `org.endMembership`) is NOT overridden by a listing that still stands. Ending a membership is the one act
+   * the organization has for saying "no longer"; a projection that was not cleaned up must not undo it.
+   *
+   * Fail closed: a record that cannot be read is not shown to be current. NEVER reads the consult grant store —
+   * holding a grant is the member's consent, and it outlives a departure.
+   */
+  private async isCurrentMember(grant: IncomingDelegation, principal: string, member: string, directory?: IndexedListing[]): Promise<boolean> {
+    const me = member.toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(me) || me === principal.toLowerCase()) return false;
+    let rec: { endedAt?: unknown } | null;
+    try { rec = await this.readDoc<{ endedAt?: unknown } | null>(grant, `org.membership:member:${me}`, null); } catch { return false; }
+    if (rec && rec.endedAt) return false;
+    try {
+      if (rec && (await this.recordedMemberName(grant, principal, me as Address))) return true;
+      return !!(await this.memberName(grant, principal, `eip155:${chainIdOf(this.env)}:${me}`, directory));
+    } catch { return false; }
+  }
+
+  /** Which of `candidates` are current members (see `isCurrentMember`). A few at a time: each is a vault read
+   *  and a chain proof, and a routed topic turn asks about every grant holder. */
+  private async currentMembersAmong(grant: IncomingDelegation, principal: string, candidates: readonly string[], directory: IndexedListing[]): Promise<string[]> {
+    const asked = [...new Set(candidates.map((c) => String(c).toLowerCase()).filter((c) => /^0x[0-9a-f]{40}$/.test(c)))];
+    const current: string[] = [];
+    for (let i = 0; i < asked.length; i += 6) {
+      const batch = asked.slice(i, i + 6);
+      const verdicts = await Promise.all(batch.map((m) => this.isCurrentMember(grant, principal, m, directory)));
+      batch.forEach((m, j) => { if (verdicts[j]) current.push(m); });
+    }
+    return current;
+  }
+
+  /**
+   * CONSULT ELIGIBILITY at this organization: CURRENT MEMBER ∩ LIVE GRANT ∩ topic participants, by fabric's
+   * pure intersection (spec 329 §4; spec 445 §3.4). The two sets come from two sources and are never the same
+   * array: `grantMembers` from this object's grant store (the member's opt-in), `currentMembers` from the
+   * organization's membership records (`currentMembersAmong`). Before spec 445 the grant store was passed as
+   * both, so a departed member whose grant was still live was sent the question, the topic's title and its tail.
+   * `only` narrows the question to one member (the send-time re-check); `channel` null ⇒ no topic scope.
+   */
+  /** The receiving agents the org's routing wires name (RUN-9: one wire per target, kept under `routing.orgWire:<target>`). */
+  private async orgWireTargets(): Promise<string[]> {
+    const m = await this.state.storage.list({ prefix: `${ROUTING_ORG_WIRE_KEY}:` });
+    return [...m.keys()].map((k) => String(k).slice(ROUTING_ORG_WIRE_KEY.length + 1));
+  }
+
+  private async consultEligible(grant: IncomingDelegation, principal: string, channel: Pick<ChannelV1, 'participationPolicy' | 'visibility' | 'members'> | null, only?: string): Promise<EligibleConsultMemberV1[]> {
+    const now = new Date().toISOString();
+    const rows = await this.readDoc<IndexedListing[]>(grant, DIRECTORY_RESOURCE, []);
+    const roster: ConsultRosterRowV1[] = rows.map((l) => ({
+      subject: l.listing.subject,
+      displayName: l.listing.displayName || l.label,
+      consultable: l.listing.consultable === true,
+      // spec 329 §12 — the member's self-asserted primary role in THIS org, straight from
+      // their signed listing (never derived, never steward-set).
+      ...(l.listing.orgRole?.trim() ? { orgRole: l.listing.orgRole.trim() } : {}),
+      current: isListingCurrent(l.listing, now),
+    }));
+    const prefix = consultGrantRecordKey('');
+    const grantKeys = await this.state.storage.list({ prefix });
+    const holders = [...grantKeys.keys()].map((k) => k.slice(prefix.length).toLowerCase());
+    const grantMembers = only ? holders.filter((m) => m === only.toLowerCase()) : holders;
+    // Only those a restricted topic could consult at all are worth a membership proof.
+    const scope = channel ?? ({ participationPolicy: 'open' } as Pick<ChannelV1, 'participationPolicy' | 'visibility' | 'members'>);
+    const participants = channelParticipationPolicy(scope) === 'restricted' ? new Set((scope.members ?? []).map((m) => m.toLowerCase())) : null;
+    const candidates = participants ? grantMembers.filter((m) => participants.has(m)) : grantMembers;
+    const currentMembers = await this.currentMembersAmong(grant, principal, candidates, rows);
+    return eligibleConsultMembers({ roster, channel: scope, currentMembers, grantMembers, orgSA: principal });
+  }
+
   /** Spec 382 — the organization's own record that this session's principal is a CURRENT member, its grant
    *  re-checked against the chain. The display name it records, or null. Never authority (ADR-0041). */
   private async recordedMemberName(grant: IncomingDelegation, principal: string, sessionSa: Address): Promise<string | null> {
@@ -2201,7 +2257,11 @@ export class InteractionsDO {
    */
   private async serviceSigningWireOp(op: string, principal: string, sessionSa: Address, body: Record<string, unknown>): Promise<Response> {
     const audit = buildAuditSink(this.env);
-    const rec = (await this.state.storage.get(SERVICE_SIGNING_WIRE_KEY)) as ServiceSigningWireRecord | undefined;
+    // ONE WIRE PER RECEIVING AGENT (RUN-9): status and clear name the publisher (`target`); enable takes it from the wire.
+    const ADDR = /^0x[0-9a-fA-F]{40}$/;
+    const askedTarget = typeof body.target === 'string' && ADDR.test(body.target) ? body.target.toLowerCase() : null;
+    if (typeof body.target === 'string' && body.target && !askedTarget) return json({ error: 'target must be the receiving agent\'s address' }, 400);
+    const rec = askedTarget ? ((await this.state.storage.get(serviceWireKey(askedTarget))) as ServiceSigningWireRecord | undefined) : undefined;
     const sessionKeyOf = async (): Promise<string | null> => {
       try { return (this.deps?.sessionKeyAddress ? await this.deps.sessionKeyAddress() : (await interactionsSessionAccount(this.env)).address).toLowerCase(); } catch { return null; }
     };
@@ -2213,12 +2273,15 @@ export class InteractionsDO {
       try { return ts?.terms ? Number(decodeTimestampTerms(ts.terms as Hex).validUntil) : null; } catch { return null; }
     };
     if (op === 'signing.wireStatus') {
+      const all = [...(await this.state.storage.list<ServiceSigningWireRecord>({ prefix: `${SERVICE_SIGNING_WIRE_KEY}:` })).values()];
       return json({
         ok: true, wirePresent: !!rec, sessionKey: await sessionKeyOf(), skills: [...SERVICE_SIGNING_WIRE_SKILLS],
+        wires: all.map((r) => ({ target: r.target ?? serviceWireTarget(r.wire, this.env.ALLOWED_TARGETS_ENFORCER ?? ''), hash: r.hash, enabledAt: r.enabledAt, validUntil: validUntilOf(r.wire) })),
         ...(rec ? { hash: rec.hash, enabledAt: rec.enabledAt, enabledBy: rec.enabledBy, validUntil: validUntilOf(rec.wire), wire: rec.wire } : {}),
       });
     }
     if (op === 'signing.wireClear') {
+      if (!askedTarget) return json({ error: 'target (the receiving agent whose wire is cleared) is required' }, 400);
       if (!rec) return json({ ok: true, cleared: false });
       const until = validUntilOf(rec.wire);
       const expired = until !== null && Math.floor(Date.now() / 1000) >= until;
@@ -2227,7 +2290,7 @@ export class InteractionsDO {
         try { gone = await revoked(rec.hash as Hex); } catch { return json({ error: 'revocation check unavailable — the wire is kept (fail-closed)' }, 503); }
       }
       if (!gone) return json({ error: 'the signing wire is still live — its custodian revokes it on chain first; then it is cleared here' }, 409);
-      await this.state.storage.delete(SERVICE_SIGNING_WIRE_KEY);
+      await this.state.storage.delete(serviceWireKey(askedTarget));
       await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.signingWire.clear', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'delegation', id: rec.hash } });
       return json({ ok: true, cleared: true });
     }
@@ -2241,9 +2304,11 @@ export class InteractionsDO {
     const amEnf = (this.env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
     if (![tsEnf, atEnf, amEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))) return json({ error: 'wire enforcers not configured — cannot verify the signing wire\'s shape' }, 503);
     const incoming = body.delegation as IncomingDelegation | undefined;
-    const shapeErr = serviceSigningWireError(incoming, { principal, sessionKey, enforcers: { timestamp: tsEnf, allowedTargets: atEnf, allowedMethods: amEnf }, nowSec: Math.floor(Date.now() / 1000) });
+    const shapeErr = serviceSigningWireError(incoming, { principal, sessionKey, enforcers: { timestamp: tsEnf, allowedTargets: atEnf, allowedMethods: amEnf }, nowSec: Math.floor(Date.now() / 1000), ...(askedTarget ? { target: askedTarget } : {}) });
     if (shapeErr) return json({ error: shapeErr }, 400);
     const w = incoming!;
+    const target = serviceWireTarget(w, atEnf)!; // the shape check above proved it names exactly one
+    const prior = (await this.state.storage.get(serviceWireKey(target))) as ServiceSigningWireRecord | undefined;
     if (w.signature.toLowerCase().startsWith('0x51')) return json({ error: 'the signing wire must be signed by the service agent\'s custodian (ERC-1271), never session-wrapped' }, 400);
     const d: Delegation = { ...w, salt: BigInt(w.salt), caveats: w.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
     const digest = hashDelegation(d, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
@@ -2253,20 +2318,20 @@ export class InteractionsDO {
     try {
       if (await revoked(digest)) return json({ error: 'the signing wire is already revoked on-chain' }, 403);
     } catch { return json({ error: 'revocation check unavailable — wire not stored (fail-closed)' }, 503); }
-    const next: ServiceSigningWireRecord = { wire: w, hash: digest, sessionKey, skills: [...SERVICE_SIGNING_WIRE_SKILLS], enabledBy: sessionSa.toLowerCase(), enabledAt: new Date().toISOString() };
-    await this.state.storage.put(SERVICE_SIGNING_WIRE_KEY, next);
+    const next: ServiceSigningWireRecord = { target, wire: w, hash: digest, sessionKey, skills: [...SERVICE_SIGNING_WIRE_SKILLS], enabledBy: sessionSa.toLowerCase(), enabledAt: new Date().toISOString() };
+    await this.state.storage.put(serviceWireKey(target), next);
     const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
-    st.ledger = [...(st.ledger ?? []), { hash: digest, delegate: sessionKey, resources: ['(signing:library.granted.read)'], storedAt: next.enabledAt }].slice(-50);
+    st.ledger = [...(st.ledger ?? []), { hash: digest, delegate: sessionKey, resources: [`(signing:library.granted.read@${target})`], storedAt: next.enabledAt }].slice(-50);
     await this.state.storage.put('state', st);
     await audit.write({ id: crypto.randomUUID(), timestamp: next.enabledAt, action: 'interactions.signingWire.enable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'delegation', id: digest } });
-    return json({ ok: true, hash: digest, replaced: rec?.hash ?? null, skills: next.skills, validUntil: validUntilOf(w) });
+    return json({ ok: true, hash: digest, target, replaced: prior?.hash ?? null, skills: next.skills, validUntil: validUntilOf(w) });
   }
 
   private async isSteward(principal: string, sessionSa: Address, wire: IncomingDelegation | undefined): Promise<boolean> {
     if (!wire) return false;
     if (wire.delegator.toLowerCase() !== principal.toLowerCase()) return false;
     if (wire.delegate.toLowerCase() !== sessionSa.toLowerCase()) return false;
-    if (!this.hasStewardshipShape(wire)) return false; // SEC-C1: a member-access grant is NOT stewardship
+    if (!(await this.hasStewardshipShape(principal, sessionSa, wire))) return false; // positive identity: only the oversight wire is stewardship
     // SHAPE decided above (app policy — a positive identity test); LIVENESS by the substrate.
     return this.verifyWire(wire, principal, sessionSa);
   }
@@ -2726,8 +2791,10 @@ export class InteractionsDO {
       if (!isInternalCall(request, this.env)) return json({ error: 'internal op — not authorized' }, 403);
       const skill = String(body.skill ?? '').trim();
       if (!skill) return json({ error: 'skill required' }, 400);
-      const svc = (await this.state.storage.get(SERVICE_SIGNING_WIRE_KEY)) as ServiceSigningWireRecord | undefined;
-      const org = (await this.state.storage.get(ROUTING_ORG_WIRE_KEY)) as RoutingOrgWireRecord | undefined;
+      // ONE service wire per receiving agent (RUN-9): the publisher the message goes to picks which one.
+      const forTarget = typeof body.target === 'string' && /^0x[0-9a-fA-F]{40}$/.test(body.target) ? body.target.toLowerCase() : null;
+      const svc = forTarget ? ((await this.state.storage.get(serviceWireKey(forTarget))) as ServiceSigningWireRecord | undefined) : undefined;
+      const org = forTarget ? ((await this.state.storage.get(orgWireKey(forTarget))) as RoutingOrgWireRecord | undefined) : undefined;
       const wire = wireCovering({ service: svc?.wire ?? null, org: org?.wire ?? null }, this.env.ALLOWED_METHODS_ENFORCER ?? '', skill);
       return json({ ok: true, wire, from: wire && wire === svc?.wire ? SERVICE_SIGNING_WIRE_KEY : wire ? ROUTING_ORG_WIRE_KEY : null });
     }
@@ -3971,24 +4038,13 @@ export class InteractionsDO {
           const entry = index.find((c) => c.descriptor.id === channelId);
           if (!entry) return json({ error: 'unknown channel' }, 404);
           const routing = entry.routing;
-          const wireRec = (await this.state.storage.get(ROUTING_ORG_WIRE_KEY)) as RoutingOrgWireRecord | undefined;
+          const wireRec = (await this.orgWireTargets()).length > 0;
           if (!routing || !entry.assistant || !wireRec) {
             return json({ ok: true, enabled: false, maxFanout: 0, members: [] });
           }
-          const now = new Date().toISOString();
-          const rows = await this.readDoc<IndexedListing[]>(g, DIRECTORY_RESOURCE, []);
-          const roster: ConsultRosterRowV1[] = rows.map((l) => ({
-            subject: l.listing.subject,
-            displayName: l.listing.displayName || l.label,
-            consultable: l.listing.consultable === true,
-            // spec 329 §12 — the member's self-asserted primary role in THIS org, straight from
-            // their signed listing (never derived, never steward-set).
-            ...(l.listing.orgRole?.trim() ? { orgRole: l.listing.orgRole.trim() } : {}),
-            current: isListingCurrent(l.listing, now),
-          }));
-          const grantKeys = await this.state.storage.list({ prefix: consultGrantRecordKey('') });
-          const grantMembers = [...grantKeys.keys()].map((k) => k.slice(consultGrantRecordKey('').length));
-          const members = eligibleConsultMembers({ roster, channel: entry, grantMembers, orgSA: principal });
+          // Spec 445 (audit DATB-3) — current member ∩ live grant ∩ topic participants; membership is read from
+          // the organization's own records, never from the grant store (`consultEligible`).
+          const members = await this.consultEligible(g, principal, entry);
           return json({ ok: true, enabled: true, maxFanout: routing.maxFanout, members });
         }
         if (op === 'internal.session.leaf') {
@@ -4005,7 +4061,10 @@ export class InteractionsDO {
         }
         if (op === 'internal.consult.orgWire') {
           // The §3.1 wire, handed ONLY in-Worker to the org's own A2aTaskDO (the routing signer).
-          const wireRec = (await this.state.storage.get(ROUTING_ORG_WIRE_KEY)) as RoutingOrgWireRecord | undefined;
+          // RUN-9 — one wire per receiving agent: `target` picks it. With no target the answer is only WHICH agents have one.
+          const t = typeof body.target === 'string' && /^0x[0-9a-fA-F]{40}$/.test(body.target) ? body.target.toLowerCase() : null;
+          if (!t) return json({ ok: true, wire: null, targets: await this.orgWireTargets() });
+          const wireRec = (await this.state.storage.get(orgWireKey(t))) as RoutingOrgWireRecord | undefined;
           if (!wireRec) return json({ ok: true, wire: null });
           return json({ ok: true, wire: wireRec.wire, sessionKey: wireRec.sessionKey });
         }
@@ -4016,7 +4075,17 @@ export class InteractionsDO {
           const member = String(body.member ?? '').toLowerCase();
           if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ error: 'member (address) required' }, 400);
           const rec = (await this.state.storage.get(consultGrantRecordKey(member))) as { wire?: IncomingDelegation } | undefined;
-          return json({ ok: true, wire: rec?.wire ?? null });
+          // Spec 445 (audit DATB-3) — the grant is the member's CONSENT, not their membership. The sender also
+          // gets this member's eligibility (current member ∩ live grant ∩, when the run came from a topic, its
+          // participants) and builds no request without it: a departed member whose grant is still live is
+          // sent nothing. An unknown topic is no topic scope satisfied — nobody is eligible.
+          let eligible: EligibleConsultMemberV1[] = [];
+          if (rec?.wire) {
+            const channelId = String(body.channelId ?? '');
+            const entry = channelId ? (await this.readDoc<ChannelV1[]>(g, CONVERSATION_INDEX_RESOURCE, [])).find((c) => c.descriptor.id === channelId) : null;
+            if (!channelId || entry) eligible = await this.consultEligible(g, principal, entry ?? null, member).catch(() => []);
+          }
+          return json({ ok: true, wire: rec?.wire ?? null, eligible });
         }
         if (op === 'internal.member.current') {
           // The messaging scope-class roster read (spec 341 §5.1c): which of these agents are CURRENT
@@ -4592,7 +4661,22 @@ export class InteractionsDO {
         if (op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take') {
           const code = String(body.code ?? '').trim();
           const cur = (await this.state.storage.get(PAIRING_KEY(code))) as PairingStateV1 | undefined;
-          if (!cur) return json({ ok: false, error: 'unknown code — mint one at the Home' }, 404);
+          if (!cur || pairingExpired(cur)) {
+            // RUNB-12 — a well-formed code that is not outstanding is a MISS; the fifth voids every outstanding code of
+            // this person's (she mints a new one), so a typed-by-hand code cannot be searched for.
+            const miss = pairingNoteMiss(await this.state.storage.get(PAIRING_MISS_KEY));
+            await this.state.storage.put(PAIRING_MISS_KEY, miss.ledger);
+            if (miss.void) {
+              const outstanding = ((await this.state.storage.get(PAIRING_INDEX_KEY)) as string[] | undefined) ?? [];
+              for (const c of outstanding) await this.state.storage.delete(PAIRING_KEY(c));
+              await this.state.storage.put(PAIRING_INDEX_KEY, []);
+              await buildAuditSink(this.env).write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.runtime.pairingVoided', outcome: 'denied', actor: { type: 'service', id: principal }, subject: { type: 'runtime-pairing', id: 'all' }, reason: 'too many unknown pairing codes' });
+            }
+            return json({ ok: false, error: miss.void ? 'too many unknown codes — every outstanding code was voided; mint a new one at the Home' : 'unknown code — mint one at the Home' }, 404);
+          }
+          // RUNB-12 — proof of possession: the claim and the take are signed by the key they name.
+          const proofErr = await pairingCheckProof(op === 'internal.runtime.pairing.claim' ? 'claim' : 'take', { code, address: body.address, home: body.home, proof: body.proof });
+          if (proofErr) return json({ ok: false, error: proofErr }, 403);
           if (op === 'internal.runtime.pairing.claim') {
             const r = pairingClaim(cur, { address: String(body.address ?? ''), ...(body.wake !== undefined ? { wake: body.wake } : {}), ...(typeof body.agent === 'string' ? { agent: body.agent } : {}) });
             if (!r.ok) return json({ ok: false, error: r.error }, 409);
@@ -5498,7 +5582,7 @@ export class InteractionsDO {
         }
         if (op === 'runtime.pairing.list') {
           const out: PairingStateV1[] = [];
-          for (const c of live) { const st = (await this.state.storage.get(PAIRING_KEY(c))) as PairingStateV1 | undefined; if (st) { const { record: _r, ...rest } = st as PairingStateV1 & { record?: unknown }; out.push(rest as PairingStateV1); } }
+          for (const c of live) { const st = (await this.state.storage.get(PAIRING_KEY(c))) as PairingStateV1 | undefined; if (st) { const { record: _r, ...rest } = st as PairingStateV1 & { record?: unknown }; const confirmation = pairingConfirmationOf(rest as PairingStateV1); out.push((confirmation ? { ...rest, confirmation } : rest) as PairingStateV1); } }
           await this.state.storage.put(PAIRING_INDEX_KEY, live);
           return json({ ok: true, pairings: out });
         }
@@ -5592,11 +5676,19 @@ export class InteractionsDO {
         const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
         if (!steward) return json({ error: 'only the organization custodian may manage member routing' }, 403);
         if (op === 'consult.routingStatus') {
-          const wireRec = (await this.state.storage.get(ROUTING_ORG_WIRE_KEY)) as RoutingOrgWireRecord | undefined;
+          const wireTargets = await this.orgWireTargets();
           // The session-key address the CLIENT needs to mint the wire (the NEW-C1 key, §3.1 pairing).
           let sessionKey: string | null = null;
           try { sessionKey = (await interactionsSessionAccount(this.env)).address; } catch { /* unprovisioned ⇒ null */ }
-          return json({ ok: true, wirePresent: !!wireRec, enabledAt: wireRec?.enabledAt ?? null, sessionKey });
+          const asked = typeof body.target === 'string' && /^0x[0-9a-fA-F]{40}$/.test(body.target) ? body.target.toLowerCase() : null;
+          const rec = asked ? ((await this.state.storage.get(orgWireKey(asked))) as RoutingOrgWireRecord | undefined) : undefined;
+          // RUN-9 — the agents a wire is WANTED for: every member whose consult grant this org holds and every archetype host it
+          // holds a dispatch grant from. The ceremony mints one wire per agent here that has none.
+          const gp = consultGrantRecordKey('');
+          const wanted = new Set<string>([...(await this.state.storage.list({ prefix: gp })).keys()].map((k) => String(k).slice(gp.length).toLowerCase()));
+          for (const [, v] of await this.state.storage.list({ prefix: archetypeGrantRecordKey('') })) { const h = (v as { host?: string })?.host; if (h) wanted.add(h.toLowerCase()); }
+          const wantedTargets = [...wanted].filter((t) => /^0x[0-9a-f]{40}$/.test(t));
+          return json({ ok: true, wirePresent: asked ? !!rec : wireTargets.length > 0, wireTargets, wantedTargets, enabledAt: rec?.enabledAt ?? null, sessionKey });
         }
         const channelId = String(body.channelId ?? '');
         if (!channelId) return json({ error: 'channelId required' }, 400);
@@ -5606,7 +5698,7 @@ export class InteractionsDO {
             const r = setTopicRouting(index, channelId, undefined);
             if (!r.ok) return json({ error: r.error }, 404);
             await this.writeDoc(grant, CONVERSATION_INDEX_RESOURCE, index);
-            if (body.clearWire === true) await this.state.storage.delete(ROUTING_ORG_WIRE_KEY);
+            if (body.clearWire === true) await this.state.storage.delete((await this.orgWireTargets()).map(orgWireKey));
             // Steward disable = immediate: pending consults for this topic are cancelled at the
             // org's task runtime (in-Worker, marker-gated). Best-effort — the turn-2 poller also
             // re-checks the wire/flag and drops on absence (belt to this suspender).
@@ -5622,7 +5714,7 @@ export class InteractionsDO {
           });
         }
         // consult.routingEnable — verify + custody the wire (when supplied / first enable), then flag the topic.
-        const wireRec = (await this.state.storage.get(ROUTING_ORG_WIRE_KEY)) as RoutingOrgWireRecord | undefined;
+        const wireRec = (await this.orgWireTargets()).length > 0;
         const incoming = body.delegation as IncomingDelegation | undefined;
         if (!wireRec && !incoming) return json({ error: 'org consult wire required — the routing ceremony signs it first' }, 400);
         if (incoming) {
@@ -5635,11 +5727,18 @@ export class InteractionsDO {
           if (incoming.delegate.toLowerCase() !== sessionKey) return json({ error: 'org consult wire delegate must be the interactions-session key' }, 400);
           const tsEnf = (this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase();
           const amEnf = (this.env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
-          if (![tsEnf, amEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))) return json({ error: 'consult enforcers not configured — cannot verify the wire shape' }, 503);
+          const atEnfC = (this.env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase();
+          if (![tsEnf, amEnf, atEnfC].every((a) => /^0x[0-9a-f]{40}$/.test(a))) return json({ error: 'consult enforcers not configured — cannot verify the wire shape' }, 503);
           // Ceremony store time for the CONSULT rail specifically — pin the consult selector, the
           // behaviour this check always had. The shape function is now skill-agnostic, so the pin
           // has to be stated rather than assumed.
-          const shapeErr = checkSessionWireShape(incoming, { timestamp: tsEnf, allowedMethods: amEnf }, Math.floor(Date.now() / 1000), { skill: CONSULT_SKILL_ID });
+          // RUN-9 — kept for later presentation at each agent it names: stored only if it names a target (the gate checks the host).
+          // RUN-9 (owner decision: one wire per target) — the wire names EXACTLY ONE receiving agent, never the org itself (a wire
+          // naming only its sender reaches no member or host), and is kept under that agent.
+          const wireTarget = serviceWireTarget(incoming, atEnfC);
+          if (!wireTarget) return json({ error: 'the org routing wire must carry an allowedTargets caveat naming exactly one receiving agent (the member or host it will be presented to) — one wire per target' }, 400);
+          if (wireTarget === principal) return json({ error: 'the org routing wire must name the RECEIVING agent (a member or host), not the organization itself — a wire is a credential only at the agent it names' }, 400);
+          const shapeErr = checkSessionWireShape(incoming, { timestamp: tsEnf, allowedMethods: amEnf, allowedTargets: atEnfC }, Math.floor(Date.now() / 1000), { target: wireTarget, skill: CONSULT_SKILL_ID });
           if (shapeErr) return json({ error: shapeErr }, 400);
           const d: Delegation = { ...incoming, salt: BigInt(incoming.salt), caveats: incoming.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
           const digest = hashDelegation(d, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
@@ -5650,8 +5749,8 @@ export class InteractionsDO {
             const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
             if (revoked) return json({ error: 'org consult wire is already revoked on-chain' }, 403);
           } catch { return json({ error: 'revocation check unavailable — wire not stored (fail-closed)' }, 503); }
-          const rec: RoutingOrgWireRecord = { wire: incoming, hash: digest, sessionKey, enabledBy: sessionSa.toLowerCase(), enabledAt: new Date().toISOString() };
-          await this.state.storage.put(ROUTING_ORG_WIRE_KEY, rec);
+          const rec: RoutingOrgWireRecord = { target: wireTarget, wire: incoming, hash: digest, sessionKey, enabledBy: sessionSa.toLowerCase(), enabledAt: new Date().toISOString() };
+          await this.state.storage.put(orgWireKey(wireTarget), rec);
           st.ledger = [...(st.ledger ?? []), { hash: digest, delegate: sessionKey, resources: ['(routing:consult-sign)'], storedAt: rec.enabledAt }].slice(-50);
           await this.state.storage.put('state', st);
         }
@@ -5995,7 +6094,7 @@ export class InteractionsDO {
           if (incoming.delegate.toLowerCase() !== sessionKey) {
             return json({ error: 'messaging wire delegate must be the interactions-session key' }, 400);
           }
-          const shapeErr = checkSessionWireShape(incoming, { timestamp: tsEnf, allowedMethods: amEnf }, Math.floor(Date.now() / 1000), { skill: MESSAGING_DELIVER_SKILL });
+          const shapeErr = checkSessionWireShape(incoming, { timestamp: tsEnf, allowedMethods: amEnf, allowedTargets: atEnf }, Math.floor(Date.now() / 1000), { target: namedTargetOr(incoming, atEnf, principal), skill: MESSAGING_DELIVER_SKILL });
           if (shapeErr) return json({ error: shapeErr }, 400);
           const wireProof = await provenByPerson(incoming);
           if (!wireProof.ok) return wireProof.res;
@@ -6007,7 +6106,7 @@ export class InteractionsDO {
           if (incomingTransport.delegator.toLowerCase() !== principal || incomingTransport.delegate.toLowerCase() !== principal) {
             return json({ error: 'the transport grant must be this person delegating to themselves' }, 400);
           }
-          const tShape = checkSessionWireShape(incomingTransport, { timestamp: tsEnf, allowedMethods: amEnf }, Math.floor(Date.now() / 1000), { skill: MESSAGING_DELIVER_SKILL });
+          const tShape = checkSessionWireShape(incomingTransport, { timestamp: tsEnf, allowedMethods: amEnf, allowedTargets: atEnf }, Math.floor(Date.now() / 1000), { target: namedTargetOr(incomingTransport, atEnf, principal), skill: MESSAGING_DELIVER_SKILL });
           if (tShape) return json({ error: `transport grant: ${tShape}` }, 400);
           // It must NAME its recipients. Without this caveat the grant is unbounded, and "approve this
           // contact" would be a client-side preference rather than an on-chain-revocable bound.
@@ -6046,8 +6145,9 @@ export class InteractionsDO {
         // a reply cannot be redirected by the other party.
         let recipient = String(body.recipient ?? '').toLowerCase();
         let recipientName = String(body.recipientName ?? '').trim().toLowerCase();
-        // Bare label → public agent name. The send is still to an address; this is the map.
-        if (recipientName && !recipientName.includes('.')) recipientName = `${recipientName}.impact`;
+        // Bare label → a PERSON's public name (`.me` — the bare-host root; every other type is addressed by its
+        // typed name). The send is still to an address; this is the map.
+        if (recipientName && !recipientName.includes('.')) recipientName = `${recipientName}.me`;
         const convId = String(body.conversationId ?? '');
         if (!recipient && recipientName) {
           if (!this.env.RPC_URL || !this.env.AGENT_NAME_REGISTRY || !this.env.AGENT_NAME_UNIVERSAL_RESOLVER) {
@@ -6121,6 +6221,7 @@ export class InteractionsDO {
             const out = await deliverOutbound({
               personSA: principal as Address,
               recipientSA: recipient as Address,
+              chainId: chainIdOf(this.env),
               transportGrant: rec.transport,
               signAsPerson: async (h: Hex) => {
                 const acct = await interactionsSessionAccount(this.env);
@@ -6174,6 +6275,7 @@ export class InteractionsDO {
           const out = await deliverOutbound({
             personSA: principal as Address,
             recipientSA: recipient as Address,
+            chainId: chainIdOf(this.env),
             transportGrant: rec.transport,
             // Sign as the PERSON: the KMS key produces the raw ECDSA, and the signing wire that
             // authorizes it is wrapped in alongside (`0x51`). The recipient unwraps and re-verifies

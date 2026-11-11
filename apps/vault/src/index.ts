@@ -424,8 +424,12 @@ export interface Env extends AkcsEnv {
    * Same value as demo-a2a's A2A_MAC_SECRET. When unset, the
    * service-mac middleware fails closed in production
    * (NODE_ENV === 'production') and bypasses with a loud warning in
-   * dev for ergonomic local hacking. Production preflight enforces
-   * its presence.
+   * dev for ergonomic local hacking. NOTHING CHECKS ITS PRESENCE BEFORE A
+   * DEPLOY: the "production preflight" this comment used to cite
+   * (`scripts/check-production-deploy.ts`) was not carried in the repository
+   * split and exists nowhere. What holds today is the request-time refusal in
+   * the service-mac middleware below, and `pnpm check:estate-shape`, which
+   * diffs secret NAMES against each estate's declaration when it is run.
    */
   A2A_MAC_SECRET?: string;
   /**
@@ -515,6 +519,9 @@ export interface Env extends AkcsEnv {
    *  per-principal bucket there, and starving the agent's reads is not what the limit is for. */
   STAGE2_VERIFIED_LIMIT?: string;
   STAGE2_VERIFIED_WINDOW_MS?: string;
+  /** The HMAC secret for the Stage-2 bucket keys (ING-18). Unset ⇒ the first of GATEWAY_ASSERTION_SECRET /
+   *  A2A_MAC_SECRET / OAUTH_SIGNING_SECRET that is set; none ⇒ the soft limiter is off, with a warning. */
+  STAGE2_RATE_LIMIT_SECRET?: string;
 }
 
 // spec 289 §5 — the resilient chain-read authority port (W1 revocation + W2 acceptance). Built once per
@@ -533,6 +540,17 @@ function stage2RateLimiter(env?: { STAGE2_VERIFIED_LIMIT?: string; STAGE2_VERIFI
     _stage2Limiter = createMemorySoftRateLimiter({ limits: { verified: { windowMs, limit } } });
   }
   return _stage2Limiter;
+}
+
+/** The Stage-2 limiter + its HMAC secret, or nothing (ING-18: there is no default secret). */
+let _stage2Warned = false;
+function stage2Config(env: Env): { stage2RateLimiter?: SoftRateLimiter; rateLimitProfileId?: string; rateLimitSecret?: string } {
+  const secret = [env.STAGE2_RATE_LIMIT_SECRET, env.GATEWAY_ASSERTION_SECRET, env.A2A_MAC_SECRET, env.OAUTH_SIGNING_SECRET].map((x) => x?.trim()).find((x) => !!x);
+  if (!secret) {
+    if (!_stage2Warned) { _stage2Warned = true; console.warn('[vault] Stage-2 soft rate limit OFF: set STAGE2_RATE_LIMIT_SECRET (spec 445 ING-18 — no default secret)'); }
+    return {};
+  }
+  return { stage2RateLimiter: stage2RateLimiter(env), rateLimitProfileId: 'verified', rateLimitSecret: secret };
 }
 
 /** sha256(signer:digest:signature) — the durable signature-verdict cache key. Including the signature
@@ -698,10 +716,10 @@ function baseConfig(env: Env): McpResourceVerifyConfig {
     chainRevocationReader: chainAuthorityReader(env),
     chainAcceptanceReader: chainAuthorityReader(env),
     chainSignatureReader: chainAuthorityReader(env),
-    // spec 290 §6 Stage-2 — post-verify soft rate limit, keyed on the verified principal/sponsor.
-    stage2RateLimiter: stage2RateLimiter(env),
-    rateLimitProfileId: 'verified',
-    rateLimitSecret: 'demo-mcp-stage2', // only obscures the opaque bucket key in logs (§9); not a secret-grade gate
+    // spec 290 §6 Stage-2 — post-verify soft rate limit, keyed on the verified principal/sponsor. ING-18: the
+    // bucket key is an HMAC under a CONFIGURED secret (no literal in source). With none configured the limiter is
+    // left off — loudly, once — rather than keyed under a public string; the hard budget (Stage 3) is unaffected.
+    ...stage2Config(env),
   };
 }
 
@@ -769,8 +787,9 @@ app.get('/health', (c) =>
 //   - Nonce single-use via the D1 JTI store (replay protection)
 //   - Clock skew bounded (default 60s)
 //
-// Fail-closed: missing/invalid → 401. In production, also requires the
-// shared secret to be present (preflight enforces).
+// Fail-closed: missing/invalid → 401. In production the shared secret must be present: enforced HERE, per
+// request (401 + an audit event below). No deploy-time preflight enforces it — the script once cited for that
+// (`scripts/check-production-deploy.ts`) does not exist in this repository.
 app.use('/tools/*', async (c, next) => {
   if (c.req.method !== 'POST') return next();
   const auditSink = buildAuditSink(c.env);
@@ -1303,7 +1322,7 @@ app.post('/mcp/v2', async (c) => {
       // spec 303 W2 — mint a verification receipt at the wrapper's terminal
       // decision (allow AND deny); the holder carries the public receipt back
       // into the response `_meta.ap_receipt`.
-      const { receipts, holder } = buildReceiptsConfig(c.env, { correlationId });
+      const { receipts, holder } = await buildReceiptsConfig(c.env, { correlationId });
       const nativeCfg: McpResourceVerifyConfig = { ...baseConfig(c.env), requireInvocationProof: true, universalSignatureValidator: usv as Address, receipts };
       const handler = withDelegation<ToolArgs>(
         nativeCfg,
@@ -2089,10 +2108,16 @@ app.get('/custody/vault-key/server-info', (c) => {
     // Dev-only local KEK (no GCP): same deterministic-ref contract, derived per owner.
     if (!kmsKeyRef && localKekEnabled(c.env)) kmsKeyRef = localKekRef(owner);
   }
+  // The delegate a person's vault-key authorization names is this vault's REAL key. There is no placeholder to fall
+  // back to (spec 445: a wire naming 0x…01 delegates to nobody): unconfigured ⇒ refuse, never answer with a fake.
+  const serverKey = (c.env.VAULT_KEY_SERVER_DELEGATE ?? '').trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(serverKey) || /^0x0{39}[0-9a-f]$/i.test(serverKey)) {
+    return c.json({ ok: false, error: 'vault_server_key_unconfigured', error_description: 'VAULT_KEY_SERVER_DELEGATE is not set to this vault\'s real key address' }, 503);
+  }
   return c.json({
     serverId: vaultServerId(c.env),
     vaultId: vaultServerId(c.env),
-    serverKey: (c.env.VAULT_KEY_SERVER_DELEGATE ?? '').trim() || '0x0000000000000000000000000000000000000001',
+    serverKey,
     kmsKeyRef,
     // `vault:*` authorizes the person's WHOLE own vault-record namespace (impact-profile, jp:adopter,
     // jp:facilitator, gs:offering, …) — relying apps store member-owned records under `vault:<app>:<type>`,
@@ -2332,8 +2357,10 @@ app.post('/mcp', async (c) => {
   return c.json({ ok: true, tool, principal, name: r.subject_name, record: r.record, served_by: spec.servedBy, grant_ref: resolved.bundle.id });
 });
 
-// R7.4: pre-declare update_profile so the preflight (N10.2) doesn't flag
-// the route as unclassified. The handler itself is still a 501 stub for
+// R7.4: pre-declare update_profile so the route is never unclassified. (The static check this was written
+// for — the production preflight's N10.2, `scripts/check-production-deploy.ts` — was dropped in the repository
+// split and nothing replaces it: an unclassified route is caught today only by `withDelegation`'s
+// production-strict default, at request time.) The handler itself is still a 501 stub for
 // the demo; when it gets implemented, the classification is already in
 // place so withDelegation's production-strict default won't block the
 // first real request.
@@ -2395,8 +2422,10 @@ app.post('/tools/update_profile', async (c) => {
 //  - the route literally doesn't exist on production Workers (Hono 404s
 //    naturally for unknown paths, no "this URL was once interesting"
 //    leak)
-//  - the production preflight (scripts/check-production-deploy.ts)
-//    statically detects this as a properly-guarded dev route
+//  - the guard is a build-time fold (wrangler's esbuild sets NODE_ENV to "production" on deploy), so the
+//    registration is dead code in a deployed bundle. NOTHING VERIFIES THAT STATICALLY TODAY: the production
+//    preflight this comment used to cite (`scripts/check-production-deploy.ts`) was not carried in the
+//    repository split and exists nowhere — a dev route registered outside such a guard would ship unnoticed.
 if (process.env.NODE_ENV !== 'production') {
   app.post('/_dev/seed', async (c) => {
     const { address } = (await c.req.json()) as { address?: string };

@@ -233,7 +233,7 @@ export async function publicShelfTool(env: ToolEnv, person: Person, args: Record
   if (!name) return { error: 'agent (a registry name) is required — the connected person has no name this server knows' };
   // `<label>.me` → `<label>`; a typed name `<label>.<type>` → `<label>-<type>` (agent-naming `hostForName`, one zone).
   const m = /^([a-z0-9-]+)\.([a-z]+)$/.exec(name);
-  const label = !m ? name : m[2] === 'me' || m[2] === 'impact' ? m[1]! : `${m[1]}-${m[2]}`;
+  const label = !m ? name : m[2] === 'me' ? m[1]! : `${m[1]}-${m[2]}`;
   const cardUri = `${pattern.replace('{label}', label)}/.well-known/agent-card.json`;
   const cardRes = await fetchImpl(cardUri, { headers: { accept: 'application/json' } }).catch(() => null);
   if (!cardRes || !cardRes.ok) return { error: `the agent card at ${cardUri} answered ${cardRes?.status ?? 'nothing'} — no agent by that name is served here`, cardUri };

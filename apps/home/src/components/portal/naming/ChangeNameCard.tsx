@@ -20,7 +20,6 @@ import {
   readClaimedRoots, readPrimaryNameNode, setPrimaryName, claimName, typedTldForKind, type AgentKind,
 } from '../../../connect-client';
 import { signHashFor, type Via } from '../../../home/onboarding';
-import { AGENT_NAME_PARENT } from '../../../lib/domain';
 import { claimableSuffix, isPresented, clearingLeavesNoName, type HeldRoot } from '../../../lib/name-change';
 import { BusyButton } from '../../shared/BusyButton';
 import { PurchaseNameCard } from './PurchaseNameCard';
@@ -92,7 +91,7 @@ export function ChangeNameCard({
     // A claim this root has already seen returns the OLD name unchanged. Reporting that as success is
     // how a member walks away believing they renamed something that never moved.
     if (res.alreadyClaimed) {
-      return { ok: false as const, error: `This agent already holds ${res.name} under .${claimable?.tld ?? AGENT_NAME_PARENT} — a root gives each agent one name, permanently.` };
+      return { ok: false as const, error: `This agent already holds ${res.name} under ${claimable ? `.${claimable.tld}` : 'that root'} — a root gives each agent one name, permanently.` };
     }
     setLabel('');
     return { ok: true as const, claimed: res.name };
@@ -160,7 +159,7 @@ export function ChangeNameCard({
           </div>
           <p style={{ fontSize: '.8rem', ...mutedText, margin: '0 0 .45rem' }}>
             This agent has not claimed a <strong>.{claimable.tld}</strong> name yet. The suffix states the
-            agent&rsquo;s type on chain, so this is how an agent moves off a legacy <code>.{AGENT_NAME_PARENT}</code> name.
+            agent&rsquo;s type on chain, so this is how an agent moves off an untyped legacy name.
           </p>
           <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
             <input

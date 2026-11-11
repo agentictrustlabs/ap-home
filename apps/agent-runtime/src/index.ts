@@ -59,6 +59,7 @@ import {
   verifyUserSignature,
   csrfTokenFor,
   verifyCsrf,
+  assertSessionSecrets,
 } from '@agenticprimitives/connect-auth';
 import { createPublicClient, createWalletClient, http, parseEther, encodeFunctionData, toHex, keccak256, toBytes, stringToBytes, recoverAddress, hashMessage } from 'viem';
 import { buildCustodyDescriptor, type CustodyDescriptor } from '@agenticprimitives/related-agents';
@@ -92,7 +93,7 @@ import {
   type ContractsGeneration,
 } from '@agenticprimitives/agent-account';
 import { getRelayerAccount, getPaymasterTopupAccount } from './relayer';
-import { AgentNamingClient, buildSubregistryRegisterCall, buildSetPrimaryNameCall, buildDeclareAgentTypeCalls, agentProfileResolverTypeAbi, derivedTypeForTld, isAgentTld, canonicalTld, agentNameRegistryAbi, namehash, parseAgentName, InvalidNameError as NamingInvalidNameError } from '@agenticprimitives/agent-naming';
+import { AgentNamingClient, buildSubregistryRegisterCall, buildSubregistryCommitCall, generateClaimSecret, SUBREGISTRY_MIN_COMMIT_AGE_SECONDS, labelClaimViolation, buildSetPrimaryNameCall, buildDeclareAgentTypeCalls, agentProfileResolverTypeAbi, derivedTypeForTld, isAgentTld, canonicalTld, agentNameRegistryAbi, namehash, parseAgentName, InvalidNameError as NamingInvalidNameError } from '@agenticprimitives/agent-naming';
 import {
   verifyCustodySession,
   verifyHomeSession,
@@ -102,7 +103,7 @@ import {
   caip10,
 } from './custody-oidc';
 import { originAllowed, hostnameAllowed } from './origins';
-import { resolveAgentHost, resolveAgentByLabel, buildA2aAgentCard, skillsFromLabels, withMountedSkills, withRecordMountedSkills, hostForName, a2aBaseDomains, a2aCanonicalDomain, AGENT_NAME_PARENT, DEFAULT_PUBLIC_BASE_DOMAIN, type A2aSkill, type AgentHostContext } from './host-context';
+import { resolveAgentHost, resolveAgentByLabel, buildA2aAgentCard, skillsFromLabels, withMountedSkills, withRecordMountedSkills, hostForName, a2aBaseDomains, a2aCanonicalDomain, nameParents, DEFAULT_PUBLIC_BASE_DOMAIN, type A2aSkill, type AgentHostContext } from './host-context';
 import { ardHostManifest, ARD_WELL_KNOWN_PATH } from './ard';
 import { cardContentDigest, jcsDigest as cardJcsDigest, readPlaybookBinding } from '@agenticprimitives/agent-profile/a2a';
 import { AgentIdentityClient } from '@agenticprimitives/agent-profile';
@@ -160,12 +161,13 @@ import { isPublisherSkill, publisherRead } from './publisher-contract.js';
 import { PULSE_PUBLIC_ASK, publicPulseAsk, COMPOSE_RULES } from './pulse-public';
 import { internalHeaders, markInWorker, isInWorkerRequest } from './internal-marker.js';
 import { parseExperimentRequest, type ExperimentJobV1 } from './experiment-job.js';
-import { validateCaptureWindow } from '@agenticprimitives/evaluation';
+import { validateCaptureWindow } from '@agenticprimitives/evaluation/evidence';
 import { RECORD_PUBLIC_ASK, standardServerFor } from './standard-a2a.js';
 import { CHURCH_DESCRIBE, CHURCH_DESCRIBE_SKILL, churchDescription } from './church-describe.js';
 import { withStandardCardFields } from '@agenticprimitives/a2a/standard';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
 import { chainStewardshipCheck, deriveStanding, governingSubjectOf, governorOf, WORKSPACE_GOVERNOR_RECORD } from '@agenticprimitives/context';
+import { oversightCheckInputs, oversightContractsFromEnv, oversightMintTargets } from '@ap-home/shared';
 import { clubTurn, CLUB_RECORDS } from './card-room-club.js';
 import { charteredAgentsReader, charteredOwnerReader } from './chartered-agents.js';
 import { relationshipRows } from '@agenticprimitives/context';
@@ -198,8 +200,9 @@ import { runUnderMandate, subjectRecordReader, askReplyFor, readSubjectReply, ty
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, skillSelector, delegationOfWire, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
 import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook } from './realtimekit.js';
-import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor, pairwiseAskerDeclaration } from '@agenticprimitives/a2a';
+import { isPlaceholderAddress, sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor, pairwiseAskerDeclaration } from '@agenticprimitives/a2a';
 import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
+import { cardTrustForEnv } from './card-trust.js';
 import { remembered, forget, rememberValue, recall } from './run-memo.js';
 /** How long "this agent declares no budget" is remembered — a budget declared at the Home applies within this. */
 const BUDGET_ABSENT_MS = 30_000;
@@ -219,7 +222,7 @@ import { signAsAgent } from './consult-rail.js';
 import { grantedReadSender } from './library-granted-fetch.js';
 import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf, runAnchorRecordKey, type RunExportDeps } from './run-export.js';
 import { vaultProvenanceStore, readCarriedProvenance } from './provenance-bindings.js';
-import { runMeasuresRecordKey } from '@agenticprimitives/evaluation';
+import { runMeasuresRecordKey } from '@agenticprimitives/evaluation/evidence';
 import { doorFromBody, modelCallsOf, variantOf, engagedFromTrace, operationalOf, parseVariantRequest, VARIANT_TOGGLES, type VariantRequestV1 , SELECTION_ARMS } from './run-trace.js';
 import { averageOutcomeChecks, judgeRepeatsOf } from './outcome-check-repeats.js';
 import { provenanceLinkHeader } from '@agenticprimitives/a2a';
@@ -229,7 +232,7 @@ import {
   agentRecordOf, agentRecordWords, assessmentDigest, outcomeCriteriaDigest, runAssessmentRecordKey,
   standingAssessments, validateAssessment, verifyAssessment,
   type AgentRunFactsV1, type AssessmentOutcomeV1, type AssessmentV1, type SignedAssessmentV1,
-} from '@agenticprimitives/evaluation';
+} from '@agenticprimitives/evaluation/evidence';
 /** A run's outcome as the ending vocabulary the record counts by. An outcome this build does not know is
  *  `unknown` rather than dropped: a run that happened and was not counted is the one error to avoid. */
 const RUN_ENDING_OF = (outcome: string): AgentRunFactsV1['ending'] =>
@@ -509,6 +512,8 @@ export interface Env {
   /** Spec 391 — a step result longer than this (canonical JSON chars) leaves the run's record for the agent's vault. */
   OFFLOAD_THRESHOLD_CHARS?: string;
   OTEL_EXPORTER_OTLP_HEADERS?: string;
+  /** RUN-19 (spec 445) — keys every exported digest of an agent / argument (a secret; owner sets it). */
+  EXPORT_DIGEST_SALT?: string;
   HARNESS_RECORD_RETENTION_DAYS?: string;
   /**
    * R5.10 / PKG-CONNECT-AUTH-003 — canonical origin of THIS broker.
@@ -824,7 +829,10 @@ function bridgeEnvToProcessEnv(env: Env) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (process.env as any).NODE_ENV = 'development';
   }
+  // Spec 445: a session secret under 32 bytes is refused at the first request of an isolate, not at first mint.
+  if (!sessionSecretsChecked && env.SESSION_JWT_SECRETS) { assertSessionSecrets(env.SESSION_JWT_SECRETS); sessionSecretsChecked = true; }
 }
+let sessionSecretsChecked = false;
 
 // ─── UserOp inner-revert detection ─────────────────────────────────────
 //
@@ -1408,7 +1416,16 @@ async function liveCardFor(env: Env, ctx: AgentHostContext): Promise<Record<stri
 }
 
 /** Spec 372 S2 — the live card with its A2A 1.0 fields (interface version, modes, named skills, the
- *  bearer scheme). The message url is the one the Worker already advertises. */
+ *  bearer scheme). The message url is the one the Worker already advertises.
+ *
+ *  PUSH IS NOT OPTED INTO (spec 445 §3.5, audit H-11). `withStandardCardFields` used to force
+ *  `capabilities.pushNotifications: true` onto a live card that says `false` (`host-context.ts`: "wires no push
+ *  sender"); it is now off unless the host passes `pushNotifications: true`, and this host does not, because
+ *  it does not deliver push: the standard server's push store is a per-isolate memory (`standard-a2a.ts`), a
+ *  delivery is a fetch nothing keeps alive past the response, and a delegated task's events happen in the
+ *  agent's object, which has no sender. The served card and the server built from it therefore agree: a push
+ *  config is answered PushNotificationNotSupported. Opting in needs a durable push store, delivery under
+ *  `waitUntil` (or from the object), and the package's URL policy with a host resolver — not this flag alone. */
 function standardCardFor(live: Record<string, unknown>): Record<string, unknown> {
   const iface = (Array.isArray(live.supportedInterfaces) ? live.supportedInterfaces[0] : null) as { url?: string } | null;
   return withStandardCardFields(live, { messageUrl: iface?.url ?? '' });
@@ -1435,12 +1452,19 @@ async function principalFromAppDelegation(c: Context<{ Bindings: Env }>, raw: st
  *  for a forwarded credential (one hop per receiver, never a replay to the same one). */
 async function verifyAppDelegation(env: Env, url: string, auth: string, raw: string, claimOn?: Address): Promise<{ ok: true; sa: Address; caip: string; app: true; delegate: string } | { ok: false; status: number; error: string }> {
   const validator = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
-  if (!validator || !env.TIMESTAMP_ENFORCER || !env.ALLOWED_METHODS_ENFORCER || !env.DELEGATION_MANAGER) return { ok: false, status: 503, error: 'the wire gate is not configured' };
+  if (!validator || !env.TIMESTAMP_ENFORCER || !env.ALLOWED_METHODS_ENFORCER || !env.ALLOWED_TARGETS_ENFORCER || !env.DELEGATION_MANAGER) return { ok: false, status: 503, error: 'the wire gate is not configured' };
   const deps = harnessDeps(env, buildAuditSink(env));
   const chainId = Number(env.CHAIN_ID);
   const dm = env.DELEGATION_MANAGER as Address;
   const principal = sessionWirePrincipal({
-    enforcers: { timestamp: env.TIMESTAMP_ENFORCER, allowedMethods: env.ALLOWED_METHODS_ENFORCER },
+    enforcers: { timestamp: env.TIMESTAMP_ENFORCER, allowedMethods: env.ALLOWED_METHODS_ENFORCER, allowedTargets: env.ALLOWED_TARGETS_ENFORCER },
+    // RUN-9 — the wire must name the agent this ask is AT: the receiver of a forwarded credential, else the asking
+    // person's own agent (an ask at the asker's own agent — the only kind this scheme admits; a hop to another agent
+    // arrives with `claimOn`). A wire minted for another host, or for none, is refused.
+    target: (req) => {
+      const who = String(claimOn ?? parseSessionAuthorization(req.headers.get('authorization') ?? '')?.agent ?? '').toLowerCase();
+      return /^0x[0-9a-f]{40}$/.test(who) ? (who as Address) : null;
+    },
     verifyDelegationSig: async (d) => (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [d.delegator, hashDelegation(d, chainId, dm), d.signature] })) === true,
     isRevoked: async (d) => (await deps.readContract({ address: dm, abi: IS_REVOKED_ABI_FOR_STANDING, functionName: 'isRevoked', args: [hashDelegation(d, chainId, dm)] })) === true,
     claim: async (digest, expiresAt) => {
@@ -1566,9 +1590,9 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
         };
       },
     } : {}),
-    ...(validator && c.env.TIMESTAMP_ENFORCER && c.env.ALLOWED_METHODS_ENFORCER ? {
+    ...(validator && c.env.TIMESTAMP_ENFORCER && c.env.ALLOWED_METHODS_ENFORCER && c.env.ALLOWED_TARGETS_ENFORCER ? {
       wire: {
-        enforcers: { timestamp: c.env.TIMESTAMP_ENFORCER, allowedMethods: c.env.ALLOWED_METHODS_ENFORCER },
+        enforcers: { timestamp: c.env.TIMESTAMP_ENFORCER, allowedMethods: c.env.ALLOWED_METHODS_ENFORCER, allowedTargets: c.env.ALLOWED_TARGETS_ENFORCER },
         verifyDelegationSig: async (d) => (await deps.readContract({
           address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig',
           args: [d.delegator, hashDelegation(d, chainId, dm), d.signature],
@@ -1727,7 +1751,7 @@ async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> 
   const reqOrigin = new URL(c.req.url).origin;
   const ctx = await resolveAgentHost(c.req.raw, c.env, reqOrigin);
   if (ctx.label && !ctx.agent) {
-    return c.json({ error: 'agent_not_found', detail: `no Smart Agent for ${ctx.name}` }, 404);
+    return c.json({ error: 'agent_not_found', detail: ctx.ambiguous ? `the host "${ctx.label}" is held by more than one agent and is refused until that is settled` : `no Smart Agent for ${ctx.name ?? ctx.label}` }, 404);
   }
   // spec 347 §8.1 — a RELEASED card, when one is published for this agent, is served byte-for-byte: the
   // well-known publisher re-fetches and compares digests, and `atl:cardDigest` on the name points at it.
@@ -1806,7 +1830,7 @@ function studioSources(env: Env): StudioSources {
     if (!env.AGENT_NAME_REGISTRY || !env.AGENT_NAME_UNIVERSAL_RESOLVER) throw new Error('AGENT_NAME_REGISTRY / AGENT_NAME_UNIVERSAL_RESOLVER are not configured');
     return new AgentNamingClient({ rpcUrl: env.RPC_URL, chainId, registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address, ...(env.PROFILE_RESOLVER ? { profileResolver: env.PROFILE_RESOLVER as Address } : {}) });
   };
-  const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
+  const parents = nameParents(env);
   const baseDomain = a2aCanonicalDomain(env);
   const servedDomains = a2aBaseDomains(env);
   const hostContext = async (agent: Address): Promise<AgentHostContext> => {
@@ -1981,11 +2005,11 @@ function selfHostForwardAuth(env: Env, caller: Address): SelfHostForwardAuth {
 }
 
 function selfHostWireChain(env: Env): SelfHostWireChain | null {
-  if (!env.UNIVERSAL_SIGNATURE_VALIDATOR || !env.TIMESTAMP_ENFORCER || !env.ALLOWED_METHODS_ENFORCER || !env.DELEGATION_MANAGER) return null;
+  if (!env.UNIVERSAL_SIGNATURE_VALIDATOR || !env.TIMESTAMP_ENFORCER || !env.ALLOWED_METHODS_ENFORCER || !env.ALLOWED_TARGETS_ENFORCER || !env.DELEGATION_MANAGER) return null;
   const deps = harnessDeps(env, buildAuditSink(env));
   return {
     chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address, validator: env.UNIVERSAL_SIGNATURE_VALIDATOR as Address,
-    enforcers: { timestamp: env.TIMESTAMP_ENFORCER, allowedMethods: env.ALLOWED_METHODS_ENFORCER },
+    enforcers: { timestamp: env.TIMESTAMP_ENFORCER, allowedMethods: env.ALLOWED_METHODS_ENFORCER, allowedTargets: env.ALLOWED_TARGETS_ENFORCER },
     readContract: (args) => deps.readContract(args as never), validatorAbi: universalSignatureValidatorAbi, isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING,
   };
 }
@@ -2492,7 +2516,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   const keep = (async () => {
     try {
       const kept = await recordFormOf(env, deps, input.addressee, input.runRef, result as never);
-      const record = recordOf({ runRef: input.runRef, intent, result: kept.result, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}), offloaded: kept.offloaded, bill,
+      const record = recordOf({ runRef: input.runRef, asker: input.agent, intent, result: kept.result, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}), offloaded: kept.offloaded, bill,
         // Spec 414 A1b — how this run arrived (the caller's A2A ids when it knows them; else decided here), the model
         // calls and the variant. A run another agent asked for is still this agent's run, traced from its door.
         door: input.door ?? (input.resume ? { kind: 'resume' } : (input.context as { trigger?: unknown } | undefined)?.trigger ? { kind: 'trigger' } : { kind: 'routed' }),
@@ -2555,7 +2579,7 @@ async function resumeFromCommitment(env: Env, input: { addressee: Address; debto
     await runStoreFor(env as never).drop(input.addressee, hit.runRef).catch(() => undefined);
     // The record of the run, the way the ask route keeps one: what was asked, what ran, what it came to.
     const intent = { goal: hit.message, context: { addressee: input.addressee, asker: hit.asker } };
-    const record = recordOf({ runRef: hit.runRef, intent, result: result as never, events, presented: (hit.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), door: { kind: 'resume' }, ...(resumed.traceFacts ? { modelCalls: resumed.traceFacts.modelCalls, variant: resumed.traceFacts.variant } : {}) });
+    const record = recordOf({ runRef: hit.runRef, asker: hit.asker, intent, result: result as never, events, presented: (hit.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), door: { kind: 'resume' }, ...(resumed.traceFacts ? { modelCalls: resumed.traceFacts.modelCalls, variant: resumed.traceFacts.variant } : {}) });
     await putRecord(env as never, input.addressee, record).catch(() => undefined);
     await exportRun(env, (() => { const d = harnessDeps(env, buildAuditSink(env)); const a = anchorPortFor(env, d); return { store: vaultProvenanceStore({ writeSubjectRecord: d.writeSubjectRecord }), ...(a ? { anchor: a } : {}) }; })(), input.addressee, record)
       .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
@@ -2572,7 +2596,7 @@ async function resumeFromCommitment(env: Env, input: { addressee: Address; debto
 async function deliverRoutedOutcome(env: Env, ctx: ExecutionContext | undefined, input: { debtor: Address; creditor: Address; answer: SubjectAnswerV1 }): Promise<{ delivered: boolean; note: string }> {
   const deps = harnessDeps(env, buildAuditSink(env));
   const name = await deps.nameOf?.(input.creditor).catch(() => null) ?? null;
-  const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
+  const parents = nameParents(env);
   const host = name ? hostForName(name, a2aCanonicalDomain(env), parents) : null;
   if (!host) return { delivered: false, note: `${input.creditor} publishes no endpoint this agent can reach` };
   const served = a2aBaseDomains(env);
@@ -2740,7 +2764,7 @@ async function mayOverseeAgent(env: Env, caller: Address, agent: Address): Promi
     verifyStewardship: chainStewardshipCheck({
       readContract: ((args: never) => deps.readContract(args)) as never,
       chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address,
-      allowedTargetsEnforcer: env.ALLOWED_TARGETS_ENFORCER, vaultRecordScopeEnforcer: VAULT_RECORD_SCOPE_ENFORCER,
+      ...oversightCheckInputs(oversightContractsFromEnv(env)),
       isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
       ...(env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
     }),
@@ -2890,7 +2914,7 @@ async function huddleStandingFor(env: Env, caller: Address, scope: NonNullable<R
     verifyStewardship: chainStewardshipCheck({
       readContract: ((args: never) => askDeps.readContract(args)) as never,
       chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address,
-      allowedTargetsEnforcer: env.ALLOWED_TARGETS_ENFORCER, vaultRecordScopeEnforcer: VAULT_RECORD_SCOPE_ENFORCER,
+      ...oversightCheckInputs(oversightContractsFromEnv(env)),
       isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
       ...(env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
     }),
@@ -2983,7 +3007,7 @@ app.post('/clubs/act', async (c) => {
     verifyStewardship: chainStewardshipCheck({
       readContract: ((args: never) => deps.readContract(args)) as never,
       chainId: Number(c.env.CHAIN_ID), delegationManager: c.env.DELEGATION_MANAGER as Address,
-      allowedTargetsEnforcer: c.env.ALLOWED_TARGETS_ENFORCER, vaultRecordScopeEnforcer: VAULT_RECORD_SCOPE_ENFORCER,
+      ...oversightCheckInputs(oversightContractsFromEnv(c.env)),
       isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
       ...(c.env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
     }),
@@ -3128,7 +3152,9 @@ app.post('/huddles/:op', async (c) => {
 // the runtime takes is the custodian's signature, revocable on chain. Both routes are the Home's to proxy
 // (`/connect/runtime-pair/*`) so a runtime needs only the Home's URL.
 const pairingRoute = (move: 'claim' | 'take') => async (c: Context<{ Bindings: Env }>) => {
-  const body = (await c.req.json().catch(() => null)) as { code?: string; address?: string; wake?: unknown; agent?: string } | null;
+  // RUNB-12 (spec 445): `proof` is the runtime key's signature over {move, code, address, home, issuedAt}; `home` is the origin the
+  // runtime was talking to, stated by the Home's proxy. The custodian's object verifies both (interactions-do).
+  const body = (await c.req.json().catch(() => null)) as { code?: string; address?: string; wake?: unknown; agent?: string; home?: string; proof?: unknown } | null;
   const code = String(body?.code ?? '').trim().toLowerCase();
   const m = /^([a-z0-9][a-z0-9-]{0,62})-([a-z0-9]{6})$/i.exec(code);
   if (!m || !body?.address) return c.json({ ok: false, error: 'code and address are required' }, 400);
@@ -3300,7 +3326,7 @@ app.post('/harness/records', async (c) => {
   if (body.runRef) {
     const rec = await getRecord(c.env as never, addressee, body.runRef);
     if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
-    const asked = String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() === caller;
+    const asked = String(rec.asker ?? '').toLowerCase() === caller;
     if (!asked && !holds) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
     const { presented: _p, ...shown } = rec;
     // 2026-10-15 — READ THE TRANSCRIPT. A step's result past the offload threshold sits in the agent's vault as a
@@ -3330,7 +3356,7 @@ app.post('/harness/records', async (c) => {
     return c.json({ ok: true, record: shown });
   }
   const all = await listRecords(c.env as never, addressee);
-  const records = holds ? all : all.filter((r) => String(((r.intent as { context?: { asker?: string } } | undefined)?.context?.asker) ?? '').toLowerCase() === caller);
+  const records = holds ? all : all.filter((r) => String(r.asker ?? '').toLowerCase() === caller);
   // Spec 381 — the retention is part of the listing: how long the object keeps these, and where the durable half lives.
   return c.json({ ok: true, records, retention: recordRetention(c.env) });
 });
@@ -3358,8 +3384,8 @@ app.post('/harness/evidence', async (c) => {
   { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawEv, selfHostForwardAuth(c.env, String(who.sa).toLowerCase() as Address)); if (fwd) return fwd; }
   const caller = String(who.sa).toLowerCase();
   const holds = await mayOverseeAgent(c.env, caller as Address, addressee).catch(() => false);
-  const mine = (r: { intent?: { context?: { asker?: string } } }): boolean =>
-    holds || String(r.intent?.context?.asker ?? '').toLowerCase() === caller;
+  const mine = (r: { asker?: string }): boolean =>
+    holds || String(r.asker ?? '').toLowerCase() === caller;
 
   if (body.runRef) {
     const rec = await getRecord(c.env as never, addressee, body.runRef);
@@ -3416,8 +3442,8 @@ app.post('/harness/record', async (c) => {
   { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawRec, selfHostForwardAuth(c.env, String(who.sa).toLowerCase() as Address)); if (fwd) return fwd; }
   const caller = String(who.sa).toLowerCase();
   const holds = await mayOverseeAgent(c.env, caller as Address, addressee).catch(() => false);
-  const mine = (r: { intent?: { context?: { asker?: string } } }): boolean =>
-    holds || String(r.intent?.context?.asker ?? '').toLowerCase() === caller;
+  const mine = (r: { asker?: string }): boolean =>
+    holds || String(r.asker ?? '').toLowerCase() === caller;
 
   const { facts, unreadable, assessments, assessmentsRead } = await agentRecordInputs(c.env, addressee, mine);
   const record = agentRecordOf(addressee, facts, assessments);
@@ -3430,7 +3456,7 @@ app.post('/harness/record', async (c) => {
  * runs it may look back on; the public lane passes one that admits every run, because counts over all of
  * them is what a stranger is told and nothing of any run leaves with them.
  */
-async function agentRecordInputs(env: Env, addressee: Address, mine: (r: { intent?: { context?: { asker?: string } } }) => boolean): Promise<{ facts: AgentRunFactsV1[]; unreadable: string[]; assessments: SignedAssessmentV1[]; assessmentsRead: boolean }> {
+async function agentRecordInputs(env: Env, addressee: Address, mine: (r: { asker?: string }) => boolean): Promise<{ facts: AgentRunFactsV1[]; unreadable: string[]; assessments: SignedAssessmentV1[]; assessmentsRead: boolean }> {
   const listing = (await listRecords(env as never, addressee)).filter((r) => mine(r as never));
   const facts: AgentRunFactsV1[] = [];
   const unreadable: string[] = [];
@@ -3663,7 +3689,7 @@ app.post('/harness/assess', async (c) => {
   const rec = (await getRecord(c.env as never, addressee, body.runRef).catch(() => null)) as RunRecordV1 | null;
   if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
   const holds = await mayOverseeAgent(c.env, caller as Address, addressee).catch(() => false);
-  if (!holds && String(rec.intent?.context?.asker ?? '').toLowerCase() !== caller) {
+  if (!holds && String(rec.asker ?? '').toLowerCase() !== caller) {
     return c.json({ ok: false, error: 'this run was not yours to judge' }, 403);
   }
 
@@ -3806,6 +3832,7 @@ app.post('/harness/experiments', async (c) => {
   const job: ExperimentJobV1 = {
     type: 'ap.lab-experiment-job.v1', planId: parsed.plan.id, plan: parsed.plan, set: parsed.request.set, criterion: parsed.request.criterion, ...(parsed.request.fixtures ? { fixtures: parsed.request.fixtures } : {}), ...(parsed.request.outcomeGold ? { outcomeGold: parsed.request.outcomeGold } : {}), ...(parsed.request.rubrics ? { rubrics: parsed.request.rubrics } : {}),
     asker: String(gate.sa).toLowerCase(), addressee: gate.addressee, session: body['session'] as string, origin: new URL(c.req.url).origin, submittedAt: new Date().toISOString(),
+    ...(Array.isArray(body['allowedProviders']) ? { allowedProviders: (body['allowedProviders'] as unknown[]).map((p) => String(p)) } : {}),
   };
   const r = await experimentOp(c.env, job.planId, { op: 'start', job, window });
   return c.json(r.body, r.status as 200);
@@ -3835,12 +3862,12 @@ app.post('/harness/spans', async (c) => {
   // The asker, OR the agent's custodian — the same two claims `/harness/records` admits. The Inspector opens
   // these from a row that listing already showed, so a narrower gate here would hand a person a run they can
   // see in the list and cannot open.
-  if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()
+  if (String(rec.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()
       && !(await mayOverseeAgent(c.env, String(who.sa).toLowerCase() as Address, addressee).catch(() => false))) {
     return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
   }
   try {
-    const spans = await firewalledSpans(rec);
+    const spans = await firewalledSpans(rec, c.env);
     return c.json({ ok: true, spans, metrics: firewalledMetrics(rec), retention: recordRetention(c.env), exporter: c.env.OTEL_EXPORTER_OTLP_ENDPOINT ? 'otlp-http' : 'none', export: rec.export ?? null, hasProvenance: hasProvenanceRef(addressee, body.runRef) });
   } catch (e) {
     // A firewall failure is a bug in the projection, and the answer is a refusal that names it — never a
@@ -3882,7 +3909,7 @@ app.post('/harness/provenance', async (c) => {
   // The asker, OR the agent's custodian — the same two claims `/harness/records` admits. The Inspector opens
   // these from a row that listing already showed, so a narrower gate here would hand a person a run they can
   // see in the list and cannot open.
-  if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()
+  if (String(rec.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()
       && !(await mayOverseeAgent(c.env, String(who.sa).toLowerCase() as Address, addressee).catch(() => false))) {
     return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
   }
@@ -3917,7 +3944,7 @@ app.post('/harness/recipe', async (c) => {
   const addressee = body.addressee.toLowerCase() as Address;
   const rec = await getRecord(c.env as never, addressee, body.runRef);
   if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
-  if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to save' }, 403);
+  if (String(rec.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to save' }, 403);
   const deps = harnessDeps(c.env, buildAuditSink(c.env));
   const playbook = await loadPlaybook(deps.readSubjectRecord, addressee, console.log).catch(() => null);
   const tools = playbook?.tools ? Object.values(playbook.tools) : [];
@@ -3967,7 +3994,7 @@ app.post('/provenance/public', async (c) => {
     const a = await readAnchor(client, c.env.RECEIPT_ANCHOR_REGISTRY as Address, contractsGeneration(c.env), anchoredBy, digest).catch(() => null);
     const anchored = a && a.anchoredBy !== '0x0000000000000000000000000000000000000000';
     const chainId = Number(c.env.CHAIN_ID);
-    return c.json({ ok: true, agent, runRef: body.runRef, carried: true, rows: [], refused: [], anchor: anchored ? { digest, registry: c.env.RECEIPT_ANCHOR_REGISTRY.toLowerCase(), anchoredBy: a!.anchoredBy.toLowerCase(), at: Number(a!.at), intentDigest: a!.intentDigest, mandateRef: a!.mandateRef, ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}), readFrom: 'chain' } : null, verify: { bundleDigest: 'keccak256 over the stable JSON of the bundle you hold must equal anchor.digest', anchoredBy: 'the runtime agent that anchored it — the acting agent of the run, not this Home' } });
+    return c.json({ ok: true, agent, runRef: body.runRef, carried: true, rows: [], refused: [], anchor: anchored ? { digest, registry: c.env.RECEIPT_ANCHOR_REGISTRY.toLowerCase(), anchoredBy: a!.anchoredBy.toLowerCase(), at: Math.floor(Number(a!.at) / 86_400) * 86_400 /* DATA-35: a public row names the day, not the second */, intentDigest: a!.intentDigest, mandateRef: a!.mandateRef, ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}), readFrom: 'chain' } : null, verify: { bundleDigest: 'keccak256 over the stable JSON of the bundle you hold must equal anchor.digest', anchoredBy: 'the runtime agent that anchored it — the acting agent of the run, not this Home' } });
   }
   const projection = await publicProvenanceOf(c.env, agent, rec);
   // Spec 406 W2 — the RUN's anchor: the bundle's digest in the registry, from the harness agent (digests and addresses only).
@@ -3989,7 +4016,7 @@ app.post('/harness/replay', async (c) => {
   const addressee = body.addressee.toLowerCase() as Address;
   const rec = await getRecord(c.env as never, addressee, body.runRef);
   if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
-  if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to replay' }, 403);
+  if (String(rec.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to replay' }, 403);
   const deps = harnessDeps(c.env, buildAuditSink(c.env));
   const { result } = await runUnderMandate(c.env as unknown as HarnessEnv, deps, {
     intent: rec.intent, presented: (rec.presented ?? []).map((p) => p.wire as never), person: who.sa as Address, session: body.session,
@@ -4098,7 +4125,8 @@ app.post('/wires/refresh', async (c) => {
   if (body?.method !== 'wires/refresh' || !/^0x[0-9a-f]{40}$/.test(delegator) || !/^0x[0-9a-f]{64}$/.test(hash)) return c.json({ ok: false, error: 'method wires/refresh, delegator and hash are required' }, 400);
   const deps = harnessDeps(c.env, buildAuditSink(c.env));
   const principal = sessionWirePrincipal({
-    enforcers: { timestamp: c.env.TIMESTAMP_ENFORCER ?? '0x0000000000000000000000000000000000000000', allowedMethods: c.env.ALLOWED_METHODS_ENFORCER ?? '0x0000000000000000000000000000000000000000' },
+    enforcers: { timestamp: c.env.TIMESTAMP_ENFORCER ?? '0x0000000000000000000000000000000000000000', allowedMethods: c.env.ALLOWED_METHODS_ENFORCER ?? '0x0000000000000000000000000000000000000000', allowedTargets: c.env.ALLOWED_TARGETS_ENFORCER ?? '0x0000000000000000000000000000000000000000' },
+    target: delegator as Address, // the refresh is asked of the delegator's own agent; no wire is accepted here (below)
     verifyDelegationSig: async () => false, // a wire-wrapped assertion is refused here: the wire is what is being refreshed
     isRevoked: async () => true,
     verifyAgentSignature: async (agent, digest, signature) => (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [agent, digest, signature] })) === true,
@@ -4144,7 +4172,7 @@ app.post('/relationships/credential/accept', async (c) => {
   const credential: RelationshipCredentialV1 = { ...body0, ...(o.terms && typeof o.terms === 'object' ? { terms: o.terms as Record<string, unknown> } : {}), signatures: { subject: body.subjectSignature as Hex, object: objectSig } };
   const deps = harnessDeps(c.env, buildAuditSink(c.env));
   const verifySig = async (signer: Address, d: Hex, sig: Hex) => (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [signer, d, sig] })) === true;
-  const v = await verifyRelationshipCredential(credential, verifySig);
+  const v = await verifyRelationshipCredential(credential, verifySig, { chainId: Number(c.env.CHAIN_ID) });
   if (!v.ok) return c.json({ ok: false, error: v.reason }, 403);
   if (!deps.writeSharedRecord) return c.json({ ok: false, error: 'this deployment cannot write a shared record' }, 503);
   const w = await deps.writeSharedRecord([credential.subject, credential.object], relationshipCredentialRecordType(digest), credential, `relationship:${digest}`);
@@ -5018,6 +5046,10 @@ app.post('/harness/ask', async (c) => {
     /** 2026-10-15 — the case's RUBRIC from a comparison: the author's instructions and scored criteria for the grader.
      *  Read ONLY by the rubric judge after the run; honoured only beside a variant. */
     rubric?: unknown;
+    /** Spec 445 decision 8 (EVAL-13) — THE EVALUATION MARKER (`evaluation.EvaluationMarkerV1`). ANY present value is a marker: it
+     *  only RESTRICTS (self-acting writes held, no standing or act-as-me authority, model calls only to its `allowedProviders`),
+     *  needs no permission to set, and never unlocks `variant`. Its absence is not evidence that a run is real. */
+    evaluation?: unknown;
   } | null;
   // The addressee is an ADDRESS — the vault keys on the hex form. A CAIP-10 `eip155:<chain>:0x…` (what a session's
   // `sub` is) used to pass through untouched, so the playbook read missed and the agent went quietly bare while
@@ -5131,12 +5163,28 @@ app.post('/harness/ask', async (c) => {
     if (parsed.variant.provider && String(body.model ?? '').trim() && parsed.variant.provider !== String(body.model).trim()) return c.json({ ok: false, error: `variant.provider (${parsed.variant.provider}) and model (${String(body.model)}) disagree`, refused: 'variant.unknown' }, 400);
     variantReq = parsed.variant;
   }
-  const chosen = resolveProvider(c.env, variantReq?.provider ?? body.model);
+  // Spec 445 decision 8 (EVAL-13) — THE EVALUATION MARKER. A present marker (of any shape) restricts this turn, decided before
+  // anything is read or any model is called: its `allowedProviders` are the ONLY providers the run may use — a provider the
+  // turn names outside the list is refused, and with none named the run is pinned to the first listed provider this
+  // deployment offers (named by the marker, so the budget route does not run); none offered ⇒ refused with no model call.
+  const evalMarker = body.evaluation !== undefined && body.evaluation !== null ? body.evaluation : undefined;
+  let evalProvider: LlmProvider | undefined;
+  if (evalMarker !== undefined) {
+    const listed = (evalMarker as { allowedProviders?: unknown }).allowedProviders;
+    const list = Array.isArray(listed) ? listed.map((p) => String(p).trim().toLowerCase()).filter(Boolean) : [];
+    if (!list.length) return c.json({ ok: false, error: 'evaluation: the marker names no allowedProviders — an evaluation run names the providers it may use (live tests: gemini); nothing was asked', refused: 'evaluation.no-providers' }, 400);
+    for (const named of [variantReq?.provider, body.model, variantReq?.selectionProvider, variantReq?.answerProvider, variantReq?.judgeProvider]) {
+      if (named && !list.includes(String(named).trim().toLowerCase())) return c.json({ ok: false, error: `evaluation: provider ${String(named)} is not in the marker's allowedProviders (${list.join(', ')}) — nothing was asked`, refused: 'evaluation.provider-not-allowed' }, 400);
+    }
+    for (const p of list) { const r = resolveProvider(c.env, p); if (r.ok && r.provider) { evalProvider = r.provider; break; } }
+    if (!evalProvider) return c.json({ ok: false, error: `evaluation: this deployment offers none of the marker's allowedProviders (${list.join(', ')}) — nothing was asked`, refused: 'evaluation.provider-not-offered' }, 400);
+  }
+  const chosen = resolveProvider(c.env, variantReq?.provider ?? body.model ?? evalProvider);
   if (!chosen.ok) return c.json({ ok: false, error: chosen.error }, 400);
   // Spec 388 — ONLY A MODEL THE TURN NAMED is "named by the turn": resolving the default here and passing it on
   // made every call look chosen, so the route never ran and the planner prompt was trimmed to Groq's budget
   // with Anthropic offered (seen live 2026-09-10: 7,813 tokens cut to 6,500, every drop taken, over-budget).
-  const provider = String(variantReq?.provider ?? body.model ?? '').trim() ? chosen.provider ?? undefined : undefined;
+  const provider = String(variantReq?.provider ?? body.model ?? evalProvider ?? '').trim() ? chosen.provider ?? undefined : undefined;
   // Per-area providers (2026-10-01): each role's provider resolved like `provider` — offered by this deployment and keyed —
   // or the turn is refused by name. Unset roles fall back to `provider` inside the run.
   const roleProviders: { selectionProvider?: LlmProvider; answerProvider?: LlmProvider; judgeProvider?: LlmProvider } = {};
@@ -5238,6 +5286,9 @@ app.post('/harness/ask', async (c) => {
   let routedDelivery: { delivered: boolean; note: string; creditor?: Address } | undefined;
   const turn = mergeTurn(stored, { ...(body.message ? { message: body.message } : {}), presented: body.presented ?? null, ...(body.supplied ? { supplied: body.supplied } : {}) });
   if ('error' in turn) return c.json({ ok: false, error: turn.error }, 409);
+  // Spec 445 decision 8 — an evaluation asks; it never brings authority: no mandate, no app delegation (the act-as-me route's
+  // carrier). A standing wire could cover an act the dry run is holding, so none is accepted beside the marker.
+  if (evalMarker !== undefined && (turn.presented.length > 0 || appCredential || viaHost)) return c.json({ ok: false, error: 'evaluation: an evaluation run carries no authority — no mandate, standing wire or app delegation is applied beside the marker', refused: 'evaluation.carries-authority' }, 400);
   // R917-H-3 (spec 409 §8): THE STORED PLAN IS THE PLAN. A turn that presents a mandate, or resumes a run that already
   // has a plan, may not bring another one: the mandate the person signed binds the plan she saw (408 §2.3), and the
   // verifier would refuse the swap anyway — this refuses it with the reason, before anything is read or asked.
@@ -5257,6 +5308,9 @@ app.post('/harness/ask', async (c) => {
   const storedTz = (stored?.intent?.context as { tz?: unknown } | undefined)?.tz;
   const tz = typeof body.tz === 'string' && /^[A-Za-z_]+\/[A-Za-z_+-]+$|^UTC$/.test(body.tz) ? body.tz : typeof storedTz === 'string' && storedTz ? storedTz : undefined;
   const intent = { goal: faithCollaboration ? faithQuestion(body.message ?? '') : turn.message, context: { addressee, asker: who.sa, ...(tz ? { tz } : {}), ...(faithCollaboration ? {faithCollaborationRole: faithCollaboration.role, faithBinding: faithCommitmentDigest(faithCollaboration), ...(faithCollaboration.role === 'synthesis' ? {faithContributions: JSON.parse(body.message!)} : {}), sharedPlan: {planId: faithCollaboration.plan.planId, revision: faithCollaboration.plan.revision, hash: faithCollaboration.plan.contentHash}, guidance: faithCollaborationGuidance(faithCollaboration.role)} : {}) } };
+  // Spec 445 decision 8 (EVAL-13) — the marker travels on the intent: the loop HOLDS every self-acting write for it
+  // (`orchestration.isEvaluationIntent`), whatever else the run does.
+  if (evalMarker !== undefined) (intent as { evaluation?: unknown }).evaluation = evalMarker;
   const audit = buildAuditSink(c.env);
   const askDeps = harnessDeps(c.env, audit, { executionCtx: c.executionCtx });
   askDeps.faithReceivers = [...(viaApp?.ok ? [viaApp.delegate] : []), ...(inResponseTo?.agent ? [inResponseTo.agent] : []), ...(faithCollaboration?.recipients ?? [])];
@@ -5316,7 +5370,7 @@ app.post('/harness/ask', async (c) => {
   // is not something the person said either: kept as a turn it cost a vault write (~1 s) before every such reply and
   // filled the person's conversation with lines like "merge my highlights for PSA.79" for the next "him" to resolve in.
   const screenTurn = !!body.plan && body.rowsOnly === true;
-  const isolatedTurn = !!variantReq || screenTurn;
+  const isolatedTurn = !!variantReq || evalMarker !== undefined || screenTurn;
   const conversationRaw = isolatedTurn || faithCollaboration ? null : askerRecords[CONVERSATION_RECORD] ?? null;
   const memoryRaw = ownAgent && (!faithCollaboration || ['synthesis', 'validation'].includes(faithCollaboration.role)) ? askerRecords[FACTS_RECORD] ?? null : null;
   const prefsRaw = ownAgent && (!faithCollaboration || ['synthesis', 'validation'].includes(faithCollaboration.role)) ? askerRecords[PREFERENCES_RECORD] ?? null : null;
@@ -5354,7 +5408,7 @@ app.post('/harness/ask', async (c) => {
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
       ...(provider ? { provider } : {}), ...roleProviders,
       // Spec 418 §12 — any variant makes this a comparison run: its self-acting writes are held, even a provider-only variant.
-      ...(variantReq ? { comparison: true } : {}),
+      ...(variantReq || evalMarker !== undefined ? { comparison: true } : {}),
       // 2026-10-15 — THE GATEWAY KNOB REACHES THE RUN. It was applied to the reply's composer only; the run's own calls (the
       // skill answer's structured call, the selection judge) never saw it, so `gateway: off` still answered through the gateway
       // — which refused the incident-playbook cases ("answered in prose instead of calling skill_answer") and cut the rest.
@@ -5381,7 +5435,7 @@ app.post('/harness/ask', async (c) => {
         // the per-agent hosts of this deployment are its own. Anything else goes over the network as it should.
         const reachFetch = reachFetchFor(c.env, c.executionCtx);
         // Spec 397 — the card through the name's records, at her agent (387's inspect): public facts, pinned when pinned.
-        if (toolId === DISCOVERY_INSPECT_CAPABILITY) return discoveryInspectInvoker({ nameRecords: nameRecordsReader(c.env) ?? (async () => null), fetch: reachFetch })(toolId, args, ctx);
+        if (toolId === DISCOVERY_INSPECT_CAPABILITY) return discoveryInspectInvoker({ nameRecords: nameRecordsReader(c.env) ?? (async () => null), fetch: reachFetch, ...((ct) => ct ? { cardTrustFor: ct } : {})(cardTrustForEnv(c.env, reachFetch)) })(toolId, args, ctx);
         // Spec 397 — the invitations that reached the person, from their own inbox record.
         // Gap register B6a — what is waiting on her: her own agent's parked runs + invitations not yet accepted (the bell's read).
         if (toolId === WAITING_LIST_CAPABILITY) return waitingListInvoker({ ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}), ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}), listRuns: (a) => runStoreFor(c.env as never).list(a) }, String(who.sa).toLowerCase())(toolId, args, ctx);
@@ -5393,7 +5447,9 @@ app.post('/harness/ask', async (c) => {
         if (toolId === INVITATIONS_RECEIVED_CAPABILITY) return invitationsReceivedInvoker({ ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}), ...(askDeps.readRecords ? { readRecords: askDeps.readRecords } : {}), ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}) }, String(who.sa).toLowerCase())(toolId, args, ctx);
         if (toolId === EXTERNAL_AGENT_TOOL.id) return externalAgentInvoker({ timeoutMs: 20_000, fetch: reachFetch,
           // Spec 379 W2 — a registry NAME resolves through its own on-chain records to a card, pinned by `atl:cardDigest`.
-          nameRecords: nameRecordsReader(c.env) ?? (async () => null) })(toolId, args, ctx);
+          nameRecords: nameRecordsReader(c.env) ?? (async () => null),
+          // RUN-16 — a card reached by name is relied on only when its signature verifies against the agent's on-chain key.
+          ...((ct) => ct ? { cardTrustFor: ct } : {})(cardTrustForEnv(c.env, reachFetch)) })(toolId, args, ctx);
         // Spec 380 — one member asked through the consult rail, at the organization; skipped without their opt-in.
         if (toolId === MEMBER_CONSULT_TOOL.id) return memberConsultInvoker(c.env, { ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}) })(toolId, args, ctx);
         // Spec 384 W2 — probe candidates for offers, each in-process as the asker's own agent (a Worker cannot fetch its own hostnames).
@@ -5402,6 +5458,10 @@ app.post('/harness/ask', async (c) => {
           return engagementProbeInvoker({
             requester, resolveName: askDeps.resolveName, nameOf: askDeps.nameOf,
             sendProbe: probeSenderFor(c.env, requester, c.executionCtx),
+            // Spec 445 decision 8 — the provider's offer signature is verified HERE (its Smart Agent, ERC-1271 / ECDSA), as the
+            // reducer requires verified evidence for every firm offer. No validator configured ⇒ no evidence ⇒ offers refused.
+            ...(c.env.UNIVERSAL_SIGNATURE_VALIDATOR ? { verifySignature: async (signer: Address, digest: Hex, signature: Hex) =>
+              (await askDeps.readContract({ address: c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [signer, digest, signature] })) === true } : {}),
           })(toolId, args, ctx);
         }
         if (toolId === KB_RETRIEVE_TOOL.id) return kbRetrieveInvoker({ fetchDiscovery: discoveryFetchFor(c.env) })(toolId, args, ctx);
@@ -5508,8 +5568,7 @@ app.post('/harness/ask', async (c) => {
       verifyStewardship: chainStewardshipCheck({
         readContract: ((args: never) => askDeps.readContract(args)) as never,
         chainId: Number(c.env.CHAIN_ID), delegationManager: c.env.DELEGATION_MANAGER as Address,
-        allowedTargetsEnforcer: c.env.ALLOWED_TARGETS_ENFORCER,
-        vaultRecordScopeEnforcer: VAULT_RECORD_SCOPE_ENFORCER,
+        ...oversightCheckInputs(oversightContractsFromEnv(c.env)),
         isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
         ...(c.env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
       }),
@@ -5732,7 +5791,7 @@ app.post('/harness/ask', async (c) => {
         const chose = [...resolved.values()].find((r) => r.arg === scope!.arg && /^0x[0-9a-f]{40}$/i.test(r.agent));
         if (chose) {
           // The surface answers with an ADDRESS (the choice's value), so the resolver reports no label for
-          // it; the memory names the agent anyway — the person reads "somali-corridor-team.impact" in
+          // it; the memory names the agent anyway — the person reads "somali-corridor.team" in
           // their remembered choices, not 0x1659…, and the next citation says whom they chose.
           const labelled = chose.label ? Promise.resolve(chose.label) : Promise.resolve(askDeps.nameOf?.(chose.agent) ?? null).catch(() => null);
           c.executionCtx.waitUntil(
@@ -5771,7 +5830,7 @@ app.post('/harness/ask', async (c) => {
       // Spec 390 W2 — the W3C Trace Context the request arrived with joins this run's spans to the caller's
       // trace. Recorded here and read by nothing else: correlation, never trust.
       const formP = recordForm ? Promise.resolve(recordForm) : recordFormOf(c.env, askDeps, addressee, runRef, result);
-      const recordP = formP.then((recordForm) => recordOf({ runRef, intent, result: recordForm.result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), receivedAt, marks: marks.list, offloaded: recordForm.offloaded, bill,
+      const recordP = formP.then((recordForm) => recordOf({ runRef, asker: String(who.sa).toLowerCase(), intent, result: recordForm.result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), receivedAt, marks: marks.list, offloaded: recordForm.offloaded, bill,
         // Spec 414 A1b — THE TRACE FROM THE DOOR. The door is decided here: an in-process hop from this Worker's A2A
         // door names its message ids; a routed ask from another agent's run is `routed`; a continuation is a
         // `resume`; anything else is a direct ask. Plus the model calls and the variant this run ran under.
@@ -5939,7 +5998,7 @@ app.post('/harness/ask', async (c) => {
       if (!signature) throw new Error('The participant could not sign its completed contribution.');
       faithReceipt = {...payload, signer: addressee, scheme: 'ecdsa', signature};
     }
-    return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, ...(faithReceipt ? {faithReceipt} : {}), hasProvenance: hasProvenanceRef(addressee, runRef), resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(routedDelivery ? { routedDelivery } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });
+    return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, ...(evalMarker !== undefined ? { evaluation: { held: true, note: 'an evaluation run: every self-acting write was held, no standing or act-as-me authority was applied, and model calls were limited to the marker\'s providers' } } : {}), ...(faithReceipt ? {faithReceipt} : {}), hasProvenance: hasProvenanceRef(addressee, runRef), resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(routedDelivery ? { routedDelivery } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
@@ -6043,7 +6102,7 @@ app.post('/api/a2a', async (c) => {
     return c.json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'A2A requests must target a personal subdomain (<handle>.impact-agent.io) or POST /api/a2a/<handle> via the edge' } }, 400);
   }
   if (!ctx.agent) {
-    return c.json({ jsonrpc: '2.0', id: null, error: { code: -32004, message: `no Smart Agent for ${ctx.name}` } }, 404);
+    return c.json({ jsonrpc: '2.0', id: null, error: { code: -32004, message: ctx.ambiguous ? `the host "${ctx.label}" is held by more than one agent and is refused until that is settled` : `no Smart Agent for ${ctx.name ?? ctx.label}` } }, 404);
   }
   return serveStandardA2a(c, ctx, raw);
 });
@@ -6516,9 +6575,8 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
       const priced = pricedRootFor(env, tld);
       let typedRoot: { subregistry: Address; tld: string } | null = null;
       if (!priced) {
-        const root = subregistryForTld(env, tld);
+        const root = subregistryForTld(env, tld, label);
         if (!root.ok) throw new Error(root.error);
-        if (!root.typed) throw new Error(`".${tld}" is not a typed root on this deployment`);
         typedRoot = { subregistry: root.subregistry, tld: root.tld };
       }
       const canonical = priced ?? typedRoot!.tld;
@@ -6547,7 +6605,7 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
         // name records once the ticket is paid (`purchaseName`), so none of the three naming calls ride here.
         ...(typedRoot ? [
           ...(await declareTypeCallsFor(env, child, typedRoot.tld)),
-          buildSubregistryRegisterCall({ subregistry: typedRoot.subregistry, label, newOwner: child }),
+          await commitThenRevealCall(env, { subregistry: typedRoot.subregistry, label, newOwner: child, root: typedRoot.tld }),
           buildSetPrimaryNameCall({ registry: env.AGENT_NAME_REGISTRY as Address, node: namehash(name) }),
         ] : []),
         orgApproveHashCall(env, grant.digest, 0n, child), // the child is deployed in this batch: custody epoch 0
@@ -6669,7 +6727,7 @@ export function probeSenderFor(env: Env, requester: Address, executionCtx?: Exec
   const deps = harnessDeps(env, buildAuditSink(env), { ...(executionCtx ? { executionCtx } : {}) });
   return async (candidate, message) => {
     const name = await deps.nameOf?.(candidate).catch(() => null) ?? null;
-    const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
+    const parents = nameParents(env);
     const host = name ? hostForName(name, a2aCanonicalDomain(env), parents) : null;
     if (!host || !a2aBaseDomains(env).some((d) => host === d || host.endsWith(`.${d}`))) return { ok: false, refused: `${name ?? candidate} is not served here — probing across deployments is spec 384 W4+` };
     const req = markInWorker(new Request(`https://${host}/api/a2a`, { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json', 'a2a-version': '1.0', 'x-ap-internal-agent': requester }), body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message } }) }));
@@ -6914,8 +6972,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     verifyStewardship: chainStewardshipCheck({
       readContract: ((args: never) => pub.readContract(args) as Promise<unknown>) as never,
       chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address,
-      allowedTargetsEnforcer: env.ALLOWED_TARGETS_ENFORCER,
-      vaultRecordScopeEnforcer: VAULT_RECORD_SCOPE_ENFORCER,
+      ...oversightCheckInputs(oversightContractsFromEnv(env)),
       isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
       ...(env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
     }),
@@ -7095,8 +7152,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
           { readSubjectRecord: readLinks, verifyStewardship: chainStewardshipCheck({
             readContract: ((a: never) => pub.readContract(a) as Promise<unknown>) as never,
             chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address,
-            allowedTargetsEnforcer: env.ALLOWED_TARGETS_ENFORCER,
-            vaultRecordScopeEnforcer: VAULT_RECORD_SCOPE_ENFORCER,
+            ...oversightCheckInputs(oversightContractsFromEnv(env)),
             isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
             ...(env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
           }) },
@@ -7228,7 +7284,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
   // WHERE A SUBJECT IS ASKED (spec 366 R4) — its name's records, read once per name per minute; never a host
   // derived from the name's spelling. `subject-address.ts` says here / wire / nowhere.
   const nameRecordsOf = nameRecordsReader(env) ?? (async () => null);
-  const parents = (e: Env): string[] => (e.AGENT_NAME_PARENTS ?? e.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
+  const parents = (e: Env): string[] => nameParents(e);
   const subjectAddressEnv = (e: Env): SubjectAddressEnv => ({ ownIngress: e.DEMO_EDGE_URL?.trim() || undefined, ownDomains: a2aBaseDomains(e), parents: parents(e), servesUnpublished: servesUnpublishedNames(e) });
   // Slice S5 — A WORKSPACE'S GRANTED READ, sent to the publisher's agent over the delegated-task rail as the workspace
   // (`grantedReadSender`: the workspace's own signing wire, in-Worker to the publisher's task object). Where the publisher
@@ -7367,7 +7423,9 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       try { mandate = await readerChildMandate(held.standing, { actor: runtimeKey.address as Address, audience: decl.audience, day: ch.day, issuerKeyId }, async (digest) => (await runtimeKey.signMessage({ message: { raw: digest } })) as Hex); }
       catch (e) { return { ok: false, via: { agent: subject, name, host, observedVia: 'network' }, refused: e instanceof Error ? e.message : String(e) }; }
       const request = readerProofRequest({ nonce: ch.nonce, audience: decl.audience, day: ch.day });
-      const proved = await proverCall(env, '/present', { credential: held.credential, device: held.device.managed, request, standing: held.standing, mandate, actor: runtimeKey.address });
+      // Spec 445 §3.2 — the HOLDER is named from what this run knows, never from the wire: the person in whose vault the
+      // credential and its device key were just read. The release requires the chain's root to be granted by her.
+      const proved = await proverCall(env, '/present', { credential: held.credential, device: held.device.managed, request, standing: held.standing, mandate, actor: runtimeKey.address, holder: asker.toLowerCase() });
       if (proved.status !== 200 || !proved.body.presentation) {
         // Said as HER agent's failure, never the service's: nothing reached it.
         const why = proved.body.error ? `${String(proved.body.error)}${proved.body.detail ? ` — ${String(proved.body.detail)}` : ''}` : `the prover answered ${proved.status} without a presentation (${Object.keys(proved.body).join(', ') || 'empty'})`;
@@ -7412,7 +7470,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       // card ⇒ said so, in the receiver's words where it has any — never read locally instead (R3).
       // Spec 397 W4 — an app-admitted run has no session: the profile carries the forwarded app credential, and the
       // receiver accepts it when it names this deployment as a peer (`A2A_TRUSTED_ORIGINS` there) — refused in its words otherwise.
-      const hop = await sendSubjectAskOverWire({ ...(trace ? { traceparent: trace.traceparent, ...(trace.tracestate ? { tracestate: trace.tracestate } : {}) } : {}), cardUrl: (at as { cardUrl: string }).cardUrl, ...((at as { pinnedDigest?: string }).pinnedDigest ? { pinnedDigest: (at as { pinnedDigest?: string }).pinnedDigest! } : {}), profile, ...(wireCred?.ok && wireCred.session ? { session: wireCred.session } : {}), ...(pairwiseTarget ? { pairwiseSubjectFor: pairwiseSubjectPort(deps, asker) } : {}), fetch: (u, init) => (laneFor(env, hostOf(u)) ?? fetch)(u, init) });
+      const hop = await sendSubjectAskOverWire({ ...(trace ? { traceparent: trace.traceparent, ...(trace.tracestate ? { tracestate: trace.tracestate } : {}) } : {}), cardUrl: (at as { cardUrl: string }).cardUrl, ...((at as { pinnedDigest?: string }).pinnedDigest ? { pinnedDigest: (at as { pinnedDigest?: string }).pinnedDigest! } : {}), profile, ...(wireCred?.ok && wireCred.session ? { session: wireCred.session, cardTrust: { relyOnCard: true } } : {}), ...(pairwiseTarget ? { pairwiseSubjectFor: pairwiseSubjectPort(deps, asker) } : {}), fetch: (u, init) => (laneFor(env, hostOf(u)) ?? fetch)(u, init) });
       if (!hop.ok) return { ok: false, via, refused: `${name ?? subject} could not be asked over the wire — ${hop.refused}` };
       envelope = hop.envelope as unknown as AskReplyEnvelopeV1;
       status = 200;
@@ -8547,12 +8605,12 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
     let claimedName = '';
     let nameCalls: Array<{ to: Address; value: bigint; data: Hex }> = [];
     if (!nameLater) {
-      const root = subregistryForTld(c.env, body.tld);
-      if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
-      claimedName = `${label}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
+      const root = subregistryForTld(c.env, body.tld, label);
+      if (!root.ok) return c.json({ ok: false, error: root.error }, rootRefusalStatus(root.error));
+      claimedName = `${label}.${root.tld}`;
       // Type first, then the claim — the record the suffix asserts must exist before the name does.
-      const declare = root.typed ? await declareTypeCallsFor(c.env, sa, root.tld) : [];
-      const register = buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: sa });
+      const declare = await declareTypeCallsFor(c.env, sa, root.tld);
+      const register = await commitThenRevealCall(c.env, { subregistry: root.subregistry, label, newOwner: sa, root: root.tld });
       const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node! });
       nameCalls = [...declare, register, setPrimary];
     } else if (body.tld && isAgentTld(body.tld)) {
@@ -8771,11 +8829,9 @@ function siteGrantCaveats(env: Env, validUntil: number): Caveat[] {
     buildCaveat(env.VALUE_ENFORCER as Address, encodeValueTerms(0n)),
     buildCaveat(
       env.ALLOWED_TARGETS_ENFORCER as Address,
-      encodeAllowedTargetsTerms([
-        env.AGENT_RELATIONSHIP as Address,
-        env.AGENT_NAME_REGISTRY as Address,
-        env.PERMISSIONLESS_SUBREGISTRY as Address,
-      ]),
+      // Spec 445 — the SAME list the stewardship recogniser reads (`@ap-home/shared` oversight-targets): mint
+      // and check cannot drift.
+      encodeAllowedTargetsTerms(oversightMintTargets(oversightContractsFromEnv(env)) as Address[]),
     ),
   ];
 }
@@ -8961,12 +9017,12 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
     let orgName = '';
     let nameCalls: Array<{ to: Address; value: bigint; data: Hex }> = [];
     if (!nameLater) {
-      const root = subregistryForTld(c.env, body.tld);
-      if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
-      orgName = `${label}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
+      const root = subregistryForTld(c.env, body.tld, label);
+      if (!root.ok) return c.json({ ok: false, error: root.error }, rootRefusalStatus(root.error));
+      orgName = `${label}.${root.tld}`;
       // Type first, then the claim — the record the suffix asserts must exist before the name does.
-      const declare = root.typed ? await declareTypeCallsFor(c.env, orgSA, root.tld) : [];
-      const register = buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: orgSA });
+      const declare = await declareTypeCallsFor(c.env, orgSA, root.tld);
+      const register = await commitThenRevealCall(c.env, { subregistry: root.subregistry, label, newOwner: orgSA, root: root.tld });
       const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node! });
       nameCalls = [...declare, register, setPrimary];
     }
@@ -9089,14 +9145,16 @@ function pricedRootFor(env: Env, tld: string | undefined): string | null {
 function subregistryForTld(
   env: Env,
   tld: string | undefined,
-): { ok: true; subregistry: Address; typed: false } | { ok: true; subregistry: Address; typed: true; tld: string } | { ok: false; error: string } {
-  const legacy = env.PERMISSIONLESS_SUBREGISTRY as Address | undefined;
-  const parent = env.AGENT_NAME_PARENT || AGENT_NAME_PARENT;
+  /** The label about to be registered. When given, the SDK's claim rule is applied HERE (spec 445 / NAME-8: a
+   *  reserved label, or a `-<type>` ending under a bare-host root, names no agent) so the caller answers with the
+   *  reason instead of `buildSubregistryRegisterCall` throwing inside a half-built batch. */
+  label?: string,
+): { ok: true; subregistry: Address; typed: true; tld: string } | { ok: false; error: string } {
+  // Every name is claimed under a TYPED root. The untyped `.impact` root (`PERMISSIONLESS_SUBREGISTRY`, served
+  // when no suffix was sent) was retired 2026-11-10 — a request that names no suffix is refused, never given a
+  // root it did not ask for (ADR-0013). `PERMISSIONLESS_SUBREGISTRY` is no longer read here.
   const raw = tld?.trim().toLowerCase();
-  if (!raw || raw === parent) {
-    if (!legacy) return { ok: false, error: 'naming_not_configured' };
-    return { ok: true, subregistry: legacy, typed: false };
-  }
+  if (!raw) return { ok: false, error: 'suffix_required: a name is claimed under a typed root (.me .org .team .svc …) — the request names none' };
   const t = canonicalTld(raw) ?? raw;
   if (!isAgentTld(t)) return { ok: false, error: `unknown_suffix: ".${raw}" is not an agent suffix` };
   let map: Record<string, string> = {};
@@ -9117,7 +9175,46 @@ function subregistryForTld(
   if (!addr || !/^0x[0-9a-fA-F]{40}$/.test(addr)) {
     return { ok: false, error: `suffix_not_claimable: ".${t}" has no root on this deployment` };
   }
+  if (label !== undefined) {
+    const v = labelClaimViolation(label.toLowerCase(), { root: t });
+    if (v) return { ok: false, error: `label_not_claimable: ${v.detail}` };
+  }
   return { ok: true, subregistry: addr as Address, typed: true, tld: t };
+}
+
+/** The status a typed-root refusal answers with. A claim the REQUEST cannot make (no suffix, an unknown or unclaimable
+ *  one, a label the naming rule refuses, a priced root) is the caller's to fix — 400 (owner decision, spec 445). Only
+ *  a root map this deployment cannot read is the deployment's own fault — 503. */
+const rootRefusalStatus = (error: string): 400 | 503 => (error.startsWith('typed_roots_misconfigured') ? 503 : 400);
+
+/**
+ * THE CLAIM IS TWO TRANSACTIONS (spec 445 / generation 4 / B2, REG-5): a `PermissionlessSubregistry` name is COMMITTED
+ * first (the label is not on chain, so a mempool watcher cannot take it) and REVEALED in a later transaction, at least
+ * `SUBREGISTRY_MIN_COMMIT_AGE_SECONDS` of CHAIN time after the commit is mined and within a day. The two can never share
+ * a batch. Every caller here builds the reveal into a batch it is about to build or submit, so this sends the commit —
+ * as the relayer (`commit` is open to any account; the commitment fixes label + owner + secret) — waits the chain out
+ * past the minimum age, and returns the reveal call carrying the secret. The secret exists only in that call's
+ * calldata; nothing keeps it. A reveal landing after the commit's day expired reverts `CommitmentExpired`: build again.
+ */
+async function commitThenRevealCall(env: Env, a: { subregistry: Address; label: string; newOwner: Address; root: string }): Promise<{ to: Address; value: bigint; data: Hex }> {
+  const secret = generateClaimSecret();
+  const commit = buildSubregistryCommitCall({ subregistry: a.subregistry, chainId: Number(env.CHAIN_ID), label: a.label, newOwner: a.newOwner, secret, root: a.root });
+  const relayer = await getRelayerAccount(env, 'direct-deploy', buildAuditSink(env));
+  const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
+  const wallet = createWalletClient({ account: relayer, chain: chainFor(env), transport: http(env.RPC_URL) });
+  const hash = await wallet.sendTransaction({ to: commit.to, data: commit.data, value: 0n } as never);
+  const receipt = await pub.waitForTransactionReceipt({ hash });
+  if (receipt.status !== 'success') throw new Error(`the name commitment reverted on chain (tx ${hash})`);
+  const committedAt = (await pub.getBlock({ blockNumber: receipt.blockNumber })).timestamp;
+  const matureAt = committedAt + BigInt(SUBREGISTRY_MIN_COMMIT_AGE_SECONDS);
+  // Wait on CHAIN time, not the wall clock: the reveal's block must carry a timestamp at or past `matureAt`.
+  for (let i = 0; i < 40; i++) {
+    const head = (await pub.getBlock()).timestamp;
+    if (head > matureAt) break;
+    if (i === 39) throw new Error('the name commitment did not mature in time — nothing was claimed; try again');
+    await new Promise((r) => setTimeout(r, 2_000));
+  }
+  return buildSubregistryRegisterCall({ subregistry: a.subregistry, label: a.label, newOwner: a.newOwner, secret, root: a.root });
 }
 
 /** spec 346 §3.6 step 1b — declare the derived type on the SA's profile subject IN THE SAME batch as the
@@ -9210,13 +9307,13 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
     let claimedName = '';
     if (wantName) {
       if (!c.env.AGENT_NAME_REGISTRY) return c.json({ ok: false, error: 'naming_not_configured' }, 503);
-      const root = subregistryForTld(c.env, body.tld);
-      if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
+      const root = subregistryForTld(c.env, body.tld, body.label!);
+      if (!root.ok) return c.json({ ok: false, error: root.error }, rootRefusalStatus(root.error));
       // Type first, then the claim — the record the suffix asserts must exist before the name does.
-      if (root.typed) calls.push(...(await declareTypeCallsFor(c.env, childSA, root.tld, body.serviceRole)));
-      calls.push(buildSubregistryRegisterCall({ subregistry: root.subregistry, label: body.label!.toLowerCase(), newOwner: childSA }));
+      calls.push(...(await declareTypeCallsFor(c.env, childSA, root.tld, body.serviceRole)));
+      calls.push(await commitThenRevealCall(c.env, { subregistry: root.subregistry, label: body.label!.toLowerCase(), newOwner: childSA, root: root.tld }));
       calls.push(buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node! }));
-      claimedName = `${body.label!.toLowerCase()}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
+      claimedName = `${body.label!.toLowerCase()}.${root.tld}`;
     }
     calls.push(orgApproveHashCall(c.env, stewardship.digest, 0n, childSA)); // deployed in this batch: epoch 0
     const callData = buildExecuteBatchCallData(calls);
@@ -9309,14 +9406,14 @@ app.post('/custody/oidc/name-agent', async (c) => {
       return c.json({ ok: false, error: 'not_custodian', detail: 'agent is not custodied by this session' }, 403);
     }
 
-    const root = subregistryForTld(c.env, body.tld);
-    if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
+    const root = subregistryForTld(c.env, body.tld, body.label);
+    if (!root.ok) return c.json({ ok: false, error: root.error }, rootRefusalStatus(root.error));
     // Type first, then the claim — the record the suffix asserts must exist before the name does.
-    const declare = root.typed ? await declareTypeCallsFor(c.env, body.agent, root.tld, body.serviceRole) : [];
-    const register = buildSubregistryRegisterCall({ subregistry: root.subregistry, label: body.label.toLowerCase(), newOwner: body.agent });
+    const declare = await declareTypeCallsFor(c.env, body.agent, root.tld, body.serviceRole);
+    const register = await commitThenRevealCall(c.env, { subregistry: root.subregistry, label: body.label.toLowerCase(), newOwner: body.agent, root: root.tld });
     const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node });
     const callData = buildExecuteBatchCallData([...declare, register, setPrimary]);
-    const claimedName = `${body.label.toLowerCase()}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
+    const claimedName = `${body.label.toLowerCase()}.${root.tld}`;
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
@@ -9716,7 +9813,13 @@ app.post('/custody/oidc/activate-vault', async (c) => {
     // Discover this server's binding params, then provision the per-person KEK (idempotent).
     const info = (await (await mfetch('/custody/vault-key/server-info')).json().catch(() => ({}))) as
       { serverId?: string; serverKey?: string; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[] };
-    const serverKey = ((info.serverKey ?? '').trim() || '0x0000000000000000000000000000000000000001') as Address;
+    // Spec 445 decision 8 — the delegate is the vault's REAL server key. The old `0x…01` fallback was a placeholder, and a
+    // delegation to a placeholder is a credential nobody holds the key to (the a2a package now refuses it everywhere).
+    // No key from the vault ⇒ refused, never invented (ADR-0013).
+    const serverKey = (info.serverKey ?? '').trim() as Address;
+    if (!/^0x[0-9a-fA-F]{40}$/.test(serverKey) || isPlaceholderAddress(serverKey)) {
+      return c.json({ ok: false, error: 'vault_server_key_unavailable', detail: 'the vault did not name its server key (server-info.serverKey) — nothing was authorized' }, 502);
+    }
     const allowedResources = info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'];
     const classificationCeiling = info.classificationCeiling ?? 'regulated.high';
     const ops: ('read' | 'write')[] = info.ops ?? ['read', 'write'];
@@ -11927,7 +12030,7 @@ app.post('/email/send', async (c) => {
       verifyStewardship: chainStewardshipCheck({
         readContract: ((args: never) => askDeps.readContract(args)) as never,
         chainId: Number(c.env.CHAIN_ID), delegationManager: c.env.DELEGATION_MANAGER as Address,
-        allowedTargetsEnforcer: c.env.ALLOWED_TARGETS_ENFORCER, vaultRecordScopeEnforcer: VAULT_RECORD_SCOPE_ENFORCER,
+        ...oversightCheckInputs(oversightContractsFromEnv(c.env)),
         isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
         ...(c.env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
       }),

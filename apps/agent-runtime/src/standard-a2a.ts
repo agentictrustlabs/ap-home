@@ -166,6 +166,8 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
   const byWire = deps.wire
     ? sessionWirePrincipal({
         ...deps.wire,
+        // RUN-9 — the ADDRESSED agent is the host: a wire minted for another agent is not a credential here.
+        target: agent,
         // THE SINGLE WRITER SPENDS IT (spec 372 S3c). The addressed agent's own object decides which caller
         // was first; a per-isolate memory is not replay protection on a fanned-out edge, as a live replay
         // showed on 2026-09-08. Unreachable ⇒ the call is refused, never admitted into a replay window.

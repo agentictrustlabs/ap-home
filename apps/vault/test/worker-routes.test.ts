@@ -114,7 +114,8 @@ describe('RFC 9728 discovery is metadata, never authority (ADR-0041)', () => {
   // a principal. An unauthenticated GET that carried any of those would be leaking the authority model.
   it('advertises scope NAMES but carries nothing decision-bearing', async () => {
     const body = await (await call(app, '/.well-known/oauth-protected-resource')).text();
-    expect(body).toContain('delegation:read'); // a scope name — expected
+    expect(body).toContain('mcp:invoke'); // a scope name — expected (D7: no vault:* / delegation:* names exist)
+    expect(body).not.toContain('delegation:read');
     for (const forbidden of ['sha256:', 'caveat', 'allowedFields', 'ap_grant', 'delegationHash', PRINCIPAL]) {
       expect(body.toLowerCase(), forbidden).not.toContain(forbidden.toLowerCase());
     }
@@ -154,9 +155,18 @@ describe('the dev seeder does not exist in production (audit M3)', () => {
 });
 
 describe('vault-key custody endpoints refuse before they act', () => {
-  it('answers the server-info probe', async () => {
-    const r = await call(app, '/custody/vault-key/server-info');
-    expect(r.status).toBeLessThan(500);
+  it('answers the server-info probe, naming the vault\'s REAL delegate', async () => {
+    const real = '0x2222222222222222222222222222222222222222';
+    const r = await call(app, '/custody/vault-key/server-info', {}, env({ VAULT_KEY_SERVER_DELEGATE: real }));
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as { serverKey: string }).serverKey).toBe(real);
+  });
+
+  it('refuses the server-info probe when no real delegate is configured (never the 0x…01 placeholder)', async () => {
+    for (const over of [{}, { VAULT_KEY_SERVER_DELEGATE: '0x0000000000000000000000000000000000000001' }]) {
+      const r = await call(app, '/custody/vault-key/server-info', {}, env(over));
+      expect(r.status).toBe(503);
+    }
   });
 
   // Provisioning wields an ADMIN KMS credential and creates a real, cost-bearing per-owner KEK, so an

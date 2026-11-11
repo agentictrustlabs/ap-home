@@ -66,7 +66,9 @@ export async function enqueueRuntimeWake(env: Env, wake: Omit<WakeMessageV1, 'v'
 /** Deliver one wake to the host and keep the receipt on the member's object. */
 export async function deliverRuntimeWake(env: Env, wake: WakeMessageV1, fetchImpl: typeof fetch = fetch): Promise<WakeReceiptV1> {
   const body = JSON.stringify({ v: 1, member: wake.memberName ?? wake.member, conversationId: wake.conversationId, messageId: wake.messageId });
-  const init: RequestInit = { method: 'POST', headers: { 'content-type': 'application/json' }, body };
+  // RUNB (spec 445): the runtime-member serves /wake only to a caller that holds the shared wake secret (Bearer).
+  const wakeSecret = (env as unknown as { AP_RUNTIME_WAKE_SECRET?: string }).AP_RUNTIME_WAKE_SECRET;
+  const init: RequestInit = { method: 'POST', headers: { 'content-type': 'application/json', ...(wakeSecret ? { authorization: `Bearer ${wakeSecret}` } : {}) }, body };
   let res: Response | null = null; let error: string | undefined;
   try {
     if (wake.host.kind === 'container') {

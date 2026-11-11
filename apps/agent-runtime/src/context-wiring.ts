@@ -128,26 +128,26 @@ export function providerStructuredCall(env: ModelEnv, p: LlmProvider, onUsage?: 
   if (p === 'openai') {
     return createOpenAiCompatStructuredCall({
       ...(onUsage ? { onUsage } : {}),
-      client: createFetchOpenAiCompatClient({ apiKey: env.OPENAI_API_KEY!, baseUrl: env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl, tokenLimitParam: 'max_completion_tokens' }),
+      client: createFetchOpenAiCompatClient({ apiKey: env.OPENAI_API_KEY!, baseUrl: env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl, tokenLimitParam: 'max_completion_tokens', provider: 'openai', allowedProviders: llmAllowlist(env) }),
       model: modelFor(env, 'openai'), label: 'openai', reasoningEffort: 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM,
     });
   }
   if (p === 'xai') {
     return createOpenAiCompatStructuredCall({
       ...(onUsage ? { onUsage } : {}),
-      client: createFetchOpenAiCompatClient({ apiKey: env.XAI_API_KEY!, baseUrl: env.ORCHESTRATION_XAI_BASE_URL || XAI_DEFAULTS.baseUrl }),
+      client: createFetchOpenAiCompatClient({ apiKey: env.XAI_API_KEY!, baseUrl: env.ORCHESTRATION_XAI_BASE_URL || XAI_DEFAULTS.baseUrl, provider: 'xai', allowedProviders: llmAllowlist(env) }),
       model: modelFor(env, 'xai'), label: 'xai',
     });
   }
   if (p === 'groq') {
     return createOpenAiCompatStructuredCall({
       ...(onUsage ? { onUsage } : {}),
-      client: createFetchOpenAiCompatClient({ apiKey: env.GROQ_API_KEY!, baseUrl: env.ORCHESTRATION_GROQ_BASE_URL || GROQ_DEFAULTS.baseUrl }),
+      client: createFetchOpenAiCompatClient({ apiKey: env.GROQ_API_KEY!, baseUrl: env.ORCHESTRATION_GROQ_BASE_URL || GROQ_DEFAULTS.baseUrl, provider: 'groq', allowedProviders: llmAllowlist(env) }),
       model: modelFor(env, 'groq'), label: 'groq',
     });
   }
   if (p !== 'anthropic') { const never: never = p; throw new Error(`structured call: no adapter for provider ${String(never)} (ADR-0013)`); }
-  const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY! });
+  const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY!, allowedProviders: llmAllowlist(env) });
   const model = tier === 'strong' ? strongModelFor(env, 'anthropic') : modelFor(env, 'anthropic');
   const autoChoice = FORCED_TOOL_CHOICE_REFUSED.test(model);
   return async ({ system, messages, tool, maxTokens }) => {
@@ -184,7 +184,7 @@ export function logprobChoiceFor(env: ModelEnv, provider: LlmProvider | undefine
   if (!p || p === 'anthropic' || !providerConfigured(env, p)) return undefined;
   const model = modelFor(env, p, 'planner');
   const client = p === 'gemini' ? geminiClient(env)
-    : createFetchOpenAiCompatClient({ apiKey: (p === 'openai' ? env.OPENAI_API_KEY : p === 'xai' ? env.XAI_API_KEY : env.GROQ_API_KEY)!, baseUrl: p === 'openai' ? env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl : p === 'xai' ? env.ORCHESTRATION_XAI_BASE_URL || XAI_DEFAULTS.baseUrl : env.ORCHESTRATION_GROQ_BASE_URL || GROQ_DEFAULTS.baseUrl });
+    : createFetchOpenAiCompatClient({ apiKey: (p === 'openai' ? env.OPENAI_API_KEY : p === 'xai' ? env.XAI_API_KEY : env.GROQ_API_KEY)!, baseUrl: p === 'openai' ? env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl : p === 'xai' ? env.ORCHESTRATION_XAI_BASE_URL || XAI_DEFAULTS.baseUrl : env.ORCHESTRATION_GROQ_BASE_URL || GROQ_DEFAULTS.baseUrl, provider: p, allowedProviders: llmAllowlist(env) });
   return async (input) => {
     const startMs = Date.now();
     let usage: ModelUsageV1 | undefined;
@@ -208,7 +208,7 @@ export function textStreamFor(env: ModelEnv, provider: LlmProvider | undefined, 
   return async (input) => {
     const startMs = Date.now();
     let usage: ModelUsageV1 | undefined;
-    const call = createOpenAiCompatTextStream({ apiKey: (env as { GEMINI_API_KEY: string }).GEMINI_API_KEY, baseUrl: (env as { ORCHESTRATION_GEMINI_BASE_URL?: string }).ORCHESTRATION_GEMINI_BASE_URL || GEMINI_DEFAULTS.baseUrl, model, label: 'gemini', reasoningEffort: opts.tier === 'minimal' ? 'minimal' : 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM, onUsage: (u) => { usage = addUsage(usage, u); } });
+    const call = createOpenAiCompatTextStream({ apiKey: (env as { GEMINI_API_KEY: string }).GEMINI_API_KEY, baseUrl: (env as { ORCHESTRATION_GEMINI_BASE_URL?: string }).ORCHESTRATION_GEMINI_BASE_URL || GEMINI_DEFAULTS.baseUrl, provider: 'gemini', allowedProviders: llmAllowlist(env), model, label: 'gemini', reasoningEffort: opts.tier === 'minimal' ? 'minimal' : 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM, onUsage: (u) => { usage = addUsage(usage, u); } });
     try {
       const text = await call(input);
       opts.onCall?.({ provider: 'gemini', model, because: 'stream', startMs, endMs: Date.now(), ...(usage ?? {}) });

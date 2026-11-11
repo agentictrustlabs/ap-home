@@ -8,7 +8,7 @@
 import { createPublicClient, http, keccak256, toBytes, type Hex, type Address } from 'viem';
 import { importJwks } from '@agenticprimitives/connect';
 import { verifySession } from '../_lib/home-session';
-import { buildCustodyDescriptor, relatedAgentWriteContentHash, hashRelatedAgentWriteChallenge, type CustodyDescriptor } from '@agenticprimitives/related-agents';
+import { buildCustodyDescriptor, relatedAgentWriteContentHash, hashRelatedAgentWriteChallenge, hashRelatedAgentWriteChallengeV3, checkRelatedAgentWriteChallengeVersion, type CustodyDescriptor } from '@agenticprimitives/related-agents';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
@@ -463,6 +463,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
      *  who holds it then sees a name, not an address. Rebuildable from the owner's vault; bearer path, caller must
      *  steward the agent. `isLocal:false` marks that the agent IS publicly named (shown without the `*`). */
     orgLocalName?: { name?: string; isLocal?: boolean };
+    /** The write-challenge version the signature was made over (spec 445 / COV-18): "v3" binds the chain; absent = "v2" (refused from 2026-12-10). */
+    challengeVersion?: string;
   } | null;
   const person = (body?.person ?? '').toLowerCase();
   const org = (body?.orgAgent ?? '').toLowerCase();
@@ -601,7 +603,16 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       purpose: (body?.purpose ?? '') as string,
       requestedBy: (body?.requestedBy ?? '') as string,
     });
-    const challenge = hashRelatedAgentWriteChallenge({ person: person as Address, orgAgent: org as Address, contentHash, nonce, expiry });
+    // COV-18 (spec 445): v3 binds the chain this home verifies on; v2 does not and is REFUSED from 2026-12-10
+    // (`challenge_v2_retired`) — until then a client that sends no `challengeVersion` is a v2 client. The clock is
+    // injected from the request's own `Date.now()`, never assumed.
+    const version = typeof body?.challengeVersion === 'string' ? body.challengeVersion : 'v2';
+    const gate = checkRelatedAgentWriteChallengeVersion(version, () => Date.now());
+    if (!gate.ok) return jsonCors({ error: gate.code, error_description: gate.reason }, request, gate.code === 'challenge_v2_retired' ? 401 : 400);
+    const fields = { person: person as Address, orgAgent: org as Address, contentHash, nonce, expiry };
+    const challenge = gate.version === 'v3'
+      ? hashRelatedAgentWriteChallengeV3({ chainId: CHAIN_ID, ...fields })
+      : hashRelatedAgentWriteChallenge(fields, { now: () => Date.now() });
 
     const client = createPublicClient({ transport: http(env.RPC_URL || DEFAULT_RPC_URL) });
     let valid = false;

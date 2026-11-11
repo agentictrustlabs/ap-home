@@ -3,7 +3,7 @@
  *
  * `claimName` took the typed root as an optional last parameter defaulting to `{}` — no root, i.e. the
  * legacy parent. Four call sites; three had forgotten it. So a person named through onboarding, or
- * through the required-name gate, was claimed as `<label>.impact` while the one screen that remembered
+ * through the required-name gate, was claimed under the untyped legacy root while the one screen that remembered
  * produced `<label>.me`.
  *
  * The failure is silent in the worst way: the claim SUCCEEDS. The name works, resolves, and looks right.
@@ -32,12 +32,14 @@ describe('claimName defaults to the person root', () => {
     expect(sig).not.toContain('typed: TypedClaimOpts = {}');
   });
 
-  it('the default is deployment-gated, not a hardcoded ".me"', () => {
-    // A deployment without the typed roots must still claim under its legacy parent rather than a root
-    // that does not exist on its chain.
+  it('the default is ALWAYS the person root — there is no untyped root to fall to (2026-11-10)', () => {
+    // It used to be deployment-gated: without `.me` it returned `{}` = the legacy `.impact` parent. A deployment
+    // without a `.me` root now refuses the claim in `subregistryForTld`, with the reason.
     const fn = SRC.slice(SRC.indexOf('function personClaimRoot'), SRC.indexOf('export async function claimName'));
-    expect(fn).toContain("CLAIMABLE_TLDS.includes('me')");
-    expect(fn).toContain('{ tld: \'me\' }');
+    expect(fn).toContain('{ tld: NEW_PERSON_TLD }');
+    expect(fn).not.toContain('{}');
+    const sub = SRC.slice(SRC.indexOf('function subregistryForTld'), SRC.indexOf('export async function readClaimedRoots'));
+    expect(sub).not.toContain('CONTRACTS.permissionlessSubregistry');
   });
 
   it('a managed agent still passes its OWN root — the default is for persons', () => {

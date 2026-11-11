@@ -89,7 +89,9 @@ export type AskReplyVariant =
       interaction?: { review?: string; navigationTarget?: string };
       /** What the ASKER is to the delegator, derived by the agent from evidence the chain confirms
        *  (spec 353 S5). It explains; it never decides — custody at grant time does that. */
-      standing?: { relation: 'self' | 'steward' | 'member' | 'none'; because: string; canGrant: boolean };
+      /* `claimed` (spec 445, audit RUNC-2): only the asker's OWN record says they belong; the organization holds
+         none of them. Rendered as not a member — no "Ask a steward" — and `because` says whose record it is. */
+      standing?: { relation: 'self' | 'steward' | 'member' | 'claimed' | 'none'; because: string; canGrant: boolean };
       note?: string;
       /** Spec 361 I4 — other digests the act needs from the SAME delegator; approveHash'd with the
        *  mandate's in one userOp (one signature). */
@@ -100,6 +102,10 @@ export type AskReplyVariant =
         arg: string; raw: string; agent: string; label?: string; hint?: string;
         /** Spec 363 — why a party was DECIDED rather than asked, in the deciding rule's own words. */
         because?: string; ruleId?: string;
+        /** Spec 445 §3.6 — what stands behind a party that is NOT a link the person holds: a registry name she
+         *  typed in full, or a choice she confirmed before (spec 385). Absent ⇒ found in her own tier. Data for
+         *  the preview; `hint` already carries the words. */
+        evidence?: 'typed-public-name' | 'confirmed';
       }> }
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: AskPrompt }
   /** Spec 374 — the run waits on ANOTHER agent's steward; not resumable here. `on` is where it waits. */
@@ -822,7 +828,7 @@ export async function mintApprovedMandate(
   const handler = reply.requirement.type === PAYMENT_TYPE ? paymentHandler : capabilityHandler;
   const caveats: Caveat[] = [
     ...handler.toCaveats(reply.requirement, enforcers as never),
-    buildDigestBindingCaveat(enforcers.digestBinding, 'intent', reply.requirement.intentDigest as Hex),
+    buildDigestBindingCaveat(enforcers.digestBinding, 'intent', reply.requirement.intentDigest as Hex, reply.requirement.maxRedemptions),
   ];
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   let salt = 0n;
@@ -869,7 +875,7 @@ export async function mintMandate(
   const handler = reply.requirement.type === PAYMENT_TYPE ? paymentHandler : capabilityHandler;
   const caveats: Caveat[] = [
     ...handler.toCaveats(reply.requirement, enforcers as never),
-    buildDigestBindingCaveat(enforcers.digestBinding, 'intent', reply.requirement.intentDigest as Hex),
+    buildDigestBindingCaveat(enforcers.digestBinding, 'intent', reply.requirement.intentDigest as Hex, reply.requirement.maxRedemptions),
   ];
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   let salt = 0n;

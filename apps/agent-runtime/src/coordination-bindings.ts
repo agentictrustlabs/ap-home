@@ -13,7 +13,7 @@
 // contracts declare, and the DO still derives the caller's standing from its own records (ADR-0054).
 import type { Address } from 'viem';
 import type { ToolInvoker, ToolSpec } from '@agenticprimitives/orchestration';
-import { deriveStanding, relationshipRows, subjectOfRead, type StandingDeps } from '@agenticprimitives/context';
+import { belongs, deriveStanding, relationshipRows, subjectOfRead, type StandingDeps } from '@agenticprimitives/context';
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
 import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import {
@@ -233,7 +233,9 @@ export function endeavorReadInvoker(deps: CoordinationDeps, addressee: Address, 
     // `deps` is StandingDeps-shaped: the harness maps the routed context (what the asker presented, that
     // their tree is not ours to read) onto `context`, and the verifier rides along (spec 366 R2/R3).
     const standing = await deriveStanding(deps, { principal: person, subject: o.org }).catch(() => null);
-    if (!standing || standing.relation === 'none') {
+    // `belongs`, never `!== 'none'` (spec 445, audit RUNC-2): an asker whose only evidence is their own
+    // relationship row (`claimed`) is refused — anyone can write that row into their own vault.
+    if (!standing || !belongs(standing)) {
       const reason = `an organization's work is its own record, and ${standing?.because ?? 'this agent cannot read your links'} — only someone who belongs there can see it`;
       return { endeavors: [], count: 0, refused: reason, reason };
     }

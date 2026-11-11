@@ -11,7 +11,7 @@ import { estateIdOf } from '@agenticprimitives/estate-projection';
 import { isArtifactRef, engagementsOf, assertFirewalled, assertMetricsFirewalled, metricsOf, provenanceOf, runProvenanceRecordKey, spansOf, summarizeOutput, type RunRecordV1, type RunExportReportV1, type RunMetricsV1, type SpanV1 } from '@agenticprimitives/orchestration';
 import { agentIri, projectHarnessRunProvenance, toJsonLd, toProvN, type ProvenanceRecordV1, projectPublicProvenance, type PublicProvenanceProjection } from '@agenticprimitives/provenance';
 import { RUN_PROVENANCE_CONTEXT, RUN_MEASURES_CONTEXT } from '@agenticprimitives/ontology';
-import { measureRun, measuresToJsonLd, runMeasuresRecordKey } from '@agenticprimitives/evaluation';
+import { measureRun, measuresToJsonLd, runMeasuresRecordKey } from '@agenticprimitives/evaluation/evidence';
 import type { ProvenanceStorePort } from '@agenticprimitives/provenance';
 import type { TraceExporterPort } from '@agenticprimitives/orchestration';
 import { otlpHttpExporter } from './provenance-bindings.js';
@@ -21,6 +21,8 @@ export interface RunExportEnv {
   OTEL_EXPORTER_OTLP_ENDPOINT?: string;
   /** `k=v,k=v` — the collector's headers (an auth token, a dataset). Values are the deployment's secret. */
   OTEL_EXPORTER_OTLP_HEADERS?: string;
+  /** RUN-19 (spec 445) — a SECRET of this deployment (>= 16 chars) that keys every exported digest of an agent or argument. */
+  EXPORT_DIGEST_SALT?: string;
   /** Spec 390 W4 — the collector's metrics endpoint (`https://…/v1/metrics`). Absent ⇒ metrics are projected and served, not sent. */
   OTEL_EXPORTER_OTLP_METRICS_ENDPOINT?: string;
   /** Days a run record stays on the agent's task object before the sweep (default 7). The vault copy is the record. */
@@ -170,8 +172,12 @@ export function firewalledMetrics(record: RunRecordV1): RunMetricsV1 {
 }
 
 /** The firewalled spans of a record — what `/harness/spans` serves and the collector receives. */
-export async function firewalledSpans(record: RunRecordV1): Promise<SpanV1[]> {
-  const spans = await spansOf(record);
+export async function firewalledSpans(record: RunRecordV1, env?: Pick<RunExportEnv, 'EXPORT_DIGEST_SALT'>): Promise<SpanV1[]> {
+  // RUN-19 (spec 445) — every agent / argument digest in an exported trace is KEYED with the deployment's own salt, so an
+  // exported trace does not name its parties to whoever holds a list of addresses. Unset ⇒ unsalted (as before), said in
+  // the owner actions; a salt, once set, stays for as long as exports must join.
+  const salt = env?.EXPORT_DIGEST_SALT?.trim();
+  const spans = await spansOf(record, salt ? { digestSalt: salt } : {});
   assertFirewalled(spans, record);
   return spans;
 }
@@ -237,7 +243,7 @@ export async function exportRun(env: RunExportEnv, deps: RunExportDeps, agent: s
   // The spans — firewalled BEFORE the port, carried by whichever binding this deployment names.
   const exporter = deps.exporter ?? otlpHttpExporter(env, deps.fetch ?? fetch);
   try {
-    const spans = await firewalledSpans(record);
+    const spans = await firewalledSpans(record, env);
     report.spans.count = spans.length;
     const out = await exporter.exportTraces(spans);
     report.spans.sent = out.sent;

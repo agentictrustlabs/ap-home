@@ -53,6 +53,7 @@ const run = (over: Record<string, unknown> = {}) => {
       deliverOutbound({
         personSA: ALICE,
         recipientSA: BOB,
+        chainId: 31337,
         transportGrant: GRANT,
         signAsPerson: async (d: Hex) => wrapped(d),
         payload: payload(),

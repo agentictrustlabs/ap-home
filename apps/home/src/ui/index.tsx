@@ -213,7 +213,7 @@ export function Avatar({ name, address, size, agent, src }: { name?: string | nu
   const key = (name || address || '?').toLowerCase();
   let h = 0; for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
   const label = name || (address ? address.slice(2, 6) : '?');
-  const parts = label.replace(/\.(me|org|team|svc|workspace|treasury|household|church|circle|impact|agent)$/i, '').split(/[\s._-]+/).filter(Boolean);
+  const parts = label.replace(/\.(me|org|team|svc|workspace|treasury|household|church|circle|agent)$/i, '').split(/[\s._-]+/).filter(Boolean);
   const initials = (parts.length >= 2 ? `${parts[0]![0]}${parts[1]![0]}` : label.slice(0, 2)).toUpperCase();
   const isAgent = agent ?? /\.(org|team|svc|workspace|treasury|household|church|circle|impact)$/i.test(label);
   return (

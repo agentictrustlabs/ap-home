@@ -298,7 +298,7 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create', 'service-agent-wire'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
-      // `skills-agent.impact` — the service agent orgs grant to and skills-a2a signs AS. It is
+      // `skills-agent.svc` — the service agent orgs grant to and skills-a2a signs AS. It is
       // custodied by a SIWE credential in its owner's Home, NOT by skills-a2a: the worker signs with
       // a KMS key that the `service-agent-wire` ceremony authorizes as a DELEGATE, so a compromise of
       // the worker yields something the custodian revokes rather than the identity itself
@@ -386,7 +386,7 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create', 'service-agent-wire'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
-      // `engage-service.impact` — the service agent orgs grant to and engage-a2a signs AS. Custodied
+      // `engage-service.svc` — the service agent orgs grant to and engage-a2a signs AS. Custodied
       // OUTSIDE engage-a2a (1 custodian, 0 passkeys on chain today); the worker signs with a KMS key
       // the `service-agent-wire` ceremony authorizes as a DELEGATE, so compromising the worker
       // yields something the custodian revokes rather than the identity itself (ADR-0019 +
@@ -406,7 +406,7 @@ const faithImpact: WhiteLabelConfig = {
     // field-app — Field Circles / Field Workspace (agentictrustlabs/engage apps/field-*).
     // A SEPARATE product (ADR-0007), not a mode of Engage. Login-grade connect via the Personal
     // Home; no PII held by the broker. No service-agent-wire yet — field-a2a signs nothing as
-    // itself until F2 (outbound send). operational_delegate is field-service.impact, not the
+    // itself until F2 (outbound send). operational_delegate is field-service.svc, not the
     // shared `delegate` below.
     {
       client_id: 'field-app',
@@ -457,7 +457,7 @@ const faithImpact: WhiteLabelConfig = {
       // the interactions service SA, revocable by the person alone at Home. `inbox.get` needs
       // `vault:inbox.data`; `inbox.body.get` needs `vault:message.body:dm:*` (interactions-do OP_RESOURCE).
       read_grant: { resources: ['vault:inbox.data', 'vault:message.body:dm:*'] },
-      // field-service.impact — a DIFFERENT SA per identity universe (the faithnet deploy sets
+      // field-service.svc — a DIFFERENT SA per identity universe (the faithnet deploy sets
       // NEXT_PUBLIC_FIELD_SERVICE_SA to the SA minted on 34348; default is base-sepolia's).
       operational_delegate:
         process.env.NEXT_PUBLIC_FIELD_SERVICE_SA || '0xD1F7Ef18537eFDBfE0cA265F60f7A59333066f20',
@@ -1223,10 +1223,10 @@ const faithImpact: WhiteLabelConfig = {
       expiryDays: 1,
     },
     // spec 266 — the corpus OWNER authorizes each content issuer's Cloud-KMS signing key: signs, with their
-    // own credential, a delegation binding each issuer SA (e.g. lbsb.impact) → its KMS content-signing key.
+    // own credential, a delegation binding each issuer SA (e.g. lbsb.org) → its KMS content-signing key.
     'content-signer': {
       canDo: [
-        'Authorize an HSM-backed Cloud KMS key to sign content on behalf of issuers you control (e.g. lbsb.impact)',
+        'Authorize an HSM-backed Cloud KMS key to sign content on behalf of issuers you control (e.g. lbsb.org)',
         'Bind each authorization to a specific issuer + key, revocable later',
       ],
       cannotDo: [
@@ -1237,7 +1237,7 @@ const faithImpact: WhiteLabelConfig = {
       expiryDays: 1,
     },
     // agent-rule `service-agent-signing.md` — you authorize a service's HSM-backed KMS key to act AS
-    // an agent you custody (e.g. skills-agent.impact), for ONE kind of message, revocably. The
+    // an agent you custody (e.g. skills-agent.svc), for ONE kind of message, revocably. The
     // service never holds anything that controls the agent.
     // Spec 397 — the Home MCP's ask wire: what Claude (or any assistant) holds when it connects as a client of you.
     'ask-as-me': {

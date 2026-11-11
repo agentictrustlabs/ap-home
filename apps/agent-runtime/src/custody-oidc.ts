@@ -262,7 +262,9 @@ export async function verifyRelyingIdToken(
     } catch { return false; }
   };
   if (!issOk(iss) || !aud) return { ok: false, status: 401, error: 'id_token iss/aud not accepted' };
-  const r = await verifyIdToken(token, { keys, expectedIss: iss!, expectedAud: aud });
+  // D5 (spec 445 decision 8): the nonce expectation is STATED. This id_token arrives as an API bearer — no flow of this
+  // Worker sent a nonce — so the statement is `null`; a token that carries one is a mismatch, and is refused.
+  const r = await verifyIdToken(token, { keys, expectedIss: iss!, expectedAud: aud, expectedNonce: null });
   if (!r.ok) return { ok: false, status: 401, error: `invalid id_token: ${r.reason}` };
   const sub = (r.claims.canonical_agent_id ?? r.claims.sub ?? '') as string;
   const sa = sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] as Address | undefined;

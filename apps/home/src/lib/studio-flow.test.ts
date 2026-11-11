@@ -46,7 +46,7 @@ describe('planPublish — one button, the whole chain, stops only where it must'
 
 describe('studioErrorSentence — a refusal has to say what to DO', () => {
   it('translates the untyped-agent refusal instead of leaking it', () => {
-    // Clicking "List it" on a legacy `.impact` agent surfaced, verbatim: "the agent has no on-chain
+    // Clicking "List it" on an untyped legacy agent surfaced, verbatim: "the agent has no on-chain
     // atl:agentType / atl:agentKind and no typed name; declare its type before projecting (spec 346)".
     // That is a correct refusal reported in our vocabulary, with a spec number and no next step.
     for (const raw of [
@@ -55,7 +55,7 @@ describe('studioErrorSentence — a refusal has to say what to DO', () => {
     ]) {
       const out = studioErrorSentence(raw);
       expect(out).toContain('typed name');
-      expect(out).toContain('.impact');            // names the case the person is actually in
+      expect(out).toContain('.agent');             // names the case the person is actually in
       for (const ours of ['atl:', 'projecting', 'spec 346', 'agentKind']) expect(out).not.toContain(ours);
     }
   });

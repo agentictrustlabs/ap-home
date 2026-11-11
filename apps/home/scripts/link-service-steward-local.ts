@@ -65,6 +65,8 @@ async function activateVault(): Promise<string> {
   const info = (await fetch(`${MCP_URL}/custody/vault-key/server-info?owner=${OWNER.toLowerCase()}`).then((r) => r.json())) as {
     serverId?: string; serverKey?: string; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[];
   };
+  // No placeholder delegate (spec 445): the vault's REAL key, or no bind.
+  if (!/^0x[0-9a-fA-F]{40}$/.test(info.serverKey ?? '') || /^0x0{39}[0-9a-f]$/i.test(info.serverKey!)) return 'vault: server-info names no real delegate (set VAULT_KEY_SERVER_DELEGATE on the vault) — not bound';
   const issuedAt = Math.floor(Date.now() / 1000);
   const challenge = keccak256(toBytes(['demo-mcp:vault-key-provision:v1', OWNER.toLowerCase(), String(issuedAt)].join('\n')));
   const prov = (await fetch(`${MCP_URL}/custody/vault-key/provision`, {
@@ -75,7 +77,7 @@ async function activateVault(): Promise<string> {
   const params = {
     vaultId: String(info.serverId ?? '').trim() || 'demo-mcp',
     kmsKeyRef: prov.kmsKeyRef,
-    serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address,
+    serverKey: info.serverKey as Address,
     allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'],
     classificationCeiling: info.classificationCeiling ?? 'regulated.high',
     ops: info.ops ?? (['read', 'write'] as ('read' | 'write')[]),

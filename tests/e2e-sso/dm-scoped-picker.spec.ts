@@ -7,13 +7,13 @@
  * a "You: …" preview. If the send needs the one-prompt wire ceremony, the test walks it.
  *
  * Runs against whatever SSO_BASE_URL points at (default: the local dev Home). Uses only what exists:
- *   DM_SCOPE   — the team/org label to open (default: russian-team.impact)
+ *   DM_SCOPE   — the team/org label to open (default: russian.team)
  *   DM_MEMBER  — optional: a substring of the member row to pick (default: the first row)
  */
 import { test, expect, type Page } from '@playwright/test';
 
 const HOME = process.env.SSO_BASE_URL ?? 'http://localhost:5373';
-const SCOPE = process.env.DM_SCOPE ?? 'russian-team.impact';
+const SCOPE = process.env.DM_SCOPE ?? 'russian.team';
 const MEMBER = process.env.DM_MEMBER ?? '';
 
 async function signInAsAlice(page: Page, request: Parameters<Parameters<typeof test>[1]>[0]['request']) {

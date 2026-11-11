@@ -24,6 +24,7 @@ import { contractsGenerationOf } from '@agenticprimitives/agent-account';
 import { defineChain, type Chain } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import type { Address } from '@agenticprimitives/types';
+import type { OversightContracts } from '@ap-home/shared';
 import { CONTRACTS as BASE_SEPOLIA } from '@agenticprimitives/contracts/deployments/base-sepolia';
 import { CONTRACTS as FAITHCHAIN } from '@agenticprimitives/contracts/deployments/faithchain';
 
@@ -165,6 +166,18 @@ export const CONTRACTS = {
   digestBindingEnforcer: addr('digestBindingEnforcer'),
   payloadClassesEnforcer: addr('payloadClassesEnforcer'), // spec 410 §7 (generation 3)
 } as const satisfies Record<string, Address>;
+
+/** Spec 445 (audit RUNC-1) — the contracts the organization's OVERSIGHT wire is built from, in the shape
+ *  `@ap-home/shared` oversight-targets reads. `siteCaveats` mints from this and `verifyStewardship` recognises
+ *  with it, so the two cannot name different targets. */
+export const OVERSIGHT_CONTRACTS: OversightContracts = {
+  allowedTargetsEnforcer: CONTRACTS.allowedTargetsEnforcer,
+  timestampEnforcer: CONTRACTS.timestampEnforcer,
+  valueEnforcer: CONTRACTS.valueEnforcer,
+  agentRelationship: CONTRACTS.agentRelationship,
+  agentNameRegistry: CONTRACTS.agentNameRegistry,
+  permissionlessSubregistry: CONTRACTS.permissionlessSubregistry,
+};
 
 /** spec 346 — per-suffix PermissionlessSubregistry map (`me org team svc workspace treasury registry`), present only on
  *  deployments where `AddTypedRoots.s.sol` has run. An absent suffix means "no typed claim on this chain" — never a

@@ -14,7 +14,7 @@
 //     --relay-key-file ~/.<chain>-deployer.key [--tld me] [--only maya,samuel] [--dry-run]
 import { readFileSync } from 'node:fs';
 import { AgentAccountClient, buildExecuteBatchCallData } from '@agenticprimitives/agent-account';
-import { AgentNamingClient, buildDeclareAgentTypeCalls, buildTypedClaimCalls, derivedTypeForTld } from '@agenticprimitives/agent-naming';
+import { AgentNamingClient, buildDeclareAgentTypeCalls, buildTypedClaimCalls, generateClaimSecret, SUBREGISTRY_MIN_COMMIT_AGE_SECONDS, derivedTypeForTld } from '@agenticprimitives/agent-naming';
 import { createPublicClient, decodeEventLog, http, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
@@ -54,14 +54,18 @@ for (const [handle, p] of Object.entries(people)) {
   if (taken && taken !== '0x0000000000000000000000000000000000000000') { console.error(`${handle}: ${name} is already ${taken}'s on this chain — not touching it`); skipped++; continue; }
   const registered = await pc.readContract({ address: dep.agentProfileResolver, abi: PROFILE_ABI, functionName: 'isRegistered', args: [agent] }).catch(() => false);
   const declare = buildDeclareAgentTypeCalls({ profileResolver: dep.agentProfileResolver, agent, agentType, registered, displayName: p.name ?? handle });
-  const claim = buildTypedClaimCalls({ name, owner: agent, registry: dep.agentNameRegistry, resolver: dep.agentNameResolver, subregistries: dep.permissionlessSubregistries, agentType, records: p.name ? { displayName: p.name } : {} });
-  const calls = [...declare, claim.claim, ...claim.records, claim.primaryName];
-  console.log(`${handle.padEnd(8)} ${agent} → ${name} (${registered ? 'profile registered' : 'registers profile'}; ${calls.length} calls in one batch)${dry ? ' — would claim' : ''}`);
+  const claim = buildTypedClaimCalls({ name, owner: agent, registry: dep.agentNameRegistry, resolver: dep.agentNameResolver, subregistries: dep.permissionlessSubregistries, agentType, chainId: dep.chainId, secret: generateClaimSecret(), records: p.name ? { displayName: p.name } : {} });
+  // REG-5 (spec 445): the claim is two transactions — [declare, commit], wait, [reveal, records, primary].
+  const commitBatch = [...declare, claim.commit];
+  const revealBatch = [claim.claim, ...claim.records, claim.primaryName];
+  const calls = [...commitBatch, ...revealBatch];
+  console.log(`${handle.padEnd(8)} ${agent} → ${name} (${registered ? 'profile registered' : 'registers profile'}; ${calls.length} calls in two batches: commit, ≥${SUBREGISTRY_MIN_COMMIT_AGE_SECONDS}s wait, reveal)${dry ? ' — would claim' : ''}`);
   if (dry) continue;
   // A typed claim batch costs ~1.1–1.7M gas and buildCallUserOp's default callGasLimit is 800k — estimate from the
   // EntryPoint and pass the limit explicitly, as the Home's /account/build-call-userop does. An out-of-gas userOp
   // fails with `success:false` and no revert reason, and every call simulates fine on its own.
-  const callData = buildExecuteBatchCallData(calls);
+  const sendBatch = async (batch: typeof calls, _label: string): Promise<string> => {
+  const callData = buildExecuteBatchCallData(batch);
   const estimate = await pc.estimateGas({ account: dep.entryPoint, to: agent, data: callData });
   const built = await account.buildCallUserOp({ sender: agent, callData, paymaster: dep.smartAgentPaymaster, callGasLimit: (estimate * 125n) / 100n });
   built.userOp.signature = await custodian.signMessage({ message: { raw: built.userOpHash } });
@@ -75,8 +79,13 @@ for (const [handle, p] of Object.entries(people)) {
   if (receipt.status !== 'success') { console.error(`  ${handle}: handleOps reverted (tx ${receipt.transactionHash}) — a validation failure, not the batch; check the paymaster's EntryPoint deposit first (entryPoint.balanceOf(paymaster))`); process.exit(1); }
   if (ok === false) { console.error(`  ${handle}: the batch reverted inside the account (tx ${receipt.transactionHash})`); process.exit(1); }
   if (ok === undefined) { console.error(`  ${handle}: no UserOperationEvent for this agent in tx ${receipt.transactionHash}`); process.exit(1); }
+  return receipt.transactionHash;
+  };
+  await sendBatch(commitBatch, 'commit');
+  await new Promise((r) => setTimeout(r, (SUBREGISTRY_MIN_COMMIT_AGE_SECONDS + 2) * 1000));
+  const txHash = await sendBatch(revealBatch, 'reveal');
   const after = await naming.reverseResolve(agent).catch(() => null);
-  if (after !== name) { console.error(`  ${handle}: claimed but reverse-resolves to "${after ?? ''}" (tx ${receipt.transactionHash})`); process.exit(1); }
-  console.log(`  ${name} presented by ${agent} (tx ${receipt.transactionHash})`); named++;
+  if (after !== name) { console.error(`  ${handle}: claimed but reverse-resolves to "${after ?? ''}" (tx ${txHash})`); process.exit(1); }
+  console.log(`  ${name} presented by ${agent} (tx ${txHash})`); named++;
 }
 console.log(`\ndone — ${named} named, ${skipped} skipped.`);

@@ -197,7 +197,7 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
   // The WebAuthn userHandle (`user.id`) MUST be STABLE for a given identity, NOT random. An
   // authenticator keys resident (discoverable) credentials by (rpId, userHandle): registering
   // with a userHandle that already exists REPLACES that passkey, but a fresh random handle each
-  // time stacks a brand-new credential — so the OS picker lists the SAME name (e.g. `gco-v1.impact`)
+  // time stacks a brand-new credential — so the OS picker lists the SAME name (e.g. `gco-v1.me`)
   // once per signup attempt. Deriving the handle deterministically from (rpId, label) means a repeat
   // signup of the same identity overwrites its passkey instead of duplicating it.
   //

@@ -3,7 +3,7 @@
  *
  *   npx tsx scripts/verify-subject-hop-wire.mts
  *
- * This script stands where another Home's harness would: it resolves alice-home-church.impact's card at
+ * This script stands where another Home's harness would: it resolves alice-home.church's card at
  * the host its name projects, takes the card's A2A 1.0 endpoint, and sends ONE `SendMessage` carrying
  * the subject-ask profile under the asker's Home session — first as alice, a steward there, then as bob,
  * who has no standing. The church's own agent answers the first from its roster and refuses the second
@@ -17,8 +17,8 @@ import { sendSubjectAskOverWire } from '@agenticprimitives/a2a';
 import { readSubjectReply } from '../apps/agent-runtime/src/harness-run.js';
 
 const HOME = 'https://faithnet.me';
-const CHURCH_NAME = 'alice-home-church.impact';
-const CHURCH_HOST = 'alice-home-church.faithnet.ai'; // `.impact` is a name PARENT on faithnet (AGENT_NAME_PARENTS), so the host is the label alone
+const CHURCH_NAME = 'alice-home.church';
+const CHURCH_HOST = 'alice-home-church.faithnet.ai'; // typed name `alice-home.church` hosts at `<label>-<type>.<zone>` (one label; spec 346)
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
 const signin = async (handle: string) => j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle, client_id: 'demo-web' }) }));
 

@@ -9,7 +9,7 @@ import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import { engagementProbeMessage, engagementOf } from '@agenticprimitives/a2a';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import {
-  initialEngagement, stepEngagement, digestOf, projectionDigest, offerDigest, type IntentProjectionV1, type EngagementProbeV1, type EngagementResponseV1, type EngagementSituationV1,
+  initialEngagement, stepEngagement, digestOf, projectionDigest, offerDigest, signatureEvidenceKey, type IntentProjectionV1, type EngagementProbeV1, type EngagementResponseV1, type EngagementSituationV1,
 } from '@agenticprimitives/intent-engagement';
 
 export const ENGAGEMENT_PROBE_CAPABILITY = 'engagement.probe' as const;
@@ -41,6 +41,10 @@ export interface ProbeDeps {
   /** Send ONE probe message to a candidate; the reply is the candidate's message (or an error). */
   sendProbe: (candidate: Address, message: MessageV1) => Promise<{ ok: true; message: MessageV1 } | { ok: false; refused: string }>;
   requester: Address;
+  /** Spec 445 decision 8 — VERIFY a party's signature against its Smart Agent (ERC-1271 / ECDSA via the universal validator).
+   *  The reducer REQUIRES this evidence for every firm offer: absent ⇒ every firm offer is refused (fail closed), never
+   *  recorded on presence alone. */
+  verifySignature?: (signer: Address, digest: Hex, signature: Hex) => Promise<boolean>;
   now?: () => number;
 }
 
@@ -76,7 +80,8 @@ export async function probeCandidates(deps: ProbeDeps, input: { campaignId: stri
       interaction: { clarification: 'structured-only', humanChannels: ['external-url'], maxRounds: 1 }, processing: 'direct-message',
       replyBy: new Date(nowMs + (input.replyByMs ?? 10 * 60_000)).toISOString(), probeNonce: crypto.randomUUID(), issuedAt: new Date(nowMs).toISOString(),
     };
-    const sent = stepEngagement(s, { kind: 'SendProbe', probe, intentDigest: input.intentDigest, idempotencyKey: `${probe.probeId}:sent`, now: probe.issuedAt });
+    // A probe carries no signed commitment, so it needs no signature evidence (the reducer asks only of offers, acceptances and mandates).
+    const sent = stepEngagement(s, { kind: 'SendProbe', probe, intentDigest: input.intentDigest, idempotencyKey: `${probe.probeId}:sent`, now: probe.issuedAt }, { verified: new Set<string>() });
     if (!sent.ok) { rows.push({ agent, name, engagementId, state: s.state, refused: `${sent.code}: ${sent.reason}` }); situations.push(s); continue; }
     s = sent.state;
     const out = await deps.sendProbe(agent, engagementProbeMessage(probe as never));
@@ -84,7 +89,15 @@ export async function probeCandidates(deps: ProbeDeps, input: { campaignId: stri
     const doc = engagementOf(out.message);
     if (!doc || 'errors' in doc || !('response' in doc)) { rows.push({ agent, name, engagementId, state: s.state, refused: doc && 'errors' in doc ? doc.errors.join('; ') : 'answered with something that was not an engagement response' }); situations.push(s); continue; }
     const response = doc.response as unknown as EngagementResponseV1;
-    const got = stepEngagement(s, { kind: 'ReceiveResponse', response, idempotencyKey: `${response.responseId}:got`, now: new Date((deps.now ?? Date.now)()).toISOString() });
+    // Spec 445 decision 8 — a firm offer is recorded only with the provider's signature VERIFIED over its digest, by us
+    // (the reducer is pure and verifies nothing). No verifier, a throw, or a false answer ⇒ no evidence ⇒ the offer is refused.
+    const verified = new Set<string>();
+    if (response.content.kind === 'offer' && response.content.offer.type === 'ap.fulfillment-offer.v1' && deps.verifySignature) {
+      const o = response.content.offer;
+      const ok = await deps.verifySignature(o.provider, offerDigest(o), o.signature).catch(() => false);
+      if (ok) verified.add(signatureEvidenceKey(o.provider, offerDigest(o)));
+    }
+    const got = stepEngagement(s, { kind: 'ReceiveResponse', response, idempotencyKey: `${response.responseId}:got`, now: new Date((deps.now ?? Date.now)()).toISOString() }, { verified });
     if (!got.ok) { rows.push({ agent, name, engagementId, state: s.state, kind: response.content.kind, refused: `${got.code}: ${got.reason}` }); situations.push(s); continue; }
     s = got.state;
     const c = response.content;

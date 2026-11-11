@@ -6,6 +6,9 @@
  * offered ".org", the member typed a name, and the agent came back `<label>.impact`: a suffix that
  * declares no type, so the agent is unlistable and fails closed at the registry (2026-08-31).
  *
+ * 2026-11-10: that untyped root is RETIRED. There is no legacy branch left — a request that names no suffix
+ * is refused (`suffix_required`), every claim declares its type, and the builder is told the root (NAME-8).
+ *
  * These are source-shape assertions on purpose. The wiring is one argument inside a long handler, which
  * is exactly the kind of line that gets copied into a fifth endpoint with the old constant still in it.
  */
@@ -37,7 +40,7 @@ describe('typed naming on the KMS-custodied endpoints', () => {
       const h = handler(path);
 
       it('resolves the root from the requested suffix, not the legacy constant', () => {
-        expect(h).toContain('subregistryForTld(c.env, body.tld)');
+        expect(h).toMatch(/subregistryForTld\(c\.env, body\.tld, (label|body\.label!?)\)/);
         expect(h).not.toContain('subregistry: c.env.PERMISSIONLESS_SUBREGISTRY');
       });
 
@@ -47,23 +50,28 @@ describe('typed naming on the KMS-custodied endpoints', () => {
 
       it('declares the agent type in the same batch as a typed claim', () => {
         expect(h).toContain('declareTypeCallsFor(c.env');
-        expect(h).toContain('root.typed');
+        expect(h).not.toContain('root.typed'); // no untyped branch: every claim is typed
+      });
+
+      it('tells the claim builder which root the label is under (spec 445 / NAME-8)', () => {
+        expect(h).toMatch(/commitThenRevealCall\(c\.env, \{[^}]*root: root\.tld \}\)/);
       });
 
       it('reports the name under the suffix it actually claimed', () => {
         // The old handlers interpolated AGENT_NAME_PARENT into the response, so a typed claim was
-        // reported back as `<label>.impact` even when it had landed elsewhere.
-        expect(h).not.toMatch(/name: `\$\{[^}]*\}\.\$\{AGENT_NAME_PARENT\}`/);
+        // reported back under the legacy root even when it had landed elsewhere.
+        expect(h).not.toContain('AGENT_NAME_PARENT');
       });
     });
   }
 
-  it('fails closed on a suffix this deployment cannot serve — never the legacy root quietly', () => {
+  it('fails closed on a suffix this deployment cannot serve, and on NO suffix — there is no untyped root', () => {
     const fn = SRC.slice(SRC.indexOf('function subregistryForTld'), SRC.indexOf('function declareTypeCallsFor'));
     expect(fn).toContain('suffix_not_claimable');
     expect(fn).toContain('unknown_suffix');
-    // The legacy root is reachable ONLY when no suffix was requested (or the legacy one was).
-    expect(fn).toMatch(/if \(!raw \|\| raw === parent\)/);
+    expect(fn).toContain('suffix_required');
+    expect(fn).not.toContain('PERMISSIONLESS_SUBREGISTRY as Address');
+    expect(fn).toContain('labelClaimViolation(');
   });
 
   it('sizes the call gas on the one naming endpoint that is a CALL, not a deploy', () => {

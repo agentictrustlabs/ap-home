@@ -4,12 +4,13 @@
 //
 // THE REQUEST a relying app (Source Publishing) sends the person to:
 //
-//   /workspace-read?client_id=…&redirect_uri=…&state=…&agent=0x…
+//   /workspace-read?client_id=…&redirect_uri=…&state=…&agent=0x…&publisher=0x…
 //
 //   client_id     WHO is asking — resolved through the same registry every gate uses (`primeRelyingClient`).
 //   redirect_uri  WHERE the answer goes — EXACT match against that client's registered redirect_uris (CN-1).
 //   state         opaque, echoed back unchanged.
 //   agent         the service agent (0x… SA) whose wire to sign — the workspace the app asked a publisher to grant.
+//   publisher     the PUBLISHER's agent (0x… SA) the wire is presented at — one wire per receiving agent (spec 445 RUN-9).
 //
 // THE ANSWER is a full-page redirect to the registered redirect_uri:
 //
@@ -24,9 +25,10 @@ export interface WorkspaceReadRequest {
   redirectUri: string;
   state: string;
   agent: string;
+  publisher: string;
 }
 
-export type WorkspaceReadRefusalCheck = TreasuryRefusal['check'] | 'agent';
+export type WorkspaceReadRefusalCheck = TreasuryRefusal['check'] | 'agent' | 'publisher';
 export interface WorkspaceReadRefusal { check: WorkspaceReadRefusalCheck; detail: string }
 
 /** The four outcomes the app is told about besides success. */
@@ -38,7 +40,7 @@ export function parseWorkspaceReadRequest(href: string): WorkspaceReadRequest | 
   const clientId = (p.get('client_id') ?? '').trim();
   const redirectUri = (p.get('redirect_uri') ?? '').trim();
   if (!clientId || !redirectUri) return null;
-  return { clientId, redirectUri, state: p.get('state') ?? '', agent: (p.get('agent') ?? '').trim().toLowerCase() };
+  return { clientId, redirectUri, state: p.get('state') ?? '', agent: (p.get('agent') ?? '').trim().toLowerCase(), publisher: (p.get('publisher') ?? '').trim().toLowerCase() };
 }
 
 /** The gate: the client and its redirect exactly as /choose-treasury checks them, then an agent address. */
@@ -46,6 +48,7 @@ export function workspaceReadRefusal(req: WorkspaceReadRequest | null, client: T
   const base = refusalFor(req ? { clientId: req.clientId, redirectUri: req.redirectUri, state: req.state, label: '' } : null, client);
   if (base) return base;
   if (!/^0x[0-9a-f]{40}$/.test(req!.agent)) return { check: 'agent', detail: 'agent must be the service agent\'s 0x address' };
+  if (!/^0x[0-9a-f]{40}$/.test(req!.publisher) || req!.publisher === req!.agent) return { check: 'publisher', detail: 'publisher must be the publisher agent\'s 0x address (another agent than the service)' };
   return null;
 }
 

@@ -325,13 +325,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // person to /workspace-read instead. One call site for both (the doctor's bridge ratchet: no new session-RPC sites).
   if (body?.action === 'routingStatus' || body?.action === 'routingEnable' || body?.action === 'routingDisable' || body?.action === 'signingWireStatus' || body?.action === 'signingWireEnable' || body?.action === 'signingWireClear') {
     const op = { routingStatus: 'consult.routingStatus', routingEnable: 'consult.routingEnable', routingDisable: 'consult.routingDisable', signingWireStatus: 'signing.wireStatus', signingWireEnable: 'signing.wireEnable', signingWireClear: 'signing.wireClear' }[body.action]!;
-    const b = body as { channelId?: string; delegation?: unknown; maxFanout?: number; clearWire?: boolean };
+    const b = body as { channelId?: string; delegation?: unknown; maxFanout?: number; clearWire?: boolean; target?: string };
     const r = await callInteractions(env, communityId, op, {
       session: who.token,
       ...(b.channelId ? { channelId: b.channelId } : {}),
       ...(b.delegation ? { delegation: b.delegation } : {}),
       ...(b.maxFanout !== undefined ? { maxFanout: b.maxFanout } : {}),
       ...(b.clearWire !== undefined ? { clearWire: b.clearWire } : {}),
+      // RUN-9 — a service signing wire names ONE receiving agent (the publisher); status and clear say which.
+      ...(typeof b.target === 'string' && b.target ? { target: b.target } : {}),
       ...(stewardship ? { stewardship } : {}),
     });
     return jsonCors(r.body, request, r.status);

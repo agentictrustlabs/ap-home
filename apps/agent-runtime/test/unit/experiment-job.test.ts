@@ -41,7 +41,7 @@ describe('parseExperimentRequest', () => {
   it('names the plan after the set, the variants, the split and the repeats when none is given', async () => {
     const criterion = await criterionFor(set);
     const r = await parseExperimentRequest({ set, criterion, variants: { model: {} } }, now);
-    expect(r.ok && r.plan.id).toBe('lab-set@1-model-held-out-r1');
+    expect(r.ok && r.plan.id).toBe('lab-set.v1-model-held-out-r1');
   });
 });
 

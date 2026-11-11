@@ -19,6 +19,7 @@ import {
   type SignedPayloadRef,
 } from '@agenticprimitives/coordination';
 import { planContentHash } from '@agenticprimitives/coordination/planning';
+import { commitmentPayloadHash } from '@agenticprimitives/coordination';
 import { projectEndeavorProvenance } from '@agenticprimitives/provenance';
 import {
   COORDINATION_REQUESTS_RESOURCE,
@@ -114,7 +115,7 @@ const STEPS: PlanStepV1[] = [{ stepId: 'step_a', kind: 'contribution', descripti
 const PLAN_HASH = planContentHash({ steps: STEPS, edges: [], milestones: [] });
 const PLAN_REF: PlanRevisionRef = { planId: 'plan_x', revision: 1, hash: PLAN_HASH };
 const SIG: SignedPayloadRef = {
-  payloadHash: `0x${'1'.repeat(64)}`,
+  payloadHash: commitmentPayloadHash({ endeavorId: 'end_1', allocationRef: 'alloc_1', planRef: PLAN_REF, steps: ['step_a'] } as never), // the canonical payload (spec 445)
   signer: CAROL,
   scheme: 'ecdsa',
   signature: `0x${'2'.repeat(64)}`,

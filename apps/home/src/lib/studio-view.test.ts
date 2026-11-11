@@ -292,14 +292,19 @@ describe('projection rows + impact', () => {
 });
 
 describe('card URI derivation', () => {
-  const opts = { nameParent: 'impact', a2aDomain: 'impact-agent.io' };
+  const opts = { nameParent: 'agent', a2aDomain: 'impact-agent.io' };
   it('drops the naming zone and folds a typed suffix into one label', () => {
-    expect(cardUriForName('vendor-payments.impact', opts)).toBe('https://vendor-payments.impact-agent.io/.well-known/agent-card.json');
-    expect(cardUriForName('finance.team.impact', opts)).toBe('https://finance-team.impact-agent.io/.well-known/agent-card.json');
+    expect(cardUriForName('vendor-payments.agent', opts)).toBe('https://vendor-payments.impact-agent.io/.well-known/agent-card.json');
+    expect(cardUriForName('finance.team.agent', opts)).toBe('https://finance-team.impact-agent.io/.well-known/agent-card.json');
   });
   it('returns null for a nameless agent', () => {
     expect(cardUriForName('', opts)).toBeNull();
-    expect(cardUriForName('impact', opts)).toBeNull();
+    expect(cardUriForName('agent', opts)).toBeNull();
+  });
+  it('a bare-root label that reads as a typed host has NO card URI (spec 445 / NAME-8)', () => {
+    // `finance-team.agent` would print `finance-team.<zone>` — the host of `finance.team`.
+    expect(cardUriForName('finance-team.agent', opts)).toBeNull();
+    expect(cardUriForName('finance-team.me', { nameParent: 'me', a2aDomain: 'faithnet.ai' })).toBeNull();
   });
 });
 
@@ -420,7 +425,7 @@ describe('lifecycleOrientation — one shared "where am I / what next" picture f
 
 describe('namesAndBindingsRows — every row states what is true, then what to do about it', () => {
   const base = {
-    agentName: 'vendor-payments.impact',
+    agentName: 'vendor-payments.svc',
     hasSignedRelease: false,
     published: null,
     namingConfigured: false,
@@ -434,7 +439,7 @@ describe('namesAndBindingsRows — every row states what is true, then what to d
     const rows = namesAndBindingsRows(base);
     const identity = rows.find((r) => r.id === 'identity')!;
     expect(identity.state).toBe('ok');
-    expect(identity.line).toContain('vendor-payments.impact');
+    expect(identity.line).toContain('vendor-payments.svc');
     expect(identity.line).toContain('owns the name');
   });
   it('the nameless case explains the consequence, never a bare negative', () => {
@@ -500,14 +505,14 @@ describe('cardUriForName — one DNS label (spec 346 §5)', () => {
     expect(cardUriForName('', opts)).toBeNull();
   });
 
-  // The estate mid-migration: the LEGACY root is still `nameParent`, and `.me` is served alongside it.
+  // An estate serving TWO bare roots: a legacy root is still `nameParent`, and `.me` is served alongside it.
   // The single-root version got this wrong in production — `nathan.me` became `nathan-me.<zone>`, a host
   // nothing answers on — because it only ever compared against `nameParent`. demo-a2a's `hostForName`
   // has always matched the whole ordered list, and these two MUST agree.
-  const migrating = { nameParent: 'impact', nameParents: ['me', 'impact'], a2aDomain: 'faithnet.ai' };
+  const migrating = { nameParent: 'agent', nameParents: ['me', 'agent'], a2aDomain: 'faithnet.ai' };
   it('drops EITHER person root while an estate serves both', () => {
     expect(cardUriForName('nathan.me', migrating)).toBe('https://nathan.faithnet.ai/.well-known/agent-card.json');
-    expect(cardUriForName('rich-google.impact', migrating)).toBe('https://rich-google.faithnet.ai/.well-known/agent-card.json');
+    expect(cardUriForName('rich-google.agent', migrating)).toBe('https://rich-google.faithnet.ai/.well-known/agent-card.json');
   });
 
   it('still hyphenates a typed suffix — a root list is not a licence to drop types', () => {

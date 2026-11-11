@@ -16,12 +16,12 @@ const ALICE = '0xb0d11ce19b756a682e78b4904cd8d832303b3d11' as const;
 const CHURCH = '0x3b99f2b452766de5df0dbcdfc676f27257151333' as const;
 const HOST = 'alice-home-church-impact.other-home.example';
 const card: AgentCardV1 = {
-  name: 'alice-home-church.impact', description: 'a church on another Home', version: '1',
+  name: 'alice-home.church', description: 'a church on another Home', version: '1',
   supportedInterfaces: [{ url: `https://${HOST}/api/a2a`, protocolBinding: 'JSONRPC', protocolVersion: '1.0' }],
   capabilities: {}, defaultInputModes: ['text/plain'], defaultOutputModes: ['text/plain'], skills: [],
 };
 const profile = subjectAsk({
-  request: { capability: 'organization.membership.list', args: { org: CHURCH }, goal: 'who are the members of alice-home-church.impact' },
+  request: { capability: 'organization.membership.list', args: { org: CHURCH }, goal: 'who are the members of alice-home.church' },
   asker: { agent: ALICE, credential: { kind: 'home-session', token: 'sess-alice' } },
   correlation: { operationId: 'op-1', runRef: 'run-a', stepRef: 's0', intentDigest: '0xabc' },
 });
@@ -84,7 +84,7 @@ describe('sender → receiver over one SendMessage', () => {
     expect(hop.task.status.state).toBe('TASK_STATE_COMPLETED');
     expect(seen[0]).toMatchObject({ session: 'sess-alice', addressee: CHURCH, message: profile.request.goal, plan: { steps: [{ toolId: 'organization.membership.list', args: { org: CHURCH } }] } });
     expect((seen[0]?.subjectAsk as { correlation: { operationId: string } }).correlation.operationId).toBe('op-1');
-    const read = readSubjectReply(hop.envelope as never, 'organization.membership.list', 'alice-home-church.impact', 200);
+    const read = readSubjectReply(hop.envelope as never, 'organization.membership.list', 'alice-home.church', 200);
     expect(read).toMatchObject({ ok: true, result: { count: 2 }, runRef: 'run-b' });
     expect(read.receipts?.length).toBe(1);
   });
@@ -96,7 +96,7 @@ describe('sender → receiver over one SendMessage', () => {
     expect(hop.ok).toBe(true);
     if (!hop.ok) return;
     expect(hop.task.status.state).toBe('TASK_STATE_REJECTED');
-    const read = readSubjectReply(hop.envelope as never, 'organization.membership.list', 'alice-home-church.impact', 200);
+    const read = readSubjectReply(hop.envelope as never, 'organization.membership.list', 'alice-home.church', 200);
     expect(read.ok).toBe(false);
     expect(read.refused).toMatch(/refused only someone who belongs/);
   });

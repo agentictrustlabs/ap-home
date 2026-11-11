@@ -1,7 +1,7 @@
 // "Let <name>.svc read works it is granted" — the Home half: the wire the custodian signs, the admission, the relying-app
 // contract (/workspace-read), and the ceremony's order (custody before any signature; on-chain revoke before the clear).
 import { describe, expect, it } from 'vitest';
-import { decodeAbiParameters, recoverAddress, type Hex } from 'viem';
+import { decodeAbiParameters, recoverAddress, type Address, type Hex } from 'viem';
 import { privateKeyToAccount, sign } from 'viem/accounts';
 import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
 import { A2A_ANY_SKILL, checkSessionWireShape, skillSelector } from '@agenticprimitives/a2a';
@@ -12,41 +12,53 @@ import { enableWorkspaceReadWire, revokeWorkspaceReadWire, type WorkspaceReadDep
 
 const CUSTODIAN_PK = '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a' as const;
 const SVC = privateKeyToAccount(CUSTODIAN_PK).address.toLowerCase() as `0x${string}`; // stands in for the .svc SA
+const PUB = '0x9999999999999999999999999999999999999999' as `0x${string}`; // the publisher's agent — the wire's one target (RUN-9)
 const SESSION_KEY = '0x7777777777777777777777777777777777777777' as const;
 const signer = async (h: Hex) => sign({ hash: h, privateKey: CUSTODIAN_PK, to: 'hex' });
-const enforcers = { timestamp: CONTRACTS.timestampEnforcer, allowedMethods: CONTRACTS.allowedMethodsEnforcer };
+const enforcers = { timestamp: CONTRACTS.timestampEnforcer, allowedMethods: CONTRACTS.allowedMethodsEnforcer, allowedTargets: CONTRACTS.allowedTargetsEnforcer };
 const methodsOf = (d: Delegation) => (decodeAbiParameters([{ type: 'bytes4[]' }], d.caveats[2]!.terms)[0] as readonly string[]).map((s) => s.toLowerCase());
 const now = () => Math.floor(Date.now() / 1000);
 
 describe('issueServiceLibraryReadWire — the wire the custodian signs', () => {
   it('passes checkSessionWireShape for library.granted.read (the identical check at every A2A gate)', async () => {
-    const d = await issueServiceLibraryReadWire(SVC, SESSION_KEY, signer);
-    expect(checkSessionWireShape({ ...d, salt: d.salt.toString() } as never, enforcers, now(), { skill: LIBRARY_GRANTED_READ_SKILL })).toBeNull();
+    const d = await issueServiceLibraryReadWire(SVC, SESSION_KEY, PUB, signer);
+    expect(checkSessionWireShape({ ...d, salt: d.salt.toString() } as never, enforcers, now(), { target: PUB, skill: LIBRARY_GRANTED_READ_SKILL })).toBeNull();
   });
 
-  it('names exactly ONE method, never the any-skill sentinel; delegator = the service, delegate = the session key, targets = [the service]', async () => {
-    const d = await issueServiceLibraryReadWire(SVC, SESSION_KEY, signer);
+  it('RUN-9 twin: checked against the SERVICE (its old target) it is refused — the wire is a credential only at the publisher it names', async () => {
+    const d = await issueServiceLibraryReadWire(SVC, SESSION_KEY, PUB, signer);
+    expect(checkSessionWireShape({ ...d, salt: d.salt.toString() } as never, enforcers, now(), { target: SVC, skill: LIBRARY_GRANTED_READ_SKILL })).not.toBeNull();
+    await expect(issueServiceLibraryReadWire(SVC, SESSION_KEY, SVC, signer)).rejects.toThrow(/another agent/);
+  });
+
+  it('names exactly ONE method, never the any-skill sentinel; delegator = the service, delegate = the session key, targets = [the publisher]', async () => {
+    const d = await issueServiceLibraryReadWire(SVC, SESSION_KEY, PUB, signer);
     expect(methodsOf(d)).toEqual([skillSelector(LIBRARY_GRANTED_READ_SKILL).toLowerCase()]);
     expect(methodsOf(d)).not.toContain(A2A_ANY_SKILL.toLowerCase());
     expect(d.delegator).toBe(SVC);
     expect(d.delegate).toBe(SESSION_KEY);
-    expect((decodeAbiParameters([{ type: 'address[]' }], d.caveats[1]!.terms)[0] as readonly string[]).map((t) => t.toLowerCase())).toEqual([SVC]);
+    expect((decodeAbiParameters([{ type: 'address[]' }], d.caveats[1]!.terms)[0] as readonly string[]).map((t) => t.toLowerCase())).toEqual([PUB]);
     const ts = decodeAbiParameters([{ type: 'uint128' }, { type: 'uint128' }], d.caveats[0]!.terms);
     expect(Number(ts[1]) - now()).toBeGreaterThan(SERVICE_READ_WIRE_VALIDITY_SECONDS - 60);
   });
 
   it('is signed by the CUSTODIAN over the EIP-712 delegation digest — what the service SA\'s ERC-1271 checks (never session-wrapped)', async () => {
-    const d = await issueServiceLibraryReadWire(SVC, SESSION_KEY, signer);
+    const d = await issueServiceLibraryReadWire(SVC, SESSION_KEY, PUB, signer);
     expect(d.signature.startsWith('0x51')).toBe(false);
     const digest = hashDelegation({ ...d, signature: '0x' }, CHAIN_ID, CONTRACTS.delegationManager);
     expect((await recoverAddress({ hash: digest, signature: d.signature })).toLowerCase()).toBe(SVC);
   });
 
-  it('the org routing wire is unchanged — consult first, then the archetype methods, same construction', async () => {
-    const d = await issueOrgConsultRoutingDelegation(SVC, SESSION_KEY, signer, undefined, ['ontologist']);
+  it('the org routing wire is unchanged — consult first, then the archetype methods — and now names ONE receiving agent (RUN-9)', async () => {
+    const MEMBER = '0x7777777777777777777777777777777777777777' as Address;
+    const OTHER = '0x8888888888888888888888888888888888888888' as Address;
+    const d = await issueOrgConsultRoutingDelegation(SVC, SESSION_KEY, signer, undefined, ['ontologist'], MEMBER);
     expect(methodsOf(d)).toEqual([skillSelector('discussion.consult').toLowerCase(), skillSelector('archetype.ontologist').toLowerCase()]);
-    expect(checkSessionWireShape({ ...d, salt: d.salt.toString() } as never, enforcers, now(), { skill: 'discussion.consult' })).toBeNull();
-    expect(checkSessionWireShape({ ...d, salt: d.salt.toString() } as never, enforcers, now(), { skill: LIBRARY_GRANTED_READ_SKILL })).toMatch(/does not name the library\.granted\.read selector/);
+    expect(checkSessionWireShape({ ...d, salt: d.salt.toString() } as never, enforcers, now(), { target: MEMBER, skill: 'discussion.consult' })).toBeNull();
+    expect(checkSessionWireShape({ ...d, salt: d.salt.toString() } as never, enforcers, now(), { target: OTHER, skill: 'discussion.consult' })).toMatch(/target/i); // minted for member A, refused at member B
+    expect(checkSessionWireShape({ ...d, salt: d.salt.toString() } as never, enforcers, now(), { target: MEMBER, skill: LIBRARY_GRANTED_READ_SKILL })).toMatch(/does not name the library\.granted\.read selector/);
+    await expect(issueOrgConsultRoutingDelegation(SVC, SESSION_KEY, signer, undefined, [], undefined)).rejects.toThrow(/receiving agent/);
+    await expect(issueOrgConsultRoutingDelegation(SVC, SESSION_KEY, signer, undefined, [], SVC)).rejects.toThrow(/not the organization/);
   });
 });
 
@@ -55,9 +67,11 @@ describe('/workspace-read — the relying-app contract', () => {
   const href = (q: string) => `https://home.example/workspace-read?${q}`;
 
   it('parses client_id, redirect_uri, state and agent; the gate is /choose-treasury\'s plus an agent address', () => {
-    const req = parseWorkspaceReadRequest(href(`client_id=source-publishing&redirect_uri=${encodeURIComponent(client.redirect_uris[0]!)}&state=s1&agent=${SVC.toUpperCase().replace('0X', '0x')}`));
-    expect(req).toEqual({ clientId: 'source-publishing', redirectUri: client.redirect_uris[0], state: 's1', agent: SVC });
+    const req = parseWorkspaceReadRequest(href(`client_id=source-publishing&redirect_uri=${encodeURIComponent(client.redirect_uris[0]!)}&state=s1&agent=${SVC.toUpperCase().replace('0X', '0x')}&publisher=${PUB}`));
+    expect(req).toEqual({ clientId: 'source-publishing', redirectUri: client.redirect_uris[0], state: 's1', agent: SVC, publisher: PUB });
     expect(workspaceReadRefusal(req, client)).toBeNull();
+    expect(workspaceReadRefusal({ ...req!, publisher: '' }, client)?.check).toBe('publisher');
+    expect(workspaceReadRefusal({ ...req!, publisher: SVC }, client)?.check).toBe('publisher');
     expect(workspaceReadRefusal(req, null)?.check).toBe('client_id');
     expect(workspaceReadRefusal({ ...req!, redirectUri: 'https://publishing.faithnet.io/elsewhere' }, client)?.check).toBe('redirect_uri');
     expect(workspaceReadRefusal({ ...req!, agent: 'ruth.svc' }, client)?.check).toBe('agent');
@@ -109,35 +123,36 @@ function fakeDeps(o: { custodian?: boolean; storeStatus?: number; storeError?: s
 describe('the ceremony, in order', () => {
   it('custodian: mints, signs as the service, and hands the DO the wire to verify and store', async () => {
     const f = fakeDeps();
-    const r = await enableWorkspaceReadWire(f.deps, { agent: SVC, agentLabel: 'ruth-study.svc', isService: true });
+    const r = await enableWorkspaceReadWire(f.deps, { agent: SVC, agentLabel: 'ruth-study.svc', isService: true, publisher: PUB });
     expect(r).toEqual({ ok: true, hash: '0xhash', validUntil: 123 });
     expect(f.calls.map((c) => c.action)).toEqual(['signingWireStatus', 'signingWireEnable']);
     expect(f.stored()!.delegator).toBe(SVC);
-    expect(checkSessionWireShape(f.stored() as never, enforcers, now(), { skill: LIBRARY_GRANTED_READ_SKILL })).toBeNull();
+    expect(checkSessionWireShape(f.stored() as never, enforcers, now(), { target: PUB, skill: LIBRARY_GRANTED_READ_SKILL })).toBeNull();
+    expect(f.calls[1]!.target).toBe(PUB);
   });
 
   it('NON-custodian: refused in words before any signature is asked for, nothing sent', async () => {
     const f = fakeDeps({ custodian: false });
-    const r = await enableWorkspaceReadWire(f.deps, { agent: SVC, agentLabel: 'ruth-study.svc', isService: true });
+    const r = await enableWorkspaceReadWire(f.deps, { agent: SVC, agentLabel: 'ruth-study.svc', isService: true, publisher: PUB });
     expect(r).toMatchObject({ ok: false, error: 'not_custodian' });
     expect(f.calls).toEqual([]);
   });
 
   it('not a service: refused, nothing sent', async () => {
     const f = fakeDeps();
-    expect(await enableWorkspaceReadWire(f.deps, { agent: SVC, agentLabel: 'grace.org', isService: false })).toMatchObject({ ok: false, error: 'not_service' });
+    expect(await enableWorkspaceReadWire(f.deps, { agent: SVC, agentLabel: 'grace.org', isService: false, publisher: PUB })).toMatchObject({ ok: false, error: 'not_service' });
     expect(f.calls).toEqual([]);
   });
 
   it('the DO\'s ERC-1271 refusal is reported as not_custodian, in the DO\'s words', async () => {
     const f = fakeDeps({ storeStatus: 403, storeError: `the signing wire's signature does not verify against ${SVC} — only the credential that custodies this service agent can sign it` });
-    expect(await enableWorkspaceReadWire(f.deps, { agent: SVC, agentLabel: 'x', isService: true })).toMatchObject({ ok: false, error: 'not_custodian', said: expect.stringMatching(/does not verify against/) });
+    expect(await enableWorkspaceReadWire(f.deps, { agent: SVC, agentLabel: 'x', isService: true, publisher: PUB })).toMatchObject({ ok: false, error: 'not_custodian', said: expect.stringMatching(/does not verify against/) });
   });
 
   it('revoke: on chain FIRST, then the stored copy is cleared', async () => {
     const f = fakeDeps();
-    await enableWorkspaceReadWire(f.deps, { agent: SVC, agentLabel: 'x', isService: true });
-    expect(await revokeWorkspaceReadWire(f.deps, SVC)).toEqual({ ok: true, txHash: '0xtx' });
+    await enableWorkspaceReadWire(f.deps, { agent: SVC, agentLabel: 'x', isService: true, publisher: PUB });
+    expect(await revokeWorkspaceReadWire(f.deps, SVC, PUB)).toEqual({ ok: true, txHash: '0xtx' });
     expect(f.stored()).toBeNull();
     expect(f.calls.map((c) => c.action).slice(-2)).toEqual(['signingWireStatus', 'signingWireClear']);
   });

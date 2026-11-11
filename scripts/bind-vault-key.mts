@@ -26,7 +26,7 @@ for (const a of agents) {
   const info = await j(await fetch(`${HOME}/mcp-bind/custody/vault-key/server-info?owner=${low}`)) as { serverId?: string; serverKey?: string; kmsKeyRef?: string | null; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[] };
   if (!info?.kmsKeyRef) { console.log(`✗ ${low}: server-info names no kmsKeyRef`); failed = true; continue; }
   const params: VaultKeyCeremonyParams = {
-    vaultId: String(info.serverId ?? '').trim() || 'demo-mcp', kmsKeyRef: info.kmsKeyRef, serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address,
+    vaultId: String(info.serverId ?? '').trim() || 'demo-mcp', kmsKeyRef: info.kmsKeyRef, serverKey: realServerKey(info.serverKey),
     allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'], classificationCeiling: info.classificationCeiling ?? 'regulated.high', ops: info.ops ?? ['read', 'write'],
     validitySeconds: 60 * 60 * 24 * 365,
   };
@@ -44,3 +44,9 @@ for (const a of agents) {
   console.log(`✓ ${low}: vault key bound (${params.kmsKeyRef}) until ${vk.expiresAt.slice(0, 10)}`);
 }
 if (failed) process.exit(1);
+
+/** The vault's REAL delegate (spec 445): a vault-key authorization naming `0x…01` delegates to nobody. Refuse, never default. */
+function realServerKey(k: unknown): `0x${string}` {
+  if (typeof k !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(k) || /^0x0{39}[0-9a-f]$/i.test(k)) throw new Error('vault server-info names no real delegate (set VAULT_KEY_SERVER_DELEGATE on the vault) — refusing to bind to a placeholder');
+  return k as `0x${string}`;
+}

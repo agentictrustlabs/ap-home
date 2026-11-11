@@ -26,7 +26,7 @@ const sign = async (digest: Hex): Promise<Hex> => { const b = await j(await fetc
 const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1); };
 
 const orgs = ((await j(await fetch(`${HOME}/connect/related-orgs?surface=any`, { headers: { authorization: `Bearer ${alice.homeSession}` } }))).orgs ?? []) as Array<{ orgAgent: string; orgName: string; relationship: string }>;
-const team = orgs.find((o) => /playwright-demo-team/i.test(o.orgName) && o.relationship === 'steward');
+const team = orgs.find((o) => /playwright-demo[-.]team/i.test(o.orgName) && o.relationship === 'steward');
 if (!team) fail('alice does not steward playwright-demo-team');
 const TEAM = team!.orgAgent.toLowerCase() as Address;
 const ME = String(alice.agent).toLowerCase() as Address;

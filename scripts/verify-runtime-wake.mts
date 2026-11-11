@@ -12,7 +12,7 @@
  *   2. the steward DMs the member (her act, her mandate, one prompt);
  *   3. waits for the WAKE RECEIPT on the member's object: the Worker enqueued after admission, the consumer woke the
  *      Container, the Container ran one pass — the agent was prompted with the steward's words, its local shell refused,
- *      the workspace tool allowed — and its reply PARKED for the steward's mandate (the parked run ref is in the receipt);
+ *      the workspace tool refused (no permissive classifier, spec 445) — and its reply PARKED for the steward's mandate (the parked run ref is in the receipt);
  *   4. the reply LANDS: under the OPEN MANDATE (spec 400 W2a — a standing grant the custodian signed once, the child the
  *      runtime derived for this intent, the chain verified by the harness) it went through without a signature and the
  *      receipt names both refs; with no grant it parked and the steward signs it at her Home;
@@ -117,7 +117,8 @@ const t = receipt!.turns.find((x) => x.answer.includes(nonce));
 if (!t) fail(`the Container's pass did not answer the steward's message: ${JSON.stringify(receipt!.turns).slice(0, 300)}`);
 console.log(`  turn: from ${t!.fromName} · agent said "${t!.answer.slice(0, 70)}…" · reply: ${t!.reply.slice(0, 90)}`);
 if (!t!.answer.includes('local tool refused')) fail('the host in the Container allowed the agent\'s local shell by default');
-if (!t!.answer.includes('workspace tool allowed')) fail('the workspace tool was not allowed to the agent');
+// Spec 445 (ACP): no permissive classifier — a workspace-tool permission prompt is REFUSED like any other; the agent's reply still lands.
+if (!t!.answer.includes('workspace tool REFUSED')) fail('the workspace tool prompt was not refused — the host must hold no permissive classifier');
 
 // ── 4. the reply lands — under the open mandate (no signature), else after the steward signs ──
 if (t!.underStandingGrant) {

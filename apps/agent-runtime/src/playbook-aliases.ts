@@ -5,6 +5,7 @@
 // OFFERED; the mandate gate is untouched, and an alias never adds a capability the playbook did not name.
 import { loadPlaybook as loadStoredPlaybook } from '@agenticprimitives/harness';
 import { withCurrentDefault } from './playbook-follows-default';
+import { isApproved } from './playbook-approval';
 
 /** Old id → the id it now is. One direction; never a second name for a live capability. */
 export const CAPABILITY_ALIASES: Readonly<Record<string, string>> = {
@@ -60,11 +61,11 @@ export function withCapabilityAliases<T extends Scope | null>(pb: T): T {
 }
 
 /** `loadPlaybook`, with the aliases applied — the one loader this runtime uses. */
-export async function loadPlaybook(...args: Parameters<typeof loadStoredPlaybook>): Promise<Awaited<ReturnType<typeof loadStoredPlaybook>>> {
+export async function loadPlaybook(...args: [read: Parameters<typeof loadStoredPlaybook>[0], agent: Parameters<typeof loadStoredPlaybook>[1], log?: Parameters<typeof loadStoredPlaybook>[2]]): Promise<Awaited<ReturnType<typeof loadStoredPlaybook>>> {
   const [read, agent, log] = args;
   const following: typeof read = read && (async (subject, key) => {
     const raw = await read(subject, key);
     return key === 'archetype.assignment' ? withCurrentDefault(raw, String(agent), log) : raw;
   }) as typeof read;
-  return withCapabilityAliases(await loadStoredPlaybook(following, agent, log));
+  return withCapabilityAliases(await loadStoredPlaybook(following, agent, log, { isApproved }));
 }

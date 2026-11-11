@@ -2,6 +2,8 @@
 // they chose stands, and a registry that cannot be trusted or reached changes nothing.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { definitionDigest, type AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-claims';
+// Spec 445 RUN-14: fixtures are not in agentic.lock.json — the deployment's approval set is stood in for here.
+vi.mock('../src/playbook-approval', () => ({ isPinnedDigest: () => true, isApproved: () => true }));
 import { loadPlaybook } from '../src/playbook-aliases';
 import { clearPlaybookMemo, withCurrentDefault } from '../src/playbook-follows-default';
 

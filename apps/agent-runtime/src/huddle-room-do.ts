@@ -153,6 +153,9 @@ export class HuddleRoomDO {
     if (!run?.provider) return json({ ok: false, error: 'there is no active huddle here' }, 404);
     const role = a.ground === 'starter' || a.ground === 'steward' ? 'host' : 'participant';
     const admitted = applyHuddleEvent(run, { type: 'admitted', participant: { actor: b.actor, ...(b.represented ? { represented: b.represented } : {}), role, admission: { ground: a.ground, ...('ref' in a && a.ref ? { ref: a.ref } : {}), at: now } }, at: now, key: `${b.key}:admit` });
+    // Spec 445 / COV-17 — the reducer refuses an `admitted` event for an actor the run recorded as removed (a removal is not undone
+    // by admitting them again), the same refusal `admissionFor('join')` makes at the door: answered 409 here, BEFORE any provider
+    // participant is created or token minted — a removed actor gets no media credential by any route.
     if (!admitted.ok) return json({ ok: false, error: admitted.reason }, 409);
     await this.save(admitted.run);
     // The correlation id is opaque and per join — never an address, never personal (Cloudflare's own rule).

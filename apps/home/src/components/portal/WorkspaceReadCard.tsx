@@ -16,6 +16,8 @@ export function WorkspaceReadCard({ agent, name, isService }: { agent: string; n
   const [status, setStatus] = useState<WorkspaceReadStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // ONE WIRE PER RECEIVING AGENT (spec 445 RUN-9): the wire names the publisher it is presented at, so the person says which.
+  const [publisher, setPublisher] = useState('');
   const label = name ? nameLabel(name) : `${agent.slice(0, 8)}…`;
 
   const deps = useCallback(async () => workspaceReadDeps({
@@ -24,27 +26,27 @@ export function WorkspaceReadCard({ agent, name, isService }: { agent: string; n
 
   const load = useCallback(async () => {
     if (!session) return;
-    try { setStatus(await readWorkspaceReadStatus(await deps(), agent as Address)); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-  }, [session, deps, agent]);
+    try { setStatus(await readWorkspaceReadStatus(await deps(), agent as Address, /^0x[0-9a-fA-F]{40}$/.test(publisher.trim()) ? (publisher.trim() as Address) : undefined)); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  }, [session, deps, agent, publisher]);
   useEffect(() => { void load(); }, [load]);
 
   const enable = useCallback(async () => {
     setBusy(true); setError(null);
     try {
-      const r = await enableWorkspaceReadWire(await deps(), { agent: agent as Address, agentLabel: label, isService });
+      const r = await enableWorkspaceReadWire(await deps(), { agent: agent as Address, agentLabel: label, isService, publisher: publisher.trim() as Address });
       if (!r.ok) setError(r.said);
       await load();
     } finally { setBusy(false); }
-  }, [deps, agent, label, isService, load]);
+  }, [deps, agent, label, isService, load, publisher]);
 
   const revoke = useCallback(async () => {
     setBusy(true); setError(null);
     try {
-      const r = await revokeWorkspaceReadWire(await deps(), agent as Address);
+      const r = await revokeWorkspaceReadWire(await deps(), agent as Address, publisher.trim() as Address);
       if (!r.ok) setError(r.error);
       await load();
     } finally { setBusy(false); }
-  }, [deps, agent, load]);
+  }, [deps, agent, load, publisher]);
 
   if (!session || !isService) return null;
   return (
@@ -58,6 +60,13 @@ export function WorkspaceReadCard({ agent, name, isService }: { agent: string; n
         and it holds no key of its own. This signs a scoped, revocable authorization, once, with your credential as its
         custodian: it lets {label}&rsquo;s runtime sign <code>library.granted.read</code> and nothing else.
       </p>
+      <label className="manage-card-blurb" style={{ display: 'grid', gap: 4 }}>
+        The publisher&rsquo;s agent (0x address) — the wire is a credential only at the agent it names
+        <input value={publisher} onChange={(e) => setPublisher(e.target.value)} placeholder="0x…" spellCheck={false} data-testid="workspace-read-publisher" />
+      </label>
+      {status?.wires?.length ? (
+        <p className="manage-card-blurb">Wires held: {status.wires.map((w) => `${(w.target ?? '?').slice(0, 8)}…${day(w.validUntil) ? ` until ${day(w.validUntil)}` : ''}`).join(' · ')}</p>
+      ) : null}
       {status?.wirePresent ? (
         <>
           <p className="manage-card-blurb">
@@ -68,8 +77,8 @@ export function WorkspaceReadCard({ agent, name, isService }: { agent: string; n
           <BusyButton busy={busy} busyLabel="Revoking…" className="btn" onClick={() => void revoke()} data-testid="workspace-read-revoke">Stop — revoke it</BusyButton>
         </>
       ) : (
-        <BusyButton busy={busy} busyLabel="Signing…" className="btn btn-primary" disabled={status === null || !status.sessionKey} onClick={() => void enable()} data-testid="workspace-read-enable">
-          Let {label} read works it is granted
+        <BusyButton busy={busy} busyLabel="Signing…" className="btn btn-primary" disabled={status === null || !status.sessionKey || !/^0x[0-9a-fA-F]{40}$/.test(publisher.trim())} onClick={() => void enable()} data-testid="workspace-read-enable">
+          Let {label} read works that publisher grants
         </BusyButton>
       )}
       {status && !status.sessionKey && <p className="manage-card-blurb">This deployment has no interactions-session key, so no agent can sign here yet.</p>}

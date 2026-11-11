@@ -46,6 +46,7 @@ import {
   type PlanStepV1,
   type SignedPayloadRef,
 } from '@agenticprimitives/coordination';
+import { commitmentPayloadHash } from '@agenticprimitives/coordination';
 import type { EntityRef } from '@agenticprimitives/situations';
 import {
   appendBoardPost,
@@ -463,12 +464,8 @@ export function commitmentPayloadDigest(payload: {
   planRef: PlanRevisionRef;
   steps: PlanStepId[];
 }): Promise<Hex32> {
-  return sha256Hex32(canonicalizeMessage({
-    endeavorId: payload.endeavorId,
-    allocationRef: payload.allocationRef,
-    planRef: { planId: payload.planRef.planId, revision: payload.planRef.revision, hash: payload.planRef.hash },
-    steps: payload.steps,
-  }));
+  // Spec 445: the signature must be over the canonical commitment payload the validator recomputes — one definition, from the package.
+  return Promise.resolve(commitmentPayloadHash({ endeavorId: payload.endeavorId, allocationRef: payload.allocationRef, planRef: payload.planRef, steps: payload.steps } as never) as Hex32);
 }
 
 /** Command validation rejects map to HTTP: actor-gate rejects ("only the …") are 403; state
@@ -669,15 +666,24 @@ function parseEvidenceRefs(note: unknown): EntityRef[] {
   return [{ kind: 'resource', iri: `urn:ap:evidence:${encodeURIComponent(text.slice(0, EVIDENCE_MAX))}` }];
 }
 
+/** REM-5 — the command's `issuedAt` is the SERVER's clock at the single-writer point, never the client's and never the
+ *  moment the command was built: the reducer refuses an `issuedAt` behind the last recorded event (a command queued behind
+ *  the mutex would otherwise be refused for waiting) and a pure reducer cannot catch a future-stamped one. Called inside
+ *  `deps.serialize`, immediately before the command is validated, on every command that reaches the reducer. */
+export function stampIssuedAt<C extends { issuedAt: string }>(command: C): C {
+  return { ...command, issuedAt: new Date().toISOString() };
+}
+
 // ── The mutation spine: validate command → append events → re-reduce → persist projections. ──
 // MUST run inside deps.serialize (the callers hold the mutex across this whole RMW).
 async function appendToEndeavorLog(
   deps: EndeavorOpDeps,
   op: string,
   endeavorId: string,
-  command: CoordinationCommandV1,
+  clientCommand: CoordinationCommandV1,
   subject: { type: string; id: string },
 ): Promise<{ ok: true; state: CoordinationStateV1; events: CoordinationEventV1[] } | { ok: false; response: Response }> {
+  const command = stampIssuedAt(clientCommand); // inside serialize: the server clock, whatever the command carried
   const log = await deps.readDoc<CoordinationEventV1[]>(coordinationEventsResource(endeavorId), []);
   if (log.length === 0) return { ok: false, response: json({ error: 'unknown endeavor' }, 404) };
   const state = reduceEventLog(log);
@@ -732,7 +738,7 @@ export async function handleEndeavorOp(
       entryPoint: entryPointRaw,
       ...(intakeContext.length ? { intakeContext } : {}),
     };
-    const r = validateCoordinationCommand(initialCoordinationState(), command);
+    const r = validateCoordinationCommand(initialCoordinationState(), stampIssuedAt(command));
     if (!r.ok) return json({ error: r.reason }, commandRejectStatus(r.reason));
     const event = r.events[0] as SubmitEvent;
     return deps.serialize(async () => {
@@ -882,7 +888,7 @@ export async function handleEndeavorOp(
           requestId: row.request.requestId,
           reason,
         };
-        const r = validateCoordinationCommand(state0, command);
+        const r = validateCoordinationCommand(state0, stampIssuedAt(command));
         if (!r.ok) return json({ error: r.reason }, commandRejectStatus(r.reason));
         await deps.writeAudit('interactions.endeavor.create', { type: 'endeavor-request', id: requestId }, now);
         row.status = 'declined';
@@ -910,7 +916,7 @@ export async function handleEndeavorOp(
         // sponsor/coordinator participations). Selection only — no delegation is minted here.
         initialParticipations: [{ participationId: makeParticipationId(crypto.randomUUID()), participant: viewer, role: 'coordinator' }],
       };
-      const r = validateCoordinationCommand(state0, command);
+      const r = validateCoordinationCommand(state0, stampIssuedAt(command));
       if (!r.ok) return json({ error: r.reason }, commandRejectStatus(r.reason));
       let next = state0;
       for (const e of r.events) next = applyCoordinationEvent(next, e);
@@ -973,7 +979,7 @@ export async function handleEndeavorOp(
         edges,
         milestones,
       };
-      const r = validateCoordinationCommand(state, command);
+      const r = validateCoordinationCommand(state, stampIssuedAt(command));
       if (!r.ok) return json({ error: r.reason }, commandRejectStatus(r.reason));
       let next = state;
       for (const e of r.events) next = applyCoordinationEvent(next, e);
@@ -1062,7 +1068,7 @@ export async function handleEndeavorOp(
       let next = state;
       const appended: CoordinationEventV1[] = [];
       for (const c of [...pre, command]) {
-        const r = validateCoordinationCommand(next, c);
+        const r = validateCoordinationCommand(next, stampIssuedAt(c));
         if (!r.ok) return json({ error: r.reason }, commandRejectStatus(r.reason));
         for (const e of r.events) { next = applyCoordinationEvent(next, e); appended.push(e); }
       }
@@ -1166,7 +1172,7 @@ export async function handleEndeavorOp(
         signature,
         ...(deadline ? { bounds: { deadline } } : {}),
       };
-      const r = validateCoordinationCommand(state, command);
+      const r = validateCoordinationCommand(state, stampIssuedAt(command));
       if (!r.ok) return json({ error: r.reason }, commandRejectStatus(r.reason));
       let next = state;
       for (const e of r.events) next = applyCoordinationEvent(next, e);
@@ -1333,9 +1339,16 @@ export async function handleEndeavorOp(
     if (dueAt !== undefined && Number.isNaN(Date.parse(dueAt))) return json({ error: 'dueAt must be an ISO timestamp' }, 400);
     const quorum = body.quorum === undefined ? undefined : Number(body.quorum);
     const decisionId = makeDecisionId(crypto.randomUUID());
+    const raiser = (await deps.isSteward()) ? principal : viewer;
+    // Spec 445 / NAME-12 (owner decision) — SEPARATION OF DUTIES: whoever raises a decision scoped to plan steps is not one of
+    // its approvers. A steward raises AS the organization, so an organization that names ITSELF approves its own request;
+    // name the people who decide instead. Said here in words; the reducer refuses it too.
+    if (stepIds?.length && approvers.includes(raiser.toLowerCase())) {
+      return json({ error: 'a decision scoped to plan steps cannot name its own requester as an approver — when you raise it for the organization, name other people to decide (the organization itself cannot approve its own request)' }, 400);
+    }
     const command: CoordinationCommandV1 = {
       kind: 'RaiseDecisionRequest',
-      actor: (await deps.isSteward()) ? principal : viewer,
+      actor: raiser,
       issuedAt: new Date().toISOString(),
       endeavorId: endeavorId as `end_${string}`,
       decisionId,

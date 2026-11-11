@@ -217,7 +217,7 @@ async function enableVault() {
   const params = {
     vaultId: String(info.serverId ?? '').trim() || 'demo-mcp',
     kmsKeyRef: info.kmsKeyRef,
-    serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address,
+    serverKey: realServerKey(info.serverKey),
     allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'],
     classificationCeiling: info.classificationCeiling ?? 'regulated.high',
     ops: info.ops ?? (['read', 'write'] as ('read' | 'write')[]),
@@ -265,3 +265,9 @@ else if (step === 'all') await provisionAll();
 else if (step === 'siwe') await siwe();
 else if (step === 'drive') await drive();
 else { console.error('unknown step', step); process.exit(1); }
+
+/** The vault's REAL delegate (spec 445): a vault-key authorization naming `0x…01` delegates to nobody. Refuse, never default. */
+function realServerKey(k: unknown): `0x${string}` {
+  if (typeof k !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(k) || /^0x0{39}[0-9a-f]$/i.test(k)) throw new Error('vault server-info names no real delegate (set VAULT_KEY_SERVER_DELEGATE on the vault) — refusing to bind to a placeholder');
+  return k as `0x${string}`;
+}

@@ -56,7 +56,7 @@ export async function onboardDemoUser(page: Page, log = (s: string) => console.l
 // the repo, nothing for secret-scanning to trip on.
 
 export interface DemoPersona {
-  /** Short, label-safe: it becomes a `<name>.impact` handle and a real subdomain home. */
+  /** Short, label-safe: it becomes a `<name>.me` handle and a real subdomain home. */
   name: string;
   address: `0x${string}`;
   privateKey: Hex;

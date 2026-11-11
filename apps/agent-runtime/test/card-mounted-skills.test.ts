@@ -90,7 +90,7 @@ describe('the card carries them through', () => {
   const ctx = {
     publicOrigin: 'https://alice.impact-agent.io',
     label: 'alice',
-    name: 'alice.impact',
+    name: 'alice.me',
     agent: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   } as never;
 

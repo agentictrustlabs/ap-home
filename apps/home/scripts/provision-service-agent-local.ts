@@ -2,15 +2,15 @@
  * provision-service-agent-local.ts — a SERVICE-CLASS Smart Agent on a LOCAL chain, with its
  * service-agent wire.
  *
- * Downstream apps (engage-a2a signs as `engage-service.impact`, field-a2a as `field-service.impact`,
- * gather27-a2a as `gather27-workspace.impact`) each act AS a service identity they do not custody:
+ * Downstream apps (engage-a2a signs as `engage-service.svc`, field-a2a as `field-service.svc`,
+ * gather27-a2a as `gather27.workspace`) each act AS a service identity they do not custody:
  * the worker signs with a KMS delegate key, authorized by a custodian-signed `service-agent-wire`
  * (a Delegation: delegator = the service SA, delegate = the key, timestamp-bounded, allowedMethods
  * pinned to the app's skills). On base-sepolia that identity exists and the wire is minted at the
  * Home ceremony. On a local chain neither exists — this script makes both, idempotently:
  *
  *   1. derive + deploy the service SA from the local factory ({ mode 0, custodians [dev EOA], salt 0 })
- *   2. claim `<handle>.impact` FROM the SA (register + setPrimaryName, paymaster-sponsored,
+ *   2. declare the type and claim `<handle>.svc` FROM the SA (declare + register + setPrimaryName, paymaster-sponsored,
  *      custodian-signed) so forward AND reverse resolution agree — the app's readiness gate checks both
  *   3. build the wire for the given DELEGATE address (the app's AKCS/KMS key), caveated with the
  *      local timestamp + allowedMethods enforcers, custodian-signed (EIP-191 over the EIP-712
@@ -32,7 +32,7 @@ import { join } from 'node:path';
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { AgentAccountClient, buildExecuteBatchCallData, type ContractCall } from '@agenticprimitives/agent-account';
-import { agentNameRegistryAbi, buildSetPrimaryNameCall, buildSubregistryRegisterCall, namehash } from '@agenticprimitives/agent-naming';
+import { agentNameRegistryAbi, agentProfileResolverTypeAbi, buildDeclareAgentTypeCalls, buildSetPrimaryNameCall, buildSubregistryRegisterCall, buildSubregistryCommitCall, generateClaimSecret, SUBREGISTRY_MIN_COMMIT_AGE_SECONDS, derivedTypeForTld, namehash } from '@agenticprimitives/agent-naming';
 import {
   ROOT_AUTHORITY,
   buildCaveat,
@@ -56,7 +56,9 @@ const WIRE_DAYS = Number(process.env.WIRE_DAYS ?? '90');
 const CUSTODIAN_KEY = (process.env.CUSTODIAN_KEY ?? '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d') as Hex;
 // anvil[0] — pays gas for the deploy. Public dev key; local chains only.
 const GAS_PAYER: Hex = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
-const NAME_PARENT = 'impact';
+// A service agent is named under the typed `.svc` root (spec 346). The untyped `.impact` root this used was retired
+// 2026-11-10. `provision-typed-service-agent.ts` is the fuller path (records, registry listing, priced roots).
+const NAME_PARENT = 'svc';
 const OUT = join(REPO_ROOT, 'demo', `${HANDLE}.local.json`);
 
 if (!/^0x[0-9a-fA-F]{40}$/.test(DELEGATE)) throw new Error('DELEGATE (the app\'s KMS key address) is required');
@@ -65,7 +67,7 @@ if (!existsSync(DEPLOYMENTS)) throw new Error(`${DEPLOYMENTS} not found — depl
 const d = JSON.parse(readFileSync(DEPLOYMENTS, 'utf8')) as {
   chainId: number; entryPoint: Address; agentAccountFactory: Address; delegationManager: Address;
   timestampEnforcer: Address; allowedMethodsEnforcer: Address;
-  permissionlessSubregistry?: Address; agentNameRegistry?: Address; smartAgentPaymaster?: Address;
+  permissionlessSubregistries?: Record<string, Address>; agentProfileResolver?: Address; agentNameRegistry?: Address; smartAgentPaymaster?: Address;
 };
 
 const pub = createPublicClient({ transport: http(RPC_URL) });
@@ -88,9 +90,10 @@ const sa = await accounts.getAddressForAgentAccount(spec);
 const deployed = await accounts.isDeployed(sa);
 if (!deployed) await accounts.createAgentAccountFromAccount(spec, payer);
 
-// 2. Claim `<handle>.impact` from the SA — the same shape the Home's name claim runs.
+// 2. Declare the type, then claim `<handle>.svc` from the SA — the same shape the Home's typed claim runs.
 async function claimName(): Promise<string> {
-  if (!d.permissionlessSubregistry || !d.agentNameRegistry || !d.smartAgentPaymaster) return 'name: n/a (no naming/paymaster deployment)';
+  const subregistry = d.permissionlessSubregistries?.[NAME_PARENT];
+  if (!subregistry || !d.agentProfileResolver || !d.agentNameRegistry || !d.smartAgentPaymaster) return `name: n/a (no .${NAME_PARENT} root / profile resolver / naming / paymaster in this deployment — run AddTypedRoots.s.sol)`;
   const name = `${HANDLE}.${NAME_PARENT}`;
   const node = namehash(name) as Hex;
   const read = <T>(fn: 'owner' | 'primaryName', args: readonly unknown[]) =>
@@ -99,17 +102,33 @@ async function claimName(): Promise<string> {
   const primary = ((await read<Hex>('primaryName', [sa])) ?? '0x').toLowerCase();
   if (primary === node.toLowerCase()) return `${name} (primary)`;
   const calls: ContractCall[] = [];
+  const reveal: ContractCall[] = []; // REG-5 (spec 445): commit now, reveal after the wait
   if (owner === '0x0000000000000000000000000000000000000000') {
-    calls.push(buildSubregistryRegisterCall({ subregistry: d.permissionlessSubregistry, label: HANDLE, newOwner: sa }));
+    // Type first, then the claim — the record the suffix asserts must exist before the name does (spec 346 §3.6).
+    const registered = (await pub.readContract({ address: d.agentProfileResolver, abi: agentProfileResolverTypeAbi, functionName: 'isRegistered', args: [sa] })) as boolean;
+    calls.push(...buildDeclareAgentTypeCalls({ profileResolver: d.agentProfileResolver, agent: sa, agentType: derivedTypeForTld(NAME_PARENT), serviceRole: 'service', registered }));
+    const secret = generateClaimSecret();
+    const { commitment: _c, ...commit } = buildSubregistryCommitCall({ subregistry, chainId, label: HANDLE, newOwner: sa, secret, root: NAME_PARENT });
+    calls.push(commit);
+    reveal.push(buildSubregistryRegisterCall({ subregistry, label: HANDLE, newOwner: sa, secret, root: NAME_PARENT }));
   } else if (owner !== sa.toLowerCase()) {
     return `name: ${name} is owned by ${owner.slice(0, 10)}… — not claimed`;
   }
-  calls.push(buildSetPrimaryNameCall({ registry: d.agentNameRegistry, node }));
-  const { userOp, userOpHash } = await accounts.buildCallUserOp({
-    sender: sa, callData: buildExecuteBatchCallData(calls), paymaster: d.smartAgentPaymaster,
-  });
-  userOp.signature = await custodian.signMessage({ message: { raw: userOpHash } });
-  await accounts.submitCallUserOp(userOp, payer);
+  const send = async (batch: ContractCall[]) => {
+    const { userOp, userOpHash } = await accounts.buildCallUserOp({
+      sender: sa, callData: buildExecuteBatchCallData(batch), paymaster: d.smartAgentPaymaster!,
+    });
+    userOp.signature = await custodian.signMessage({ message: { raw: userOpHash } });
+    await accounts.submitCallUserOp(userOp, payer);
+  };
+  const primaryCall = buildSetPrimaryNameCall({ registry: d.agentNameRegistry, node });
+  if (reveal.length) {
+    await send(calls); // declare + commit
+    await new Promise((r) => setTimeout(r, (SUBREGISTRY_MIN_COMMIT_AGE_SECONDS + 2) * 1000));
+    await send([...reveal, primaryCall]);
+  } else {
+    await send([...calls, primaryCall]);
+  }
   const after = ((await read<Hex>('primaryName', [sa])) ?? '0x').toLowerCase();
   return after === node.toLowerCase() ? `${name} CLAIMED (primary set)` : 'name: userOp landed but primaryName not set';
 }

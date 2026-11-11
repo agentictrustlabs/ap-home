@@ -26,8 +26,7 @@ import { WorkingBar } from './WorkingBar';
 import { useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { BalanceLine, createAgentWithBirthrights, useManagedAgents } from '../portal/ManagedAgents';
-import { signsWithoutPrompt, typedTldForKind } from '../../connect-client';
-import { AGENT_NAME_PARENT } from '../../lib/domain';
+import { signsWithoutPrompt, tldOfKind } from '../../connect-client';
 import { displayAppDomain, displayAppName, toOrgLabel } from './org-chooser-label';
 import { whitelabel } from '../../whitelabel/config';
 
@@ -116,7 +115,7 @@ export function TreasuryChooser({
   // `.treasury` here promised a name this chain does not issue: the typed root is only claimable
   // where it has been provisioned, and elsewhere the claim lands on the legacy parent. A screen that
   // names an account something it will not be called is worse than one that says nothing.
-  const suffix = typedTldForKind('person-treasury')?.tld ?? AGENT_NAME_PARENT;
+  const suffix = tldOfKind('person-treasury');
 
   async function go() {
     if (busy) return;

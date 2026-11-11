@@ -16,6 +16,8 @@ import { MCP_SERVER_ID } from '../lib/inbox-delivery';
 import { recordInvitation } from './ask-record';
 
 export type { PairingStateV1, PairingOptionsV1 };
+/** A listed pairing; a claimed one carries the six-digit confirmation (RUNB-12) the runtime prints too. */
+export type PairingListItemV1 = PairingStateV1 & { confirmation?: string };
 
 const j = async (r: Response): Promise<Record<string, unknown>> => { const t = await r.text(); try { return JSON.parse(t) as Record<string, unknown>; } catch { return { _raw: t.slice(0, 200), _status: r.status }; } };
 
@@ -28,10 +30,10 @@ export async function mintPairing(me: Address, session: string, handle: string, 
   if (r.ok !== true || !r.pairing) throw new Error(String(r.error ?? 'the code was not minted'));
   return r.pairing as PairingStateV1;
 }
-export async function listPairings(me: Address, session: string): Promise<PairingStateV1[]> {
+export async function listPairings(me: Address, session: string): Promise<PairingListItemV1[]> {
   const r = await op(me, 'list', session, {});
   if (r.ok !== true) throw new Error(String(r.error ?? 'pairings could not be read'));
-  return (r.pairings as PairingStateV1[]) ?? [];
+  return (r.pairings as PairingListItemV1[]) ?? [];
 }
 export async function cancelPairing(me: Address, session: string, code: string): Promise<void> {
   const r = await op(me, 'cancel', session, { code });

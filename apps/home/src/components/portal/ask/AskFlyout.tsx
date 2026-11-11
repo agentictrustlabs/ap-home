@@ -1269,7 +1269,9 @@ function ReplyView({ reply, realm, addressee, onNext }: { reply: AskReply; realm
         {/* One line per agent and standing: a run that read and then acted at the same organization routed two steps there,
             and the card said "Done by missio-nexus.org's agent…" twice. */}
         {(reply.routed ?? []).filter((x) => x.observedVia !== 'handoff').filter((x, i, all) => all.findIndex((y) => y.observedVia !== 'handoff' && String(y.agent).toLowerCase() === String(x.agent).toLowerCase() && y.standing?.relation === x.standing?.relation && y.standing?.wireRef === x.standing?.wireRef) === i).flatMap((x, i) => {
-          const st = x.standing && x.standing.relation !== 'none' ? x.standing : undefined;
+          // Spec 445 (RUNC-2): the three relations that ARE standing, never `!== 'none'` — a hop whose asker only
+          // claims to belong (`claimed`) is shown like no link: no "done … as a …" line.
+          const st = x.standing && (x.standing.relation === 'self' || x.standing.relation === 'steward' || x.standing.relation === 'member') ? x.standing : undefined;
           return st ? [
             <div key={`standing-${i}`} className="muted" style={{ fontSize: 11.5, marginTop: 3 }} data-testid="ask-standing-link">
               Done by {x.name ? <span title={x.agent}>{x.name}</span> : <AgentName address={x.agent} />}’s agent — {st.relation === 'self' ? 'its own' : st.relation === 'steward' ? `for it, under a steward wire${st.wireRef ? ` ${short(st.wireRef)}` : ''} held by ${short(st.principal)}` : `as a ${st.relation}`}: {st.because}.
@@ -1435,7 +1437,7 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
       {!!reply.parties?.length && (
         <div style={{ marginTop: 8 }} data-testid="ask-parties">
           {reply.parties.map((p) => (
-            <div key={`${p.arg}:${p.agent}`} style={{ fontSize: 12, marginTop: 2 }}>
+            <div key={`${p.arg}:${p.agent}`} style={{ fontSize: 12, marginTop: 2 }} {...(p.evidence ? { 'data-evidence': p.evidence } : {})}>
               <span className="muted">{p.arg}: </span>
               <strong>{p.label ?? chosen[p.agent.toLowerCase()] ?? <AgentName address={p.agent} />}</strong>
               {p.hint && <span className="muted" style={{ fontSize: 11 }}> — {p.hint}</span>}

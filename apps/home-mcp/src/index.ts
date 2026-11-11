@@ -136,7 +136,9 @@ app.get('/oauth/authorize', async (c) => {
   const id = randomToken(24);
   const homeVerifier = randomToken(48);
   const homeState = randomToken(16);
-  await store(c.env).putPending({ id, ...parsed.req, home_verifier: homeVerifier, home_state: homeState, created_at: Date.now() });
+  // The id_token's nonce (spec 445 D5): stored with the pending row and required back at the callback.
+  const homeNonce = randomToken(12);
+  await store(c.env).putPending({ id, ...parsed.req, home_verifier: homeVerifier, home_state: homeState, home_nonce: homeNonce, created_at: Date.now() });
   const home = new URL(c.env.HOME_ORIGIN);
   // Scope act redirects to the Home AS THE ACT CLIENT with the act template; any other connect stays ask-as-me.
   home.searchParams.set('client_id', act ? c.env.CLIENT_ID_ACT! : c.env.CLIENT_ID);
@@ -144,7 +146,7 @@ app.get('/oauth/authorize', async (c) => {
   home.searchParams.set('response_type', 'code');
   home.searchParams.set('scope', 'openid agent');
   home.searchParams.set('state', `${id}.${homeState}`);
-  home.searchParams.set('nonce', randomToken(12));
+  home.searchParams.set('nonce', homeNonce);
   home.searchParams.set('code_challenge', await sha256b64(homeVerifier));
   home.searchParams.set('code_challenge_method', 'S256');
   home.searchParams.set('delegation_template', act ? ACT_TEMPLATE : 'ask-as-me');
@@ -156,12 +158,12 @@ app.get('/oauth/authorize', async (c) => {
 });
 
 /** The Home's token exchange → the id_token (who) and the ask-as-me delegation (how). Verified here against the Home's JWKS. */
-async function connectFromHome(env: Env, exchange: { id_token?: string; delegation?: DelegationWireV1; delegations?: unknown; agent_name?: string }, clientId: string, template: 'ask-as-me' | typeof ACT_TEMPLATE = 'ask-as-me'): Promise<{ ok: true; sub: string; agent: string } | { ok: false; error: string }> {
+async function connectFromHome(env: Env, exchange: { id_token?: string; delegation?: DelegationWireV1; delegations?: unknown; agent_name?: string }, clientId: string, template: 'ask-as-me' | typeof ACT_TEMPLATE = 'ask-as-me', expectedNonce: string | null = null): Promise<{ ok: true; sub: string; agent: string } | { ok: false; error: string }> {
   if (!exchange.id_token || !exchange.delegation) return { ok: false, error: 'the Home returned no id_token or no delegation' };
   const jwksUrl = env.BROKER_JWKS_URL ?? `${env.HOME_ORIGIN}/jwks`;
   const jwks = (await fetch(jwksUrl).then((r) => r.json()).catch(() => null)) as { keys: Array<JsonWebKey & { kid?: string; alg?: string }> } | null;
   if (!jwks) return { ok: false, error: 'the Home\'s JWKS could not be read' };
-  const v = await verifyIdToken(exchange.id_token, { keys: await importJwks(jwks), expectedIss: env.HOME_ORIGIN, expectedAud: template === ACT_TEMPLATE ? (env.CLIENT_ID_ACT ?? env.CLIENT_ID) : env.CLIENT_ID });
+  const v = await verifyIdToken(exchange.id_token, { keys: await importJwks(jwks), expectedIss: env.HOME_ORIGIN, expectedAud: template === ACT_TEMPLATE ? (env.CLIENT_ID_ACT ?? env.CLIENT_ID) : env.CLIENT_ID, expectedNonce });
   if (!v.ok) return { ok: false, error: `the Home's id_token did not verify: ${v.reason}` };
   const agent = String(v.claims.sub).match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
   if (!agent) return { ok: false, error: 'the id_token names no agent' };
@@ -212,7 +214,7 @@ app.get('/oauth/callback', async (c) => {
   const act = requestsAct(pending.scope);
   const exchange = (await fetch(`${c.env.HOME_ORIGIN}/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ grant_type: 'authorization_code', code, code_verifier: pending.home_verifier, client_id: act ? c.env.CLIENT_ID_ACT : c.env.CLIENT_ID, redirect_uri: `${originOf(c)}/oauth/callback` }) }).then((r) => r.json()).catch(() => null)) as { id_token?: string; delegation?: DelegationWireV1; delegations?: unknown; error?: string } | null;
   if (!exchange || exchange.error) return json({ error: 'access_denied', error_description: exchange?.error ?? 'the Home\'s token exchange failed' }, 400);
-  const connected = await connectFromHome(c.env, exchange, pending.client_id, act ? ACT_TEMPLATE : 'ask-as-me');
+  const connected = await connectFromHome(c.env, exchange, pending.client_id, act ? ACT_TEMPLATE : 'ask-as-me', pending.home_nonce);
   if (!connected.ok) return json({ error: 'access_denied', error_description: connected.error }, 400);
   const ours = randomToken(32);
   await store(c.env).putCode({ code: ours, client_id: pending.client_id, redirect_uri: pending.redirect_uri, code_challenge: pending.code_challenge, scope: pending.scope, resource: pending.resource, sub: connected.sub, created_at: Date.now() });

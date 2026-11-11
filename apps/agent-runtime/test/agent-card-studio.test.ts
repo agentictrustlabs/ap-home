@@ -161,10 +161,11 @@ describe('the RELEASED_CARDS key is one key', () => {
   });
   it('projects a typed name onto the deployment zone', () => {
     // spec 346 §5: one DNS label, type folded in with a hyphen, so `*.<zone>` covers every agent.
-    expect(hostForName('acme.svc', 'impact-agent.io', ['me', 'impact'])).toBe('acme-svc.impact-agent.io');
-    expect(hostForName('fort-morgan-household.church', 'faithnet.io', ['me', 'impact'])).toBe('fort-morgan-household-church.faithnet.io');
-    expect(hostForName('alice.impact', 'impact-agent.io', ['me', 'impact'])).toBe('alice.impact-agent.io');
-    expect(hostForName('alice.me', 'impact-agent.io', ['me', 'impact'])).toBe('alice.impact-agent.io');
+    expect(hostForName('acme.svc', 'impact-agent.io', ['me'])).toBe('acme-svc.impact-agent.io');
+    expect(hostForName('fort-morgan-household.church', 'faithnet.io', ['me'])).toBe('fort-morgan-household-church.faithnet.io');
+    expect(hostForName('alice.me', 'impact-agent.io', ['me'])).toBe('alice.impact-agent.io');
+    expect(hostForName('alice.impact', 'impact-agent.io', ['me'])).toBeNull(); // a retired root has no host
+    expect(hostForName('alice-team.me', 'impact-agent.io', ['me'])).toBeNull(); // NAME-8: that is `alice.team`'s host
     expect(hostForName('x.y.z', 'impact-agent.io')).toBeNull();
   });
 });

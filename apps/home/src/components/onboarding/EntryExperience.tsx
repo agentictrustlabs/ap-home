@@ -575,7 +575,7 @@ function NameStart({ onStart, enrollApi, reason }: { onStart: (name: string, exi
   const [busy, setBusy] = useState(false);
   const label = nameLabel(value);
   const brand = whitelabel.brand.name;
-  const fullName = label ? toAgentName(label) : '';                 // <label>.impact (the public handle)
+  const fullName = label ? toAgentName(label) : '';                 // <label>.me (the public handle)
   const homeHost = label ? `${label}.${CENTRAL_AUTH_DOMAIN}` : '';  // <label>.impact-agent.me (the home)
   const onGoogle = () => {
     const stash = enrollApi?.enroll

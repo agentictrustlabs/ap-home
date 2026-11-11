@@ -28,6 +28,8 @@ import { universalSignatureValidatorAbi as USV_ISVALIDSIG_ABI } from '@agenticpr
 export interface CredentialVerifierEnv {
   RPC_URL: string;
   UNIVERSAL_SIGNATURE_VALIDATOR?: string;
+  /** The chain this verifier's client is connected to (DATA-23: declared, never defaulted). */
+  CHAIN_ID: string;
 }
 
 /**
@@ -63,7 +65,7 @@ export function buildCredentialVerifier(env: CredentialVerifierEnv): CredentialV
     // The entitlement credential envelope is a VC envelope (structurally close); verifyCredential runs
     // the structural + canonical-hash + validity + ERC-1271 checks. A missing/invalid proof or
     // out-of-window credential returns valid:false with its issues.
-    const result = await verifyCredential(credential as unknown as VerifiableCredential, erc1271);
+    const result = await verifyCredential(credential as unknown as VerifiableCredential, erc1271, { chainId: Number(env.CHAIN_ID) });
     return { valid: result.valid, reason: result.valid ? undefined : result.issues.join('; ') || 'verification_failed' };
   };
 }

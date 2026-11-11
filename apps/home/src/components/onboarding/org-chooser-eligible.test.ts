@@ -8,26 +8,26 @@ const org = (
 
 describe('eligibleConnectOrgs', () => {
   const rows = [
-    org('colorado-outreach.impact', { relationship: 'member', purpose: 'commons:community' }),
-    org('faith.impact', { relationship: 'steward', purpose: 'jp-adopter-org' }),
+    org('colorado-outreach.org', { relationship: 'member', purpose: 'commons:community' }),
+    org('faith.org', { relationship: 'steward', purpose: 'jp-adopter-org' }),
     org('commons-circle', { relationship: 'steward', purpose: 'commons:community' }),
     { kind: 'person-treasury' as const, name: 'treasury', relationship: 'steward' as const },
   ];
 
   it('with a purpose, lists only orgs of that purpose — not Field workspaces or other-app members', () => {
     const names = eligibleConnectOrgs(rows, { purpose: 'commons:community' }).map((o) => o.name);
-    expect(names).toEqual(['colorado-outreach.impact', 'commons-circle']);
+    expect(names).toEqual(['colorado-outreach.org', 'commons-circle']);
   });
 
   it('without a purpose, lists every related org (members and stewards)', () => {
     const names = eligibleConnectOrgs(rows).map((o) => o.name);
-    expect(names).toEqual(['colorado-outreach.impact', 'commons-circle', 'faith.impact']);
+    expect(names).toEqual(['colorado-outreach.org', 'commons-circle', 'faith.org']);
   });
 
   it('a named TEAM is org-class and choosable where its purpose matches (ADR-0046)', () => {
-    const withTeam = [...rows, { kind: 'team' as const, name: 'somali-corridor-team.impact', relationship: 'steward' as const, purpose: 'field-team' }];
-    expect(eligibleConnectOrgs(withTeam, { purpose: 'field-team' }).map((o) => o.name)).toEqual(['somali-corridor-team.impact']);
-    expect(eligibleConnectOrgs(withTeam).map((o) => o.name)).toContain('somali-corridor-team.impact');
+    const withTeam = [...rows, { kind: 'team' as const, name: 'somali-corridor.team', relationship: 'steward' as const, purpose: 'field-team' }];
+    expect(eligibleConnectOrgs(withTeam, { purpose: 'field-team' }).map((o) => o.name)).toEqual(['somali-corridor.team']);
+    expect(eligibleConnectOrgs(withTeam).map((o) => o.name)).toContain('somali-corridor.team');
   });
 
   it('drops unnamed rows and non-orgs', () => {

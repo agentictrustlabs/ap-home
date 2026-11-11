@@ -14,17 +14,19 @@ const AGENT = '0x00000000000000000000000000000000000000aa' as const;
 const RUTH = '0x00000000000000000000000000000000000000cc' as const;
 const PK = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d' as const;
 const key = privateKeyToAccount(PK);
+const ALLOWED_TARGETS = '0x00000000000000000000000000000000000000a7' as const;
 const wireOf = (skill = HARNESS_READ_SKILL, over: Record<string, unknown> = {}) => ({
   delegator: AGENT, delegate: key.address, authority: `0x${'0'.repeat(64)}`, salt: '0x1', signature: '0xsig',
   caveats: [
     { enforcer: TIMESTAMP, terms: encodeAbiParameters([{ type: 'uint256' }, { type: 'uint256' }], [0n, BigInt(Math.floor(Date.now() / 1000) + 3600)]), args: '0x' },
+    { enforcer: ALLOWED_TARGETS, terms: encodeAbiParameters([{ type: 'address[]' }], [[AGENT]]), args: '0x' }, // RUN-9: names the host it is for
     { enforcer: ALLOWED, terms: encodeAbiParameters([{ type: 'bytes4[]' }], [[skillSelector(skill)]]), args: '0x' },
   ],
   ...over,
 }) as never;
 const chain = (over: Partial<SelfHostWireChain> = {}): SelfHostWireChain => ({
   chainId: 1, delegationManager: '0x00000000000000000000000000000000000000d0', validator: '0x00000000000000000000000000000000000000e0',
-  enforcers: { timestamp: TIMESTAMP, allowedMethods: ALLOWED }, validatorAbi: [], isRevokedAbi: [],
+  enforcers: { timestamp: TIMESTAMP, allowedMethods: ALLOWED, allowedTargets: ALLOWED_TARGETS }, validatorAbi: [], isRevokedAbi: [],
   readContract: async (a) => (a.functionName === 'isRevoked' ? false : true), ...over,
 });
 

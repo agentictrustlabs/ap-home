@@ -5,6 +5,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Address } from '@agenticprimitives/types';
+import { assertSessionSecrets } from '@agenticprimitives/connect-auth';
 
 export interface DemoA2aConfig {
   port: number;
@@ -56,6 +57,7 @@ function loadDeployments(): DemoA2aConfig['deployments'] {
 export function loadConfig(): DemoA2aConfig {
   // Required regardless of signer backend:
   require_('SESSION_JWT_SECRETS');
+  assertSessionSecrets(); // spec 445: refuse a key under 32 bytes at boot
   require_('CSRF_SECRET');
   require_('A2A_SESSION_SECRET');
 

@@ -55,7 +55,7 @@ async function claimJoinName(
 ): Promise<string> {
   const claimed = await claimName(agent, sign, joinLabel(displayName));
   if (!claimed.ok) throw new Error(claimed.error);
-  return claimed.name.includes('.') ? claimed.name : `${joinLabel(displayName)}.impact`;
+  return claimed.name.includes('.') ? claimed.name : `${joinLabel(displayName)}.me`;
 }
 
 export default function InviteRedeemPage({ params }: { params: Promise<{ token: string }> }) {

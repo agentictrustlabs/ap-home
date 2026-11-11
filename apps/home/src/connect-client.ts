@@ -1,9 +1,12 @@
 // Browser orchestration for the real wallet (SIWE) connect → resolve → bootstrap
 // → PII, all against the live broker + the deployed demo-a2a worker (via /a2a).
-import { AGENT_NAME_PARENT, AGENT_REGISTRY_URN, CLAIMABLE_TLDS, candidateNamesForLabel } from './lib/domain';
+import { AGENT_REGISTRY_URN, CLAIMABLE_TLDS, NEW_PERSON_TLD, candidateNamesForLabel, nameLabel } from './lib/domain';
 import { buildMessage } from '@agenticprimitives/connect-auth/siwe';
 import {
   buildSubregistryRegisterCall,
+  buildSubregistryCommitCall,
+  generateClaimSecret,
+  SUBREGISTRY_MIN_COMMIT_AGE_SECONDS,
   buildSetPrimaryNameCall,
   buildDeclareAgentTypeCalls,
   agentProfileResolverTypeAbi,
@@ -32,7 +35,7 @@ import {
   buildRotationBatch,
   type CredentialRef,
 } from '@agenticprimitives/agent-account';
-import { buildRevokeDelegationCall, type Delegation } from '@agenticprimitives/delegation';
+import { buildRevokeDelegationCall, hashDelegation, type Delegation } from '@agenticprimitives/delegation';
 import {
   buildProposeEdgeCall,
   buildConfirmEdgeCall,
@@ -262,7 +265,12 @@ export async function chargePayment(
 ): Promise<{ ok: true; settlementHash: Hex } | { ok: false; error: string }> {
   const deleg = delegation as { delegator?: Address };
   if (!deleg?.delegator) return { ok: false, error: 'payment delegation missing delegator' };
+  // THE PAYER IS THE DELEGATION'S OWN DELEGATOR, and the mandate NAMES the delegation it spends (spec 445 §3.3,
+  // audit H-9): `delegationRef` is the EIP-712 hash of exactly the delegation redeemed below. A rail that settles
+  // this mandate (`x402.createX402Rail(...).settle`) refuses unless the delegation it is handed hashes to this
+  // reference and is the payer's — a mandate from one account can then never spend another account's delegation.
   const payer = deleg.delegator;
+  const delegationRef = hashDelegation(delegation as Delegation, CHAIN_ID, CONTRACTS.delegationManager) as Hex32;
   // Uniform funding (all custodians): top up the person-treasury if it can't cover this charge.
   await fundTreasuryIfNeeded(personSa, payer, opts.asset, opts.amount, signHash);
   const nonce = BigInt(Date.now());
@@ -272,16 +280,28 @@ export async function chargePayment(
   const resourceHash = keccak256(toBytes(`x402:${opts.edition}:pass`)) as Hex32;
   const mandate = {
     mandateId: computeMandateId({ payer, nonce, rail: 'x402', chain: CHAIN_ID }),
-    payer, payee: opts.payee, granter: payer, rail: 'x402',
+    payer, payee: opts.payee, granter: payer, rail: 'x402', delegationRef,
     amountPolicy: { kind: 'exact', amount: opts.amount, asset, chain: CHAIN_ID },
     nonce, maxRedemptions: 1, validFrom: now, expiresAt: now + 3600,
     contextBinding: { resource: { method: 'GET', url: `x402:${opts.edition}:pass`, requestBodyHash: zero32 }, chain: CHAIN_ID, asset, nonce, validFrom: now, expiresAt: now + 3600 },
     mode: 'closed', reasonHash: keccak256(toBytes(`access:${opts.edition}`)) as Hex32, signature: '0x',
   } as PaymentMandate;
-  const plan = x402.buildRedemptionCalldata({
+  // ONT-4 (spec 445): value moves treasury → treasury. The REQUIRED `isTreasury` port answers from the on-chain
+  // `atl:agentType` (ADR-0061), never a name; an agent whose type cannot be read is not a treasury (refuse).
+  const { AgentNamingClient } = await import('@agenticprimitives/agent-naming');
+  const typeReader = new AgentNamingClient({
+    rpcUrl: DEFAULT_RPC_URL, chainId: CHAIN_ID,
+    registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
+    profileResolver: CONTRACTS.agentProfileResolver,
+  });
+  const plan = await x402.buildRedemptionCalldata({
     mandate, delegation: delegation as never,
     delegationManager: CONTRACTS.delegationManager, paymentEnforcer: CONTRACTS.paymentEnforcer,
     asset: opts.asset, resourceHash,
+  }, {
+    isTreasury: async (agent) => {
+      try { return (await typeReader.readDerivedType(agent as Address)).agentType === 'treasury'; } catch { return false; }
+    },
   });
   const callData = encodeFunctionData({ abi: PAY_EXECUTE_ABI, functionName: 'execute', args: [plan.to, plan.value, plan.data] });
   const res = await executeCall(personSa, signHash, callData);
@@ -304,14 +324,15 @@ const REGISTRY_EXISTS_ABI = [
   { type: 'function', name: 'recordExists', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'bool' }] },
 ] as const;
 
-/** spec 346 — the subregistry a claim goes through: the legacy parent's (default) or the typed suffix's
- *  (from the deployment's `permissionlessSubregistries` map). A typed suffix this deployment cannot claim
- *  is an error, never a silent fall-back to `.impact` (ADR-0013). */
-function subregistryForTld(tld: string | undefined): { ok: true; subregistry: Address; typed: boolean } | { ok: false; error: string } {
-  if (!tld || tld === AGENT_NAME_PARENT) return { ok: true, subregistry: CONTRACTS.permissionlessSubregistry, typed: false };
+/** spec 346 — the subregistry a claim goes through: the typed suffix's, from the deployment's
+ *  `permissionlessSubregistries` map. EVERY claim names its root: the untyped `.impact` root that an omitted
+ *  suffix used to mean was retired 2026-11-10, so a claim with no suffix — a kind this deployment has no root
+ *  for — is an error, never some other root (ADR-0013). */
+function subregistryForTld(tld: string | undefined): { ok: true; subregistry: Address; typed: true; tld: string } | { ok: false; error: string } {
+  if (!tld) return { ok: false, error: 'This deployment has no naming root for that kind of agent, so it cannot be named here.' };
   const a = isAgentTld(tld) ? PERMISSIONLESS_SUBREGISTRIES[tld] : undefined;
   if (!a) return { ok: false, error: `".${tld}" is not claimable on this deployment` };
-  return { ok: true, subregistry: a, typed: true };
+  return { ok: true, subregistry: a, typed: true, tld };
 }
 
 /** Which roots this SA has ALREADY claimed under, and the name it holds in each.
@@ -326,7 +347,6 @@ export async function readClaimedRoots(
   agent: Address,
 ): Promise<Array<{ tld: string; node: Hex; name: string | null; typed: boolean; expired?: boolean; viaRoot?: boolean }>> {
   const roots: Array<{ tld: string; subregistry: Address; typed: boolean }> = [
-    { tld: AGENT_NAME_PARENT, subregistry: CONTRACTS.permissionlessSubregistry, typed: false },
     ...Object.entries(PERMISSIONLESS_SUBREGISTRIES)
       .filter((e): e is [string, Address] => !!e[1])
       .map(([tld, subregistry]) => ({ tld, subregistry, typed: true })),
@@ -401,21 +421,29 @@ async function declareTypeCalls(sa: Address, tld: string, serviceRole?: string):
   return buildDeclareAgentTypeCalls({ profileResolver: CONTRACTS.agentProfileResolver, agent: sa, agentType: derivedTypeForTld(tld), serviceRole, registered });
 }
 
+/** The typed root each app-level kind is named under (spec 346). Kinds map DOWN to a derived type (ADR-0046/0061):
+ *  org, circle and church are Organizations; team → Team; workspace → WorkspaceAgent; both treasuries → Treasury. */
+const KIND_ROOT: Record<string, { tld: string; serviceRole?: string }> = {
+  person: { tld: 'me' }, org: { tld: 'org' }, circle: { tld: 'circle' }, church: { tld: 'church' }, household: { tld: 'household' }, team: { tld: 'team' },
+  workspace: { tld: 'workspace', serviceRole: 'workspace' }, 'person-treasury': { tld: 'treasury' }, 'org-treasury': { tld: 'treasury' },
+  service: { tld: 'svc', serviceRole: 'service' },
+};
+
+/** The suffix a kind's name CARRIES, whether or not this deployment can claim it — for labels and messages.
+ *  (These used to print the legacy parent when the typed root was not claimable, promising a name no claim makes.) */
+export function tldOfKind(kind: AgentKind | 'person'): string {
+  return KIND_ROOT[kind]?.tld ?? NEW_PERSON_TLD;
+}
+
 /** spec 346 — the typed suffix an app-level kind claims under, IF this deployment lists it as claimable;
- *  otherwise `undefined` = the legacy parent. Kinds map DOWN to a derived type (ADR-0046/0061): org, circle and
- *  church are Organizations; team → Team; workspace → WorkspaceAgent; both treasuries → Treasury. */
+ *  otherwise `undefined` = this kind cannot be named here (the claim refuses — there is no other root to fall to). */
 export function typedTldForKind(kind: AgentKind | 'person'): { tld: string; serviceRole?: string } | undefined {
-  const map: Record<string, { tld: string; serviceRole?: string }> = {
-    person: { tld: 'me' }, org: { tld: 'org' }, circle: { tld: 'circle' }, church: { tld: 'church' }, household: { tld: 'household' }, team: { tld: 'team' },
-    workspace: { tld: 'workspace', serviceRole: 'workspace' }, 'person-treasury': { tld: 'treasury' }, 'org-treasury': { tld: 'treasury' },
-    service: { tld: 'svc', serviceRole: 'service' },
-  };
-  const t = map[kind];
+  const t = KIND_ROOT[kind];
   return t && CLAIMABLE_TLDS.includes(t.tld) ? t : undefined;
 }
 
-/** The home an EXISTING subdomain label denotes: the first of `candidateNamesForLabel(label)` (typed-first, then
- *  the legacy root) that resolves to an agent. `null` when none does — the label is free. One lookup over an
+/** The home an EXISTING subdomain label denotes: the first of `candidateNamesForLabel(label)` (this deployment's
+ *  bare-host roots, in order) that resolves to an agent. `null` when none does — the label is free. One lookup over an
  *  ordered candidate set whose uniqueness `/connect/name` enforces (spec 346 migration), not a fallback. */
 export async function resolveHomeNameForLabel(label: string): Promise<{ name: string; agent: Address } | null> {
   for (const name of candidateNamesForLabel(label)) {
@@ -426,13 +454,13 @@ export async function resolveHomeNameForLabel(label: string): Promise<{ name: st
 }
 
 export interface TypedClaimOpts {
-  /** A typed suffix (spec 346). Omit for the deployment's legacy parent. */
+  /** The typed suffix (spec 346) the name is claimed under. Omitted ⇒ the claim is refused: there is no untyped root. */
   tld?: string;
   /** Required = the type name for `.workspace` / `.registry`; free for other services. */
   serviceRole?: string;
 }
 
-/** Claim a forced-unique `<base>[N].impact` for the agent + set it as primary.
+/** Claim a forced-unique `<base>[N].<tld>` for the agent + set it as primary.
  *  register + setPrimaryName are BATCHED into one execute UserOp (one nonce, one signature):
  *  they must land together, and the batch avoids an inter-userOp race where the second op
  *  sees a stale view of the first's state. `minNonce` rides out the post-deploy nonce lag
@@ -444,13 +472,44 @@ export interface TypedClaimOpts {
  *  revert the whole userOp → a 500 the founding flow can't recover from. We detect the existing claim and
  *  return it as a NO-OP success instead — the home keeps its established name (one mechanism, ADR-0013: a
  *  positive `claimedBy` read IS the answer; we don't attempt-then-handle-the-revert). */
-/** The root a PERSON's name is claimed under on this deployment — `.me` where the typed roots exist,
- *  the legacy parent otherwise. It is the DEFAULT rather than a parameter every caller must remember,
+// ── Name claim = commit, wait, reveal (spec 445 / REG-5; generation-4 PermissionlessSubregistry) ──────────────────
+//
+// `register(label, owner, secret)` only succeeds against a MATURED commitment made by `commit(...)` in an EARLIER
+// transaction (≥ SUBREGISTRY_MIN_COMMIT_AGE_SECONDS, ≤ a day). So a claim can no longer ride one batch or one userOp:
+// the COMMIT travels in the first batch (the deploy userOp, for a fresh agent), the REVEAL — with setPrimary and the
+// name records — in a second, after the wait. The secret never leaves this module's memory between the two.
+const NAME_CLAIM_WAIT_MS = (SUBREGISTRY_MIN_COMMIT_AGE_SECONDS + 2) * 1000;
+
+function nameClaimPhases(a: { subregistry: Address; label: string; newOwner: Address; root: string }): { commit: ContractCall; reveal: ContractCall } {
+  const secret = generateClaimSecret();
+  const { commitment: _commitment, ...commit } = buildSubregistryCommitCall({ subregistry: a.subregistry, chainId: CHAIN_ID, label: a.label, newOwner: a.newOwner, secret, root: a.root });
+  return { commit, reveal: buildSubregistryRegisterCall({ subregistry: a.subregistry, label: a.label, newOwner: a.newOwner, secret, root: a.root }) };
+}
+
+/** Wait out the commitment, then send the reveal batch as `agent`. A reveal that lands a block early (`CommitmentTooNew`)
+ *  is retried — the SAME call, bounded (ADR-0013). */
+async function finishNameClaim(agent: Address, signHash: SignHash, reveal: ContractCall[], onStep?: (s: string) => void, minNonce?: bigint): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (reveal.length === 0) return { ok: true };
+  onStep?.('Letting your name commitment mature…');
+  await new Promise((r) => setTimeout(r, NAME_CLAIM_WAIT_MS));
+  let last = '';
+  for (let i = 0; i < 3; i++) {
+    const r = await executeCall(agent, signHash, buildExecuteBatchCallData(reveal), { ...(minNonce !== undefined ? { minNonce } : {}), attempts: 6 });
+    if (r.ok) return { ok: true };
+    last = r.error;
+    if (!/CommitmentTooNew/i.test(last)) break;
+    await new Promise((res) => setTimeout(res, 6000));
+  }
+  return { ok: false, error: `name claim (reveal) failed: ${last}` };
+}
+
+/** The root a PERSON's name is claimed under — `.me` (a deployment without that root refuses the claim).
+ *  It is the DEFAULT rather than a parameter every caller must remember,
  *  because forgetting it is silent: the claim succeeds, under the wrong root, and the agent ends up with
  *  no derived type (spec 346) — which only surfaces much later as "declare its type before projecting".
  *  Three of the four person-claim call sites had forgotten it. */
 function personClaimRoot(): TypedClaimOpts {
-  return CLAIMABLE_TLDS.includes('me') ? { tld: 'me' } : {};
+  return { tld: NEW_PERSON_TLD };
 }
 
 export async function claimName(
@@ -513,18 +572,17 @@ export async function claimName(
   }
 
   onStep?.(`Claiming ${picked.name}…`);
-  const register = buildSubregistryRegisterCall({
-    subregistry: sub.subregistry,
-    label: picked.label,
-    newOwner: agent,
-  });
+  const phases = nameClaimPhases({ subregistry: sub.subregistry, label: picked.label, newOwner: agent, root: sub.tld });
   const setPrimary = buildSetPrimaryNameCall({ registry: CONTRACTS.agentNameRegistry, node: picked.node });
   // Typed claim: declare the derived type first (step 1b); the name record's agentKind is the ROOT of that type.
-  const declare = sub.typed ? await declareTypeCalls(agent, typed.tld!, typed.serviceRole) : [];
-  const agentKind = sub.typed ? rootClassForDerivedType(derivedTypeForTld(typed.tld as never)) : 'person';
-  const batch = buildExecuteBatchCallData([...declare, register, setPrimary, ...buildNameRecordCalls(picked.node, agent, { agentKind })]);
+  const declare = await declareTypeCalls(agent, sub.tld, typed.serviceRole);
+  const agentKind = rootClassForDerivedType(derivedTypeForTld(sub.tld as never));
+  // REG-5 (spec 445): a claim is TWO transactions — commit (with the type declaration), wait, reveal.
+  const batch = buildExecuteBatchCallData([...declare, phases.commit]);
   const res = await executeCall(agent, signHash, batch, { minNonce, attempts: 10 });
   if (!res.ok) return { ok: false, error: `name claim failed: ${res.error}` };
+  const fin = await finishNameClaim(agent, signHash, [phases.reveal, setPrimary, ...buildNameRecordCalls(picked.node, agent, { agentKind })], onStep);
+  if (!fin.ok) return fin;
   requestReindex([agent]); // auto-index: surface the freshly-named agent in discovery immediately
   return { ok: true, name: picked.name };
 }
@@ -970,14 +1028,15 @@ function buildNameRecordCalls(node: Hex, sa: Address, records: NameClaimRecords)
 function childDiscoveryRecords(base: string, cOpts: CreateChildOpts): NameClaimRecords {
   const purpose = (cOpts.purpose ?? '').toLowerCase();
   const requestedBy = (cOpts.requestedBy ?? '').toLowerCase();
-  const name = `${base.replace(/\.(impact|demo\.agent)$/i, '')}.impact`;
+  const label = nameLabel(base);
+  const name = `${label}.${tldOfKind('org')}`; // the claim rewrites it to the label actually picked
   const records: NameClaimRecords = { agentKind: 'org', displayName: name };
   if (purpose.includes('uupg') || requestedBy === 'uupg-tracker') {
     const orgRole = purpose.includes('alliance') ? 'alliance' : 'organization';
     records.appContext = 'uupg';
     records.orgRole = orgRole;
     records.serviceUrl = 'https://uupg.richardpedersen3.workers.dev/';
-    if (orgRole === 'organization') records.siteUrl = `https://${name.replace(/\.impact$/i, '')}.impact-agent.me/`;
+    if (orgRole === 'organization') records.siteUrl = `https://${label}.impact-agent.me/`;
     records.description = orgRole === 'alliance'
       ? 'UUPG alliance agent discoverable by public Agent Naming metadata.'
       : 'UUPG organization agent discoverable by public Agent Naming metadata.';
@@ -992,7 +1051,7 @@ async function buildClaimCallData(
   exact = false,
   records: NameClaimRecords = { agentKind: 'person' },
   typed: TypedClaimOpts = {},
-): Promise<{ ok: true; callData: Hex; calls: ContractCall[]; name: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; callData: Hex; calls: ContractCall[]; reveal: ContractCall[]; name: string } | { ok: false; error: string }> {
   const sub = subregistryForTld(typed.tld);
   if (!sub.ok) return { ok: false, error: sub.error };
   // exact (spec 275 MAM-D4): the member typed the precise label — claim it or fail, no
@@ -1010,22 +1069,23 @@ async function buildClaimCallData(
     taken?: boolean;
   };
   if (!picked.name || !picked.node || !picked.label) {
-    if (picked.taken) return { ok: false, error: `“${base}.${typed.tld ?? AGENT_NAME_PARENT}” is already taken — pick another name.` };
+    if (picked.taken) return { ok: false, error: `“${base}.${sub.tld}” is already taken — pick another name.` };
     return { ok: false, error: picked.error ?? 'no free name' };
   }
-  const register = buildSubregistryRegisterCall({ subregistry: sub.subregistry, label: picked.label, newOwner: sa });
+  const phases = nameClaimPhases({ subregistry: sub.subregistry, label: picked.label, newOwner: sa, root: sub.tld });
   const setPrimary = buildSetPrimaryNameCall({ registry: CONTRACTS.agentNameRegistry, node: picked.node });
   // Typed claim (spec 346 §3.6): declare the derived type on the SA's profile FIRST; the name record's
   // agentKind is the ROOT of that type; the display name carries the typed suffix.
-  const declare = sub.typed ? await declareTypeCalls(sa, typed.tld!, typed.serviceRole) : [];
-  const effective: NameClaimRecords = sub.typed
-    ? { ...records, agentKind: rootClassForDerivedType(derivedTypeForTld(typed.tld as never)), ...(records.displayName ? { displayName: `${picked.label}.${typed.tld}` } : {}) }
-    : records;
+  const declare = await declareTypeCalls(sa, sub.tld, typed.serviceRole);
+  const effective: NameClaimRecords = { ...records, agentKind: rootClassForDerivedType(derivedTypeForTld(sub.tld as never)), ...(records.displayName ? { displayName: `${picked.label}.${sub.tld}` } : {}) };
   // `calls` is surfaced so an org-create can EXTEND the batch with approveHash(digest) calls
   // (spec 253) and still deploy + claim + approve in ONE userOp. `callData` is the standalone
   // deploy+claim batch for the simpler person-SA bootstrap callers.
-  const calls: ContractCall[] = [...declare, register, setPrimary, ...buildNameRecordCalls(picked.node, sa, effective)];
-  return { ok: true, callData: buildExecuteBatchCallData(calls), calls, name: picked.name };
+  // REG-5 (spec 445): `calls` is the COMMIT phase (declare + commit — rides the deploy userOp); `reveal` is the second
+  // transaction (register + setPrimary + records), which the caller sends after the deploy with `finishNameClaim`.
+  const calls: ContractCall[] = [...declare, phases.commit];
+  const reveal: ContractCall[] = [phases.reveal, setPrimary, ...buildNameRecordCalls(picked.node, sa, effective)];
+  return { ok: true, callData: buildExecuteBatchCallData(calls), calls, reveal, name: picked.name };
 }
 
 /** spec 253 — `ContractCall` for `ApprovedHashRegistry.approveHash(key)`. Batched into the delegator's
@@ -1036,7 +1096,7 @@ async function buildClaimCallData(
  *  its current epoch first. */
 function buildApproveHashCall(digest: Hex, account: Address): ContractCall {
   // Spec 410 §1 (generation 3): a self-call on the account being deployed — it derives the key on chain.
-  const scheme = CONTRACTS_GENERATION === 1 ? { generation: 1 as const } : CONTRACTS_GENERATION === 3 ? { generation: 3 as const, account } : { generation: 2 as const, epoch: 0n };
+  const scheme = CONTRACTS_GENERATION === 1 ? { generation: 1 as const } : CONTRACTS_GENERATION === 3 ? { generation: 3 as const, account } : CONTRACTS_GENERATION === 4 ? { generation: 4 as const, account } : { generation: 2 as const, epoch: 0n };
   return buildApproveHashKeyCall(CONTRACTS.approvedHashRegistry, digest, scheme);
 }
 
@@ -1338,10 +1398,10 @@ export async function createChildAgentForSite(
   // first organization a demo persona created from the skills app after the root switch, 2026-10-08). The KMS path
   // learned this on 2026-10-06; this is the passkey / wallet / demo-custody path. The caller deploys nameless and
   // buys the name next (`home/charter-name.ts`), exactly as the portal's "Add an organization" does.
-  const claim: { ok: true; callData: Hex; calls: ContractCall[]; name: string } | { ok: false; error: string } = cOpts.nameLater
+  const claim: { ok: true; callData: Hex; calls: ContractCall[]; reveal: ContractCall[]; name: string } | { ok: false; error: string } = cOpts.nameLater
     // NAMELESS IS NOT TYPELESS (spec 346 §3.6 step 1b): the name is bought next, the TYPE is declared now, in the
     // same genesis — the harness reads `atl:agentType`, and an agent born without it is one nobody can tell apart.
-    ? { ok: true, callData: '0x', calls: await declareTypeCalls(childAgent, typedTldForKind('org')!.tld, typedTldForKind('org')!.serviceRole), name: '' }
+    ? { ok: true, callData: '0x', calls: await declareTypeCalls(childAgent, typedTldForKind('org')!.tld, typedTldForKind('org')!.serviceRole), reveal: [], name: '' }
     : await buildClaimCallData(base, childAgent, onStep, false, childDiscoveryRecords(base, cOpts), typedTldForKind('org') ?? {});
   if (!claim.ok) return { ok: false, error: claim.error };
 
@@ -1424,6 +1484,11 @@ export async function createChildAgentForSite(
       if (code && code !== '0x') break;
       await new Promise((r) => setTimeout(r, fastPollMs(1000)));
     }
+  }
+  // REG-5 (spec 445): the deploy carried the COMMIT; the reveal (register + setPrimary + records) follows the wait.
+  {
+    const fin = await finishNameClaim(childAgent, signHash, claim.reveal, onStep, 1n);
+    if (!fin.ok) return { ok: false, error: fin.error };
   }
 
   // ADR-0025: person↔org is a PRIVATE vault credential, NOT a public on-chain edge.
@@ -1665,6 +1730,7 @@ export async function createManagedAgent(
   // (ADR-0010); the name is just an optional public facet.
   const wantName = !!input.label && input.label.trim().length >= 3;
   let claimCalls: ContractCall[] = [];
+  let claimReveal: ContractCall[] = [];
   let name = '';
   if (wantName) {
     const claim = await buildClaimCallData(input.label!, child, onStep, true, {
@@ -1673,10 +1739,11 @@ export async function createManagedAgent(
       // claimed a `.me` name declaring itself service-class — which the typed claim refuses outright
       // (spec 346 §3.6: the suffix, the on-chain type and the name record's class must agree).
       agentKind: agentClassOf(input.kind),
-      displayName: `${input.label!.replace(/\.(impact|demo\.agent)$/i, '')}.${typedTldForKind(input.kind)?.tld ?? AGENT_NAME_PARENT}`,
+      displayName: `${nameLabel(input.label!)}.${tldOfKind(input.kind)}`,
     }, typedTldForKind(input.kind) ?? {});
     if (!claim.ok) return { ok: false, error: claim.error };
     claimCalls = claim.calls;
+    claimReveal = claim.reveal;
     name = claim.name;
   }
 
@@ -1708,6 +1775,11 @@ export async function createManagedAgent(
       await new Promise((r) => setTimeout(r, fastPollMs(1000)));
     }
   }
+  // REG-5 (spec 445): the deploy carried the COMMIT; the reveal follows the wait.
+  {
+    const fin = await finishNameClaim(child, signHash, claimReveal, onStep, 1n);
+    if (!fin.ok) return { ok: false, error: fin.error };
+  }
 
   // ADR-0025: private, self-issued related-agent credential (unsigned — proofHash anchors integrity,
   // the authenticated home session provides provenance). Holder = the parent in the tree.
@@ -1716,7 +1788,8 @@ export async function createManagedAgent(
     relatedAgent: child,
     purpose: input.kind,
     requestedBy: '',
-    issuerCaip10: `eip155:${CHAIN_ID}:${input.person}`,
+    // RA-2 / COV-20 (spec 445): self-issued — the issuer IS the holder (here the parent), matching `roles.issuer`.
+    issuerCaip10: `eip155:${CHAIN_ID}:${input.parent}`,
     body: { agentName: name },
     validFrom: new Date().toISOString(),
   });
@@ -1780,13 +1853,15 @@ export async function nameManagedAgent(
 
   const claim = await buildClaimCallData(input.label, input.agent, onStep, true, {
     agentKind: agentClassOf(input.kind), // see the note at the charter path — one classifier, never a list
-    displayName: `${input.label.replace(/\.(impact|demo\.agent)$/i, '')}.${typedTldForKind(input.kind)?.tld ?? AGENT_NAME_PARENT}`,
+    displayName: `${nameLabel(input.label)}.${tldOfKind(input.kind)}`,
   }, typedTldForKind(input.kind) ?? {}); // EXACT or fail
   if (!claim.ok) return { ok: false, error: claim.error };
 
   onStep?.('Naming your agent on the network…');
   const res = await executeCall(input.agent, signHash, buildExecuteBatchCallData(claim.calls), { attempts: 6 });
   if (!res.ok) return { ok: false, error: `naming failed: ${res.error}` };
+  const fin = await finishNameClaim(input.agent, signHash, claim.reveal, onStep); // REG-5: commit sent, wait, reveal
+  if (!fin.ok) return { ok: false, error: `naming failed: ${fin.error}` };
 
   onStep?.('Saving the name…');
   const save = await fetch('/connect/related-orgs', {
@@ -1809,13 +1884,13 @@ export async function nameManagedAgent(
 async function resolveExactName(label: string, tld?: string): Promise<{ ok: true; label: string; node: Hex } | { ok: false; error: string }> {
   const clean = label.trim().toLowerCase();
   // The suffix must ride along: `node` is the namehash UNDER a root, so resolving without one returns
-  // the legacy `.impact` node and the claim lands there no matter what the form promised.
+  // the person root's node and the claim lands there no matter what the form promised.
   const q = `/connect/name?exact=1&label=${encodeURIComponent(clean)}${tld ? `&tld=${encodeURIComponent(tld)}` : ''}`;
   const picked = (await (await fetch(q)).json()) as {
     label?: string; node?: Hex; error?: string; taken?: boolean;
   };
   if (!picked.label || !picked.node) {
-    if (picked.taken) return { ok: false, error: `“${clean}.${tld ?? AGENT_NAME_PARENT}” is already taken — pick another name.` };
+    if (picked.taken) return { ok: false, error: `“${clean}.${tld ?? NEW_PERSON_TLD}” is already taken — pick another name.` };
     return { ok: false, error: picked.error ?? 'no free name' };
   }
   return { ok: true, label: picked.label, node: picked.node };
@@ -1864,7 +1939,7 @@ async function createManagedAgentSocial(
   onStep?.('Saving to your private vault…');
   const credential = buildRelatedAgentCredential({
     holder: input.parent, relatedAgent: child, purpose: input.kind, requestedBy: '',
-    issuerCaip10: `eip155:${CHAIN_ID}:${input.person}`, body: { agentName: name }, validFrom: new Date().toISOString(),
+    issuerCaip10: `eip155:${CHAIN_ID}:${input.parent}`, body: { agentName: name }, validFrom: new Date().toISOString(),
   });
   const proofHash = relatedAgentProofHash(credential);
   const save = await fetch('/connect/related-orgs', {
@@ -2717,8 +2792,7 @@ export async function connectWithName(
 
 /** Step 1 — create the person's secure-home passkey (ONE WebAuthn create). Stored on this device. */
 export async function createSecureHomePasskey(name: string): Promise<DemoPasskey> {
-  const base = name.replace(/\.(impact|demo\.agent)$/, '');
-  return registerPasskey(`${base}.impact`);
+  return registerPasskey(`${nameLabel(name)}.${NEW_PERSON_TLD}`);
 }
 
 /** Step 2 — deploy the person's Smart Agent + claim its name in ONE userOp (ONE WebAuthn sign). */
@@ -2738,6 +2812,9 @@ export async function deployAndClaimAgent(
     : claim.callData;
   const dep = await bootstrapWithPasskey(passkey, onStep, callData);
   if (!dep.ok) return { ok: false, error: dep.error };
+  // REG-5 (spec 445): the deploy carried the COMMIT; the reveal is a second device prompt after the wait.
+  const fin = await finishNameClaim(dep.agent, passkeySignHash, claim.reveal, onStep, 1n);
+  if (!fin.ok) return { ok: false, error: fin.error };
   return { ok: true, agent: dep.agent, name: claim.name };
 }
 
@@ -2757,7 +2834,7 @@ export async function signupWithName(
 ): Promise<{ ok: true; token: string; name: string; agent: Address } | { ok: false; error: string }> {
   if (via === 'passkey') {
     onStep?.('Creating your passkey…');
-    const pk = await registerPasskey(`${base}.impact`); // FRESH passkey for this workspace
+    const pk = await registerPasskey(`${nameLabel(base)}.${NEW_PERSON_TLD}`); // FRESH passkey for this workspace
     // Deploy + claim the name in ONE userOp (one device prompt): derive the SA address, build
     // the claim calldata (newOwner = that SA), and deploy with it attached.
     const sa = await derivePasskeySa(pk, 0n);
@@ -2765,6 +2842,8 @@ export async function signupWithName(
     if (!claim.ok) return { ok: false, error: claim.error };
     const dep = await bootstrapWithPasskey(pk, onStep, claim.callData);
     if (!dep.ok) return { ok: false, error: dep.error };
+    const fin = await finishNameClaim(dep.agent, passkeySignHash, claim.reveal, onStep, 1n); // REG-5: reveal after the wait
+    if (!fin.ok) return { ok: false, error: fin.error };
     // The OIDC enrollment ceremony signs the person in via the grant + id_token, so it skips
     // this extra passkeyLogin (its token would be unused) — saving one device prompt. We return
     // the KNOWN agent address (from the deploy) so callers needn't re-resolve by name — the
@@ -2817,6 +2896,9 @@ export async function signupWithName(
     for (let i = 0; i < 20; i++) { if (await isAgentDeployed(agent).catch(() => false)) break; await new Promise((r) => setTimeout(r, fastPollMs(2000))); }
     await extra.submit();
   }
+  // REG-5 (spec 445): the deploy carried the COMMIT; the reveal is a second wallet prompt after the wait.
+  const fin = await finishNameClaim(agent, (h) => personalSign(address, h), claim.reveal, onStep, 1n);
+  if (!fin.ok) return { ok: false, error: fin.error };
   // B1 — self-serve `secureHome` passes signIn=false; the session is issued later by openHome, so skip the
   // SIWE here (its token would be unused).
   if (!signIn) return { ok: true, token: '', name: claim.name, agent };
@@ -3055,7 +3137,7 @@ export async function executeCalls(
 // Rotation = add the new credential → retire the old → re-approve every standing approved-digest wire under the new
 // custody epoch, in ONE userOp signed by the OLD credential as its last act. The batch's order is the SDK's
 // (`buildRotationBatch`), the key derivation is the account's (`approveDigest`), and this estate must run contracts
-// generation 3 — an older estate has no `approveDigest`, and pretending with a computed future-epoch key is the
+// generation 3 or later (4 also re-affirms the kept modules) — an older estate has no `approveDigest`, and pretending with a computed future-epoch key is the
 // exact hole generation 3 closes (THESIS-1a). Governed accounts (custody mode > 0) rotate through the custody
 // policy's `RotateCredential` action under quorum, which is not this ceremony.
 
@@ -3079,8 +3161,35 @@ export async function readCustodyMode(personAgent: Address): Promise<number> {
 
 /** Whether THIS estate can perform the rotation ceremony at all, and why not when it cannot. */
 export function rotationAvailability(): { ok: true } | { ok: false; reason: string } {
-  if (CONTRACTS_GENERATION !== 3) return { ok: false, reason: `rotation is not available on this estate yet — its contracts are generation ${CONTRACTS_GENERATION}, and the ceremony needs generation 3 (spec 410 §1)` };
+  if (CONTRACTS_GENERATION !== 3 && CONTRACTS_GENERATION !== 4) return { ok: false, reason: `rotation is not available on this estate yet — its contracts are generation ${CONTRACTS_GENERATION}, and the ceremony needs generation 3 or later (spec 410 §1)` };
   return { ok: true };
+}
+
+/** What a rotation RE-AFFIRMS besides the wires (spec 445 §1.3, generation 4): on generation 4 a credential retirement
+ *  EXPELS every non-canonical executor module and a non-canonical delegation manager unless the rotation re-stamps
+ *  them under the new custody epoch. Read from the account itself — the installed executor modules that are still
+ *  current, minus the canonical custody policy (exempt), and the delegation manager when it is not this deployment's
+ *  canonical one and is current. Generation 3 has no such concept: nothing to keep. RECOVERY re-affirms nothing. */
+export interface KeptModules { modules: Address[]; delegationManager: Address | null }
+export async function readKeptModules(personAgent: Address): Promise<KeptModules> {
+  if (CONTRACTS_GENERATION !== 4) return { modules: [], delegationManager: null };
+  const pc = createPublicClient({ chain: CHAIN, transport: http('/a2a/rpc') });
+  const abi = [
+    { type: 'function', name: 'getInstalledModules', stateMutability: 'view', inputs: [{ name: 'moduleTypeId', type: 'uint256' }], outputs: [{ type: 'address[]' }] },
+    { type: 'function', name: 'isModuleCurrent', stateMutability: 'view', inputs: [{ name: 'module', type: 'address' }], outputs: [{ type: 'bool' }] },
+    { type: 'function', name: 'delegationManager', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+    { type: 'function', name: 'isDelegationManagerCurrent', stateMutability: 'view', inputs: [], outputs: [{ type: 'bool' }] },
+  ] as const;
+  const installed = (await pc.readContract({ address: personAgent, abi, functionName: 'getInstalledModules', args: [2n] })) as readonly Address[];
+  const canonicalPolicy = (CONTRACTS.custodyPolicy ?? '').toLowerCase();
+  const modules: Address[] = [];
+  for (const m of installed) {
+    if (m.toLowerCase() === canonicalPolicy) continue;
+    if ((await pc.readContract({ address: personAgent, abi, functionName: 'isModuleCurrent', args: [m] })) === true) modules.push(m);
+  }
+  const dm = (await pc.readContract({ address: personAgent, abi, functionName: 'delegationManager' })) as Address;
+  const keepDm = dm.toLowerCase() !== CONTRACTS.delegationManager.toLowerCase() && (await pc.readContract({ address: personAgent, abi, functionName: 'isDelegationManagerCurrent' })) === true;
+  return { modules, delegationManager: keepDm ? dm : null };
 }
 
 /** ONE userOp: add → retire → approveDigest × N, signed by the OLD credential (`signHash`). */
@@ -3090,13 +3199,21 @@ export async function rotateCredential(
   input: { add: CredentialRef; retire: { kind: 'custodian'; address: Address } | { kind: 'passkey'; credentialIdDigest: Hex }; reapprove: readonly Hex[];
     /** Wires the person STRUCK from the reviewed list: revoked on chain in the same batch, so the strike is said
      *  where every verifier reads it, not only implied by the missing re-approval. */
-    revoke?: readonly DelegationWire[] },
+    revoke?: readonly DelegationWire[];
+    /** The modules + delegation manager the person KEEPS (the reviewed list's "kept modules" section). Read from the
+     *  account when omitted — re-affirmed under the new custody epoch in the same batch (generation 4). */
+    kept?: KeptModules },
 ): Promise<{ ok: true; txHash?: Hex } | { ok: false; error: string }> {
   const avail = rotationAvailability();
   if (!avail.ok) return { ok: false, error: avail.reason };
   let calls: ContractCall[];
   try {
-    calls = buildRotationBatch({ scheme: { generation: 3, account: personAgent }, add: input.add, retire: input.retire, reapprove: input.reapprove });
+    const kept = input.kept ?? (await readKeptModules(personAgent));
+    const generation = CONTRACTS_GENERATION === 4 ? 4 : 3;
+    calls = buildRotationBatch({
+      scheme: { generation, account: personAgent }, add: input.add, retire: input.retire, reapprove: input.reapprove,
+      ...(generation === 4 ? { reaffirmModules: kept.modules, reaffirmDelegationManager: kept.delegationManager !== null } : {}),
+    });
     for (const w of input.revoke ?? []) {
       const d: Delegation = { delegator: w.delegator, delegate: w.delegate, authority: w.authority, caveats: w.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })), salt: BigInt(String(w.salt)), signature: w.signature };
       calls.push(buildRevokeDelegationCall(d, CONTRACTS.delegationManager));

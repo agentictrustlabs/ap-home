@@ -35,7 +35,7 @@ const D = {
   allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41',
   value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1',
 } as const;
-// alicefield.impact — a workspace Alice's OWN key custodies. (Northern Colorado Field sits in her tree but its
+// alicefield.workspace — a workspace Alice's OWN key custodies. (Northern Colorado Field sits in her tree but its
 // on-chain custodian is another persona's key — the verifier refuses her mandate for it, correctly: a tree
 // entry is not custody.) Override: `npx tsx scripts/verify-harness-team-create.mts <label> <workspace>`.
 const WORKSPACE = ((process.argv[3] ?? '0xee11DFB02e4a02630bE512886305DF5C68Fd682c').toLowerCase()) as Address;

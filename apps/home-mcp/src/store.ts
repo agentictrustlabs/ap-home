@@ -5,7 +5,7 @@
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 
 export interface ClientRow { client_id: string; client_secret_hash?: string; redirect_uris: string[]; client_name?: string; token_endpoint_auth_method: 'none' | 'client_secret_post' | 'client_secret_basic'; created_at: number; /** Spec 397 §11 — the OPERATOR allowed this registration to request scope `act`. Never set by the registration body alone. */ act?: boolean }
-export interface PendingRow { id: string; client_id: string; redirect_uri: string; state?: string; code_challenge: string; scope: string[]; resource: string; home_verifier: string; home_state: string; created_at: number }
+export interface PendingRow { id: string; client_id: string; redirect_uri: string; state?: string; code_challenge: string; scope: string[]; resource: string; home_verifier: string; home_state: string; /** the nonce sent to the Home; the id_token must carry it (spec 445 D5) */ home_nonce: string; created_at: number }
 export interface CodeRow { code: string; client_id: string; redirect_uri: string; code_challenge: string; scope: string[]; resource: string; sub: string; created_at: number }
 export interface TokenRow { token_hash: string; kind: 'access' | 'refresh'; client_id: string; sub: string; scope: string[]; resource: string; exp: number; refresh_of?: string; created_at: number }
 /** Spec 397 W3 — what the client declared at initialize, kept under the `Mcp-Session-Id` it echoes. */
@@ -52,6 +52,7 @@ export class HomeMcpStoreDO {
       case 'code.take': { const r = [...this.sql.exec(`SELECT row, created_at FROM codes WHERE code = ?`, key)][0]; this.sql.exec(`DELETE FROM codes WHERE code = ?`, key); if (!r || now - Number(r.created_at) > (ttlMs ?? 300_000)) return json({ ok: true, row: null }); return json({ ok: true, row: JSON.parse(String(r.row)) }); }
       case 'token.put': { const t = row as TokenRow; this.sql.exec(`INSERT OR REPLACE INTO tokens (token_hash, row, exp) VALUES (?, ?, ?)`, key, JSON.stringify(t), t.exp); this.sql.exec(`DELETE FROM tokens WHERE exp < ?`, now); return json({ ok: true }); }
       case 'token.get': { const r = [...this.sql.exec(`SELECT row, exp FROM tokens WHERE token_hash = ?`, key)][0]; if (!r || Number(r.exp) < now) return json({ ok: true, row: null }); return json({ ok: true, row: JSON.parse(String(r.row)) }); }
+      case 'token.take': { const r = [...this.sql.exec(`SELECT row, exp FROM tokens WHERE token_hash = ?`, key)][0]; this.sql.exec(`DELETE FROM tokens WHERE token_hash = ?`, key); if (!r || Number(r.exp) < now) return json({ ok: true, row: null }); return json({ ok: true, row: JSON.parse(String(r.row)) }); }
       case 'token.delete': this.sql.exec(`DELETE FROM tokens WHERE token_hash = ?`, key); return json({ ok: true });
       case 'token.clientsFor': { const r = row as { sub: string }; const ids = new Set<string>(); for (const x of [...this.sql.exec(`SELECT row, exp FROM tokens`)]) { if (Number(x.exp) < now) continue; const t = JSON.parse(String(x.row)) as TokenRow; if (t.sub === r.sub) ids.add(t.client_id); } return json({ ok: true, clients: [...ids] }); }
       case 'token.deleteFor': { const r = row as { sub: string; client_id?: string }; for (const x of [...this.sql.exec(`SELECT token_hash, row FROM tokens`)]) { const t = JSON.parse(String(x.row)) as TokenRow; if (t.sub === r.sub && (!r.client_id || t.client_id === r.client_id)) this.sql.exec(`DELETE FROM tokens WHERE token_hash = ?`, x.token_hash); } return json({ ok: true }); }
@@ -97,6 +98,8 @@ export class Store {
   async takeCode(code: string): Promise<CodeRow | null> { return (await this.call<{ row: CodeRow | null }>('code.take', code)).row; }
   putToken(hash: string, r: TokenRow) { return this.call('token.put', hash, r); }
   async getToken(hash: string): Promise<TokenRow | null> { return (await this.call<{ row: TokenRow | null }>('token.get', hash)).row; }
+  /** Read AND delete in one step: refresh rotation spends the presented token through this (spec 445 / ING-17). */
+  async takeToken(hash: string): Promise<TokenRow | null> { return (await this.call<{ row: TokenRow | null }>('token.take', hash)).row; }
   deleteToken(hash: string) { return this.call('token.delete', hash); }
   deleteTokensFor(sub: string, client_id?: string) { return this.call('token.deleteFor', undefined, { sub, client_id }); }
   /** The clients that still hold a live token for this person — the ones that count against the cap. */

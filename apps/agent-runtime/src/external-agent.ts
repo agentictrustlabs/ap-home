@@ -4,12 +4,14 @@
 // A step that would ACT there is refused at admission (`externalExecutorsReadOnly`); this tool has no
 // capability and cannot be made to spend one.
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
-import { resolveAgentCard, createStandardA2aClient } from '@agenticprimitives/a2a/standard';
+import { resolveAgentCard, createStandardA2aClient, type OutboundFetchLimits, type CardTrustOptions } from '@agenticprimitives/a2a/standard';
 
 export const EXTERNAL_AGENT_CAPABILITY = 'external.agent.ask' as const;
 
 export const EXTERNAL_AGENT_TOOL: ToolSpec = {
   id: EXTERNAL_AGENT_CAPABILITY,
+  // RUN-4 (spec 445): this sends words to ANOTHER PARTY — after untrusted content the loop parks it for a confirmation bound to what would leave.
+  outbound: { partyArg: 'agent' },
   answers: ['what an outside agent says', 'what does an outside agent say'],
   // The imperatives that name a consultation (spec 379): an instruction opening with one is discharged by this read.
   verbs: ['ask', 'consult'],
@@ -31,6 +33,14 @@ export interface ExternalAgentDeps {
    *  admits (338): the card is still only a card, and the tool still spends nothing. */
   nameRecords?: (name: string) => Promise<{ a2aEndpoint?: string; cardUri?: string; cardDigest?: string } | null>;
   timeoutMs?: number;
+  /** RUN-16 — outbound limits (a deployment with a resolver binds `resolveHost`; a Worker's fetch cannot reach private ranges). */
+  limits?: OutboundFetchLimits;
+  /** RUN-16 — a deployment that ROUTES by an unpinned card binds `relyOnCard` + `verifyCardSignature`. This tool only asks. */
+  cardTrust?: CardTrustOptions;
+  /** RUN-16 — for a card reached BY NAME: the trust options that rely on it only when its signature verifies against the key the
+   *  agent's on-chain record binds (`cardTrustForEnv`). A bare card URL has no on-chain agent to verify against, so it is
+   *  never relied on beyond what a pin gives. Absent ⇒ `cardTrust` as given. */
+  cardTrustFor?: (name: string, cardUrl: string) => CardTrustOptions;
 }
 
 const TYPED_NAME = /^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)+$/i;
@@ -59,7 +69,9 @@ export function externalAgentInvoker(deps: ExternalAgentDeps = {}): ToolInvoker 
     if (!question) return { refused: 'nothing to ask — the question is empty' };
     if (expect === undefined) expect = await deps.pinnedDigest?.(agent).catch(() => undefined);
     let resolved;
-    try { resolved = await resolveAgentCard(agent, deps.fetch ?? fetch, expect); }
+    try { resolved = await resolveAgentCard(agent, deps.fetch ?? fetch, expect, deps.limits ?? {}, (byName && deps.cardTrustFor && !expect ? deps.cardTrustFor(byName.name, agent) : deps.cardTrust) ?? {}); }
+    // ^ RUN-16: a card PINNED by the name's own digest is already the name's word (a supplied verifier would also refuse
+    //   every pinned card that publishes no binding); an UNPINNED card reached by name must verify against the agent's on-chain key.
     catch (e) { return { refused: e instanceof Error ? e.message : String(e), interpretation: byName ? `resolved “${byName.name}” through the registry to ${agent}${byName.pinned ? ' (pinned by its atl:cardDigest)' : ''} and tried to reach it` : `tried to reach the outside agent at ${agent}` }; }
     const client = createStandardA2aClient({ endpoint: resolved.endpoint, fetch: deps.fetch ?? fetch });
     let answer;

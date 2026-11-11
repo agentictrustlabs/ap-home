@@ -27,6 +27,11 @@ export const kv: KVNamespace = {
   async delete(key: string): Promise<void> {
     await redis.del(key);
   },
+  // Atomic read-and-delete (GETDEL): a single-use record is spent by exactly one caller (spec 445).
+  async take(key: string): Promise<string | null> {
+    const v = await redis.getdel<string>(key);
+    return v ?? null;
+  },
   // Cloudflare KV's `list({prefix})` has no Upstash equivalent as one call, so back it with SCAN + MATCH.
   // SCAN is cursor-paged and a batch may be partial or empty (COUNT is a hint), which is exactly the
   // Cloudflare contract the callers already loop against. Cursor "0" starts; a returned "0" means complete.

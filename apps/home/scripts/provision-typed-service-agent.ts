@@ -25,7 +25,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { AgentAccountClient, buildExecuteBatchCallData, type ContractCall } from '@agenticprimitives/agent-account';
 import {
   agentNameRegistryAbi, agentProfileResolverTypeAbi, buildDeclareAgentTypeCalls, buildSetPrimaryNameCall,
-  buildSubregistryRegisterCall, buildSetAddressAttributeCall, buildSetBytes32AttributeCall, buildSetStringAttributeCall,
+  buildSubregistryRegisterCall, buildSubregistryCommitCall, generateClaimSecret, SUBREGISTRY_MIN_COMMIT_AGE_SECONDS, buildSetAddressAttributeCall, buildSetBytes32AttributeCall, buildSetStringAttributeCall,
   namehash, parseAgentName, derivedTypeForTld, rootClassForDerivedType, AGENT_KIND_ID, PREDICATE_ID, ROLE_TYPED,
   type AgentTld,
 } from '@agenticprimitives/agent-naming';
@@ -123,35 +123,51 @@ if (registryId && d.agentRegistryBase) {
 }
 
 const calls: ContractCall[] = [];
+const reveal: ContractCall[] = [];
+const commitCalls: ContractCall[] = []; // REG-5 (spec 445): a claim is commit → wait → reveal; `calls` goes after the reveal
 if (!typeDeclared) {
   calls.push(...buildDeclareAgentTypeCalls({ profileResolver: d.agentProfileResolver, agent: sa, agentType, serviceRole: SERVICE_ROLE, registered, displayName: DISPLAY_NAME }));
 }
 if (owner === '0x0000000000000000000000000000000000000000') {
   // A priced root was refused above, before anything was deployed.
-  calls.push(buildSubregistryRegisterCall({ subregistry, label: parsed.handle!.label, newOwner: sa }));
+  const secret = generateClaimSecret();
+  const { commitment: _c, ...commit } = buildSubregistryCommitCall({ subregistry, chainId, label: parsed.handle!.label, newOwner: sa, secret, root: tld });
+  commitCalls.push(commit);
+  reveal.push(buildSubregistryRegisterCall({ subregistry, label: parsed.handle!.label, newOwner: sa, secret, root: tld }));
 } else if (owner !== sa.toLowerCase()) {
   throw new Error(`${HANDLE} is owned by ${owner} — not this SA`);
 }
+const afterName: ContractCall[] = []; // what follows the name: primary + records + the registry
 if (primary !== node.toLowerCase()) {
-  calls.push(buildSetPrimaryNameCall({ registry: d.agentNameRegistry, node }));
-  calls.push(buildSetAddressAttributeCall({ resolver: d.agentNameResolver, node, predicate: PREDICATE_ID.addr, value: sa }));
-  calls.push(buildSetBytes32AttributeCall({ resolver: d.agentNameResolver, node, predicate: PREDICATE_ID.agentKind, value: AGENT_KIND_ID[root] }));
-  calls.push(buildSetStringAttributeCall({ resolver: d.agentNameResolver, node, predicate: PREDICATE_ID.displayName, value: DISPLAY_NAME }));
+  afterName.push(buildSetPrimaryNameCall({ registry: d.agentNameRegistry, node }));
+  afterName.push(buildSetAddressAttributeCall({ resolver: d.agentNameResolver, node, predicate: PREDICATE_ID.addr, value: sa }));
+  afterName.push(buildSetBytes32AttributeCall({ resolver: d.agentNameResolver, node, predicate: PREDICATE_ID.agentKind, value: AGENT_KIND_ID[root] }));
+  afterName.push(buildSetStringAttributeCall({ resolver: d.agentNameResolver, node, predicate: PREDICATE_ID.displayName, value: DISPLAY_NAME }));
 }
 if (registryId && d.agentRegistryBase && !registryExists) {
-  calls.push({ to: d.agentRegistryBase, value: 0n, data: encodeFunctionData({ abi: REGISTRY_ABI, functionName: 'createRegistry', args: [registryId, '0x0000000000000000000000000000000000000000'] }) });
+  afterName.push({ to: d.agentRegistryBase, value: 0n, data: encodeFunctionData({ abi: REGISTRY_ABI, functionName: 'createRegistry', args: [registryId, '0x0000000000000000000000000000000000000000'] }) });
 }
 
-if (calls.length === 0) {
+if (calls.length + afterName.length + reveal.length + commitCalls.length === 0) {
   console.log('nothing to do — type declared, name primary, registry present');
 } else {
-  console.log(`submitting ${calls.length} calls in one userOp (declare type: ${!typeDeclared}, claim: ${owner === '0x0000000000000000000000000000000000000000'}, primary: ${primary !== node.toLowerCase()}, registry: ${!!registryId && !registryExists})`);
+  console.log(`submitting ${calls.length + afterName.length + reveal.length + commitCalls.length} calls (commit → wait → reveal when claiming) (declare type: ${!typeDeclared}, claim: ${owner === '0x0000000000000000000000000000000000000000'}, primary: ${primary !== node.toLowerCase()}, registry: ${!!registryId && !registryExists})`);
   // Nine calls (profile registration + typed claim + records + createRegistry) exceed the client's default
   // callGasLimit; an inner out-of-gas surfaces only as UserOperationEvent.success=false with no reason.
   const callGasLimit = BigInt(process.env.CALL_GAS_LIMIT ?? 3_000_000);
-  const { userOp, userOpHash } = await accounts.buildCallUserOp({ sender: sa, callData: buildExecuteBatchCallData(calls), paymaster: d.smartAgentPaymaster, callGasLimit });
-  userOp.signature = await custodian.signMessage({ message: { raw: userOpHash } });
-  await accounts.submitCallUserOp(userOp, custodian);
+  const send = async (batch: ContractCall[]) => {
+    const { userOp, userOpHash } = await accounts.buildCallUserOp({ sender: sa, callData: buildExecuteBatchCallData(batch), paymaster: d.smartAgentPaymaster, callGasLimit });
+    userOp.signature = await custodian.signMessage({ message: { raw: userOpHash } });
+    await accounts.submitCallUserOp(userOp, custodian);
+  };
+  if (commitCalls.length) {
+    // declare the type with the commit, wait out the commitment, then reveal + everything that follows the name.
+    await send([...calls, ...commitCalls]);
+    await new Promise((r) => setTimeout(r, (SUBREGISTRY_MIN_COMMIT_AGE_SECONDS + 2) * 1000));
+    await send([...reveal, ...afterName]);
+  } else {
+    await send([...calls, ...afterName]);
+  }
 }
 
 const after = ((await pub.readContract({ address: d.agentNameRegistry, abi: agentNameRegistryAbi, functionName: 'primaryName', args: [sa] })) as Hex).toLowerCase();

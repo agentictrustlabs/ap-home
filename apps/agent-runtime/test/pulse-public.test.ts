@@ -258,7 +258,7 @@ describe('the town of names, answered in counts (spec 430)', () => {
       { tld: 'org', kind: 'org', names: 'an organization', count: 69 },
       { tld: 'svc', kind: 'service', names: 'a service', count: 24 },
       { tld: 'church', kind: 'church', names: 'a church', count: 2 },
-      { tld: 'impact', kind: null, names: null, count: 0 },
+      { tld: 'agent', kind: null, names: null, count: 0 },
     ],
   };
   const w = windowOf('this week', NOW);

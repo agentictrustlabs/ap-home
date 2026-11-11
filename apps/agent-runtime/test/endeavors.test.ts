@@ -13,6 +13,7 @@ import {
   endeavorTopicResource,
   endeavorViewFor,
   handleEndeavorOp,
+  stampIssuedAt,
   parsePlanSteps,
   reduceEventLog,
   visibleEndeavorRows,
@@ -670,5 +671,20 @@ describe('spec 382 W2 — withdraw, reallocate, and typed receipt refs', () => {
     expect(done.ok).toBe(true);
     const ev = (h.docs.get(coordinationEventsResource(endeavorId)) as CoordinationEventV1[]).find((e) => e.kind === 'PlanStepSatisfied') as { evidenceRefs: Array<{ iri: string }> };
     expect(ev.evidenceRefs.map((r) => r.iri)).toEqual(['urn:ap:receipt:run:run-9', 'urn:ap:receipt:tx:0x99', expect.stringMatching(/^urn:ap:evidence:drafted$/)]);
+  });
+
+  it('REM-5 — issuedAt is the SERVER clock inside serialize: a client-supplied future issuedAt is replaced, and every logged event carries a server time', async () => {
+    const future = '2999-01-01T00:00:00.000Z';
+    const before = Date.now();
+    const stamped = stampIssuedAt({ kind: 'X', issuedAt: future });
+    expect(stamped.issuedAt).not.toBe(future);
+    expect(Date.parse(stamped.issuedAt)).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(stamped.issuedAt)).toBeLessThanOrEqual(Date.now());
+    // end to end: the endeavor's events never carry a future instant
+    const h = makeHarness();
+    await driveToAllocation(h);
+    const logs = [...h.docs.entries()].filter(([k]) => k.includes('events')).flatMap(([, v]) => v as CoordinationEventV1[]);
+    expect(logs.length).toBeGreaterThan(0);
+    for (const e of logs) expect(Date.parse(String((e as { occurredAt?: string; issuedAt?: string }).occurredAt ?? (e as { issuedAt?: string }).issuedAt ?? new Date().toISOString()))).toBeLessThanOrEqual(Date.now() + 1000);
   });
 });

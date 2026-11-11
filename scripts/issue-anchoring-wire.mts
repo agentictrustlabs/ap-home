@@ -5,7 +5,7 @@
 // What this mints: a standing delegation from the registry agent's Smart Agent to one key, pinned to ONE target (the
 // EstateProjectionRegistry) and ONE method (`setRoots`), time-bounded, signed by the agent's own custodian. The holder
 // of that key redeems it; the DelegationManager executes the call THROUGH the agent's account, so the registry sees
-// `msg.sender == the agent` — which is what lets `signerOf(estateId)` be the agent rather than a loose key.
+// `msg.sender == the agent` — which is what lets `declaredSignerOf(estateId)` be the agent rather than a loose key.
 //
 // What that buys, concretely: the key the projector holds can anchor this estate's roots and do nothing else, for as
 // long as the wire lasts, and the estate ENDS it with one on-chain revocation without touching the agent, its name,

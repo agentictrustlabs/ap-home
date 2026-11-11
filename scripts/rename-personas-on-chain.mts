@@ -95,6 +95,8 @@ for (const [h, p] of Object.entries(T.roster)) {
   if (receipt.status !== 'success') { console.error(`  handleOps reverted (tx ${receipt.transactionHash}) — validation; check the paymaster's EntryPoint deposit`); process.exit(1); }
   if (ok !== true) { console.error(`  the batch ${ok === false ? 'reverted inside the account' : 'left no UserOperationEvent'} (tx ${receipt.transactionHash})`); process.exit(1); }
   if (oldNode) {
+    // REG-6 (spec 445): renew is the PARENT's act — `rootWallet` IS the `.${tld}` root's owner (asserted above), never the
+    // name's holder; the node was handed to the same key only so it could be expired.
     const tx = await rootWallet.writeContract({ address: T.dep.agentNameRegistry, abi: REGISTRY_ABI, functionName: 'renew', args: [oldNode, 1n] });
     const r = await T.pc.waitForTransactionReceipt({ hash: tx }); if (r.status !== 'success') { console.error(`  expiring ${have} reverted (tx ${tx})`); process.exit(1); }
   }

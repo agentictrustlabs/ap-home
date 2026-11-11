@@ -35,7 +35,7 @@ export interface GrantedReadSenderDeps {
   where?: (publisher: string) => Promise<{ here: true } | { here: false; refused: string }>;
   /** The sender's own A2A signing wire (tests inject; the Worker reads the agent's InteractionsDO — `signingWireFor`, the wire
    *  covering library.granted.read: the service signing wire a custodian mints at Home, or an org's consult wire). */
-  signingWire?: (agent: string) => Promise<IncomingDelegation | null>;
+  signingWire?: (agent: string, publisher?: string) => Promise<IncomingDelegation | null>;
   /** The interactions-session raw signer (tests only; the Worker uses the KMS session key). */
   signRaw?: RawSigner;
   deadlineMs?: number;
@@ -54,14 +54,16 @@ export function grantedReadSender(env: Env, deps: GrantedReadSenderDeps = {}): G
       if (!at.here) return { ok: false, refused: `the publisher ${p} cannot be asked from here: ${at.refused}` };
     }
     let wire: IncomingDelegation | null;
-    try { wire = await (deps.signingWire ? deps.signingWire(s) : signingWireFor(env, s, LIBRARY_GRANTED_READ)); } catch (e) {
+    try { wire = await (deps.signingWire ? deps.signingWire(s, p) : signingWireFor(env, s, LIBRARY_GRANTED_READ, p)); } catch (e) {
       return { ok: false, refused: `this workspace's signing wire could not be read (${e instanceof Error ? e.message : String(e)})` };
     }
-    if (!wire) return { ok: false, refused: `this workspace (${s}) holds no signing wire of its own — the A2A message must be signed as the workspace, and this runtime does that only under a wire the workspace's custodian signed (workspace → the interactions-session key) naming ${LIBRARY_GRANTED_READ}; its custodian signs one at their Home (/workspace-read)` };
+    if (!wire) return { ok: false, refused: `this workspace (${s}) holds no signing wire of its own — the A2A message must be signed as the workspace, and this runtime does that only under a wire the workspace's custodian signed (workspace → the interactions-session key) naming ${LIBRARY_GRANTED_READ} AT THE PUBLISHER ${p} (one wire per publisher); its custodian signs one at their Home (/workspace-read)` };
     const tsEnf = (env.TIMESTAMP_ENFORCER ?? '').toLowerCase();
     const amEnf = (env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
-    const shapeErr = [tsEnf, amEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))
-      ? checkSessionWireShape(wire as never, { timestamp: tsEnf, allowedMethods: amEnf }, Math.floor(Date.now() / 1000), { skill: LIBRARY_GRANTED_READ })
+    const atEnf = (env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase();
+    // RUN-9 — the wire is presented at the PUBLISHER's gate, so it is checked against the publisher's agent.
+    const shapeErr = [tsEnf, amEnf, atEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))
+      ? checkSessionWireShape(wire as never, { timestamp: tsEnf, allowedMethods: amEnf, allowedTargets: atEnf }, Math.floor(Date.now() / 1000), { target: p, skill: LIBRARY_GRANTED_READ })
       : 'the timestamp / allowedMethods enforcers are not configured, so the signing wire cannot be checked';
     if (shapeErr) return { ok: false, refused: `this workspace's signing wire cannot sign a granted read (${shapeErr}) — its custodian re-signs the wire with ${LIBRARY_GRANTED_READ} among its methods` };
 

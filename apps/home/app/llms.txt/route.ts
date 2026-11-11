@@ -21,7 +21,7 @@ export function GET(req: Request) {
 ## Start an app (the Developer Kit)
 
     npx @agenticprimitives/create-app my-agent-app --template home-client
-    cd my-agent-app && cp .env.example .env.local && pnpm install && npx ap doctor && pnpm dev
+    cd my-agent-app && cp .env.example .env.local && pnpm install && pnpm exec ap doctor && pnpm dev
 
 The app is a client of the PERSON's own agent through her Home MCP: it registers itself (RFC 7591), sends her here to
 connect (OAuth 2.1 + PKCE), asks her agent as her. A read answers under her standing; an act comes back
@@ -31,12 +31,12 @@ connect (OAuth 2.1 + PKCE), asks her agent as her. A read answers under her stan
 
 - Home MCP (a person's agent, for assistants and apps): ${HOME_MCP}/mcp — metadata at ${HOME_MCP}/.well-known/oauth-protected-resource; tools: ask · grant_link · my_runs · discover_agents · engage · inspect_agent · run.
 - A2A boundary (an app's own asks, a runtime member's acts): ${origin}/a2a/harness/ask — one wire, A2A 1.0; \`kind\` is answer · authority_required · prompt · done.
-- Developer MCP (release knowledge, read-only; never the runtime): \`npx ap mcp\` in a generated app — package exports, ontology terms, contract deployments, recipes, the doctor.
+- Developer MCP (release knowledge, read-only; never the runtime): \`pnpm exec ap mcp\` in a generated app — package exports, ontology terms, contract deployments, recipes, the doctor.
 
 ## Where behaviour comes from
 
 Capabilities are SKILL.md contracts in the skills corpus, compiled by digest into an agent's playbook (${SKILLS_REGISTRY}/context/contexts/agentic-trust/archetypes/<archetype>/definition). Project a typed client from one:
-\`npx ap generate client --registry ${SKILLS_REGISTRY} --definition agentic-trust/person-steward --only <capability>\`.
+\`pnpm exec ap generate client --registry ${SKILLS_REGISTRY} --definition agentic-trust/person-steward --only <capability>\`.
 A playbook changes what an agent knows how to do and grants nothing.
 
 ## Doctrine an app must keep

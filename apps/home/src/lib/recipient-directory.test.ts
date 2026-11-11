@@ -11,13 +11,13 @@ describe('rosterFromDirectoryResponse', () => {
       ok: true,
       listings: [
         { listing: { subject: `eip155:84532:${B.toUpperCase().replace('0X', '0x')}`, displayName: 'Zed Nameless', orgRole: 'volunteer' }, label: 'zed-nameless' },
-        { listing: { subject: `eip155:84532:${A}`, displayName: 'Alice Named', localName: 'Ali', publicName: 'alice.impact' }, label: 'alice' },
+        { listing: { subject: `eip155:84532:${A}`, displayName: 'Alice Named', localName: 'Ali', publicName: 'alice.me' }, label: 'alice' },
         { listing: { displayName: 'No address' } },
         { listing: { subject: `eip155:84532:${C}` }, label: 'label-only' },
       ],
     });
     expect(rows.map((r) => r.displayName)).toEqual(['Ali', 'label-only', 'Zed Nameless']);
-    expect(rows[0]).toMatchObject({ address: A, publicName: 'alice.impact' });
+    expect(rows[0]).toMatchObject({ address: A, publicName: 'alice.me' });
     expect(rows[2]).toMatchObject({ address: B, publicName: null, role: 'volunteer' });
   });
   it('dedupes a subject listed twice and falls back to a short address when nothing names them', () => {
@@ -29,12 +29,12 @@ describe('rosterFromDirectoryResponse', () => {
 
 describe('filterRecipients', () => {
   const rows = [
-    { address: A, title: 'Alice Named', subtitle: 'alice.impact' },
+    { address: A, title: 'Alice Named', subtitle: 'alice.me' },
     { address: B, title: 'Zed Nameless' },
   ];
   it('matches title, subtitle or address, case-insensitively; empty returns all', () => {
     expect(filterRecipients(rows, '').map((r) => r.title)).toEqual(['Alice Named', 'Zed Nameless']);
-    expect(filterRecipients(rows, 'IMPACT').map((r) => r.title)).toEqual(['Alice Named']);
+    expect(filterRecipients(rows, 'ALICE.ME').map((r) => r.title)).toEqual(['Alice Named']);
     expect(filterRecipients(rows, 'zed').map((r) => r.title)).toEqual(['Zed Nameless']);
     expect(filterRecipients(rows, '0xbbbb').map((r) => r.title)).toEqual(['Zed Nameless']);
   });
@@ -54,16 +54,16 @@ describe('membersFromReceivedDelegations + mergeRosters', () => {
   });
   it('unions listings with invited members — a listing wins for someone in both', () => {
     const merged = mergeRosters(
-      [{ address: A, displayName: 'Ali', publicName: 'alice.impact', role: 'steward' }],
+      [{ address: A, displayName: 'Ali', publicName: 'alice.me', role: 'steward' }],
       [{ address: A, displayName: 'Alice (invited)', publicName: null }, { address: B, displayName: 'Boris', publicName: null }],
     );
     expect(merged).toEqual([
       // 398 §4.5 — the merge also says HOW they were admitted: a listing found with no invite row is 'listing'
-      { address: A, displayName: 'Ali', publicName: 'alice.impact', role: 'steward', admittedVia: 'listing' },
+      { address: A, displayName: 'Ali', publicName: 'alice.me', role: 'steward', admittedVia: 'listing' },
       { address: B, displayName: 'Boris', publicName: null },
     ]);
     // someone in BOTH keeps the invitation's provenance under the listing's name
-    const both = mergeRosters([{ address: A, displayName: 'Ali', publicName: 'alice.impact', admittedVia: 'listing' }], [{ address: A, displayName: 'x', publicName: null, admittedVia: 'invite' }]);
+    const both = mergeRosters([{ address: A, displayName: 'Ali', publicName: 'alice.me', admittedVia: 'listing' }], [{ address: A, displayName: 'x', publicName: null, admittedVia: 'invite' }]);
     expect(both[0]).toMatchObject({ displayName: 'Ali', admittedVia: 'invite' });
   });
 });

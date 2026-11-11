@@ -15,9 +15,9 @@
 // object's storage, and it keeps what `projectRunForExport` projects at the window's level, never a reply's words.
 // Wiped, it is a job to resubmit; the harness's own run records are the record of what ran (ADR-0055).
 import {
-  startComparison, runOneCase, finishComparison, comparisonSteps, pseudonymiser, validateCaptureWindow,
+  startComparison, runOneCase, finishComparison, comparisonSteps, pseudonymiser, validateCaptureWindow, LIVE_TEST_PROVIDERS,
   type ComparisonInput, type ComparisonState, type ComparisonPorts, type EvalStoreLike, type ExperimentRunV1, type ExperimentRecordV1, type EvalCaptureWindowV1,
-} from '@agenticprimitives/evaluation';
+} from '@agenticprimitives/evaluation/experiment';
 import { isInternalCall, internalHeaders, markInWorker, type InternalMarkerEnv } from './internal-marker.js';
 import { progressOf, type ExperimentJobV1, type ExperimentStatusV1 } from './experiment-job.js';
 import { enrichRun, traceFactsOf, type TraceFactsV1, type RunRecordPlusV1 } from './experiment-run-facts.js';
@@ -159,7 +159,7 @@ export class ExperimentDO {
     const ports: ComparisonPorts = {
       // The same ask the CLI sends: the session, the addressee, the message, the variant and a run reference of its own —
       // and (W2) the case's OUTCOME GOLD when the submission carried it, so the outcome check scores the expert's plan.
-      async ask({ intentId, message, variant, variantName, repeat }) {
+      async ask({ intentId, message, variant, variantName, repeat, evaluation }) {
         const runRef = `lab-${job.planId}-${variantName}-${intentId}-${repeat}`.replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 180);
         // 2026-10-15 (W4, isolation) — THE EMPTY VARIANT IS STILL SENT. A `{}` arm used to go out with no `variant` at all, so
         // the ask route ran it as a real turn: it READ the steward's rolling conversation (recalledTurns climbed 3 → 12 across
@@ -169,7 +169,7 @@ export class ExperimentDO {
         const gold = job.outcomeGold?.cases[intentId];
         const rubric = job.rubrics?.cases[intentId];
         lastTrace = {};
-        const r = await post('/harness/ask', { session: job.session, addressee: job.addressee, message, variant: variant ?? {}, runRef, ...(gold ? { outcomeGold: gold } : {}), ...(rubric ? { rubric } : {}) }) as { ok?: boolean; error?: string; refused?: string; reply?: { kind?: string; error?: string; text?: string; plannerTrace?: { selection?: unknown } }; hasProvenance?: { recordType?: string } };
+        const r = await post('/harness/ask', { session: job.session, addressee: job.addressee, message, variant: variant ?? {}, runRef, evaluation, ...(gold ? { outcomeGold: gold } : {}), ...(rubric ? { rubric } : {}) }) as { ok?: boolean; error?: string; refused?: string; reply?: { kind?: string; error?: string; text?: string; plannerTrace?: { selection?: unknown } }; hasProvenance?: { recordType?: string } };
         if (r.ok === false || r.error) return { ok: false, error: `${r.refused ? `${r.refused}: ` : ''}${r.error ?? 'the ask failed'}` };
         const said = String(r.reply?.error ?? r.reply?.text ?? '');
         if (r.reply?.kind === 'refused' && /planner_failed:.*HTTP (402|429|5\d\d)/.test(said)) return { ok: false, error: `provider: ${said.slice(0, 160)}` };
@@ -198,6 +198,8 @@ export class ExperimentDO {
     void state;
     return {
       set: job.set, criterion: job.criterion, plan: job.plan, ...(job.fixtures ? { fixtures: job.fixtures } : {}),
+      // Spec 445 decision 8 — explicit, never defaulted by the runner; riding every ask's evaluation marker below.
+      allowedProviders: job.allowedProviders?.length ? job.allowedProviders : [...LIVE_TEST_PROVIDERS],
       window, estate: job.origin, estateCapture: String(env.EVAL_CAPTURE ?? '').trim().toLowerCase() === 'on' ? 'on' : 'off',
       asker: job.asker, addressee: job.addressee, store, pseudo: pseudonymiser(salt), ports,
       log: (line) => console.log(`[lab ${job.planId}] ${line}`),

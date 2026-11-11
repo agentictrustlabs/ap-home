@@ -496,7 +496,7 @@ afterEach(() => restoreFetch());
 async function session(sub: string): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const enc = new TextEncoder();
-  const si = `${b64url(enc.encode(JSON.stringify({ alg: 'ES256', kid: KID, typ: 'JWT' })))}.${b64url(enc.encode(JSON.stringify({ iss: BROKER_ISS, aud: AUD, sub, iat: now, exp: now + 3600, jti: crypto.randomUUID() })))}`;
+  const si = `${b64url(enc.encode(JSON.stringify({ alg: 'ES256', kid: KID, typ: 'agent-session+jwt' })))}.${b64url(enc.encode(JSON.stringify({ iss: BROKER_ISS, aud: AUD, sub, iat: now, exp: now + 3600, jti: crypto.randomUUID(), assurance: 'onchain-confirmed', principal: { kind: 'passkey', id: 'test', assurance: 'onchain-confirmed' } })))}`;
   const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, signer, enc.encode(si));
   return `${si}.${b64url(new Uint8Array(sig))}`;
 }

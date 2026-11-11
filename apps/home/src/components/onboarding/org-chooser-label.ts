@@ -1,4 +1,4 @@
-/** Same slug rule the relying apps use app-side: the `.impact` subregistry only accepts
+/** Same slug rule the relying apps use app-side: a naming subregistry only accepts
  *  `[a-z0-9-]`, so normalize BEFORE the ceremony instead of failing at the name claim. */
 export function toOrgLabel(input: string): string {
   return input
@@ -25,11 +25,11 @@ export function shortAppHost(host: string): string {
   return h.split('.')[0] || h;
 }
 
-/** A machine handle rendered for a person — `church-8008-windsor.impact` → `Church 8008 Windsor`.
+/** A machine handle rendered for a person — `church-8008-windsor.org` → `Church 8008 Windsor`.
  *  Display-only: the handle stays the identifier everywhere else. A non-technical member cannot
  *  recognize their own organization from a slug. */
 export function humanizeOrgName(name: string): string {
-  const bare = name.replace(/\.impact$/i, '');
+  const bare = name.trim().split('.')[0] ?? ''; // the label — whatever root the handle is under
   return (
     bare
       .split('-')

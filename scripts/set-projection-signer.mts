@@ -1,8 +1,9 @@
 // DECLARE THE ESTATE'S PROJECTION SIGNER — spec 439 F2.5, the estate's half of closing first-come-wins.
 //
-// `EstateProjectionRegistry.register(estateId, signer)` on neutral ground is first-come-wins: public ground cannot
-// verify who governs an estate on another chain. So the estate agent declares, ON ITS OWN CHAIN, the key that
-// anchors its roots — `atl:projectionSigner` on its profile — and a verifier cross-checks `signerOf` against it.
+// Public ground cannot verify who governs an estate on another chain. So the estate agent declares, ON ITS OWN
+// CHAIN, the key that anchors its roots — `atl:projectionSigner` on its profile — and a verifier reads the registry's
+// `roots(estateId, signer)` row for THAT signer only (generation 4: rows are keyed by (estateId, signer); `register` /
+// `signerOf` are gone, a stranger's row for the same id is never read).
 // Signed by the estate agent itself (its custodian is the estate's interactions key, as in add-estate-agent.mts).
 // Idempotent: a declaration already equal to this one writes nothing. The value is PUBLIC by construction (the
 // registry stores the same address); the key behind it stays the federation operator's.

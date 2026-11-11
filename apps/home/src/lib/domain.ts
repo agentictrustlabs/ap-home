@@ -5,18 +5,30 @@
 //
 // SSO/A2A split (spec 232): the human SSO home is `<handle>.impact-agent.me`
 // (this app); the agent's A2A endpoint is a separate domain
-// `<handle>.impact-agent.io` (the demo-a2a Worker). Names live under a
-// permissionless subregistry `<label>.demo.agent`.
+// `<handle>.impact-agent.io` (the demo-a2a Worker). Names live under the typed
+// roots (`.me .org .team .svc …`, spec 346) — a person is `<label>.me`.
 
-import { parseAgentName, parseSubdomainLabel } from '@agenticprimitives/agent-naming';
+import { LEGACY_TLDS, isAgentTld, parseAgentName, parseSubdomainLabel } from '@agenticprimitives/agent-naming';
 import { PERMISSIONLESS_SUBREGISTRIES } from './chain';
 
 /** Registrable Connect SSO domain — each person's home is a single-label subdomain. */
 export const CONNECT_DOMAIN = process.env.NEXT_PUBLIC_CONNECT_DOMAIN || 'impact-agent.me';
 /** Registrable A2A domain (served by demo-a2a, not this app) — for display/links. */
 export const A2A_DOMAIN = process.env.NEXT_PUBLIC_A2A_DOMAIN || 'impact-agent.io';
-/** The TLD names are claimed under (the `.impact` permissionless subregistry). */
-export const AGENT_NAME_PARENT = process.env.NEXT_PUBLIC_AGENT_NAME_PARENT || 'impact';
+/** The root a BARE label denotes: the person root (`alice` → `alice.me`, served at `alice.<zone>`). Every other
+ *  agent type is named under its own typed root. The untyped `.impact` root this used to default to was retired
+ *  2026-11-10 — the naming package refuses it (`unknown_tld`), so nothing here may produce or expect one. */
+export const AGENT_NAME_PARENT = knownRoots(process.env.NEXT_PUBLIC_AGENT_NAME_PARENT || '')[0] ?? 'me';
+
+/** A comma list of roots, keeping only the ones the naming package knows. A deployment whose variable still lists a
+ *  retired root (`me,impact`) would otherwise hash an unknown root and throw on every bare-label lookup the moment
+ *  the pin moves; a name under a retired root is not a name, so the entry is dropped and said so once. */
+function knownRoots(list: string): string[] {
+  const listed = list.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const known = listed.filter((r) => isAgentTld(r) || (LEGACY_TLDS as readonly string[]).includes(r));
+  if (known.length !== listed.length) console.warn(`[domain] NEXT_PUBLIC_AGENT_NAME_PARENT(S) lists a root that is not a naming root (retired or unknown): "${list}" — ignored; remove it from the deployment's variables.`);
+  return known;
+}
 
 /** The Agentic Edge origin (spec 288) — the admission Worker that signs the GatewayAssertion demo-a2a
  *  requires on `/mcp/*`. This MUST equal the `next.config` `DEMO_EDGE_URL` default: the browser MCP-data
@@ -72,20 +84,19 @@ export function personalAuthOrigin(label: string): string {
   return `https://${label}.${CONNECT_DOMAIN}`;
 }
 
-/** The `.agent` name for a label (alice → alice.demo.agent). */
+/** The person name for a label (alice → alice.me). */
 export function agentNameForLabel(label: string): string {
   return `${label}.${AGENT_NAME_PARENT}`;
 }
 
 /**
- * spec 346 migration — the ORDERED set of person roots a bare subdomain label may denote on this deployment
- * (`NEXT_PUBLIC_AGENT_NAME_PARENTS`, e.g. `me,impact` while an estate moves from the legacy root to `.me`).
+ * The roots whose names take the BARE host `<label>.<zone>` on this deployment
+ * (`NEXT_PUBLIC_AGENT_NAME_PARENTS`; more than one only while an estate serves a second bare root, e.g. `me,agent`).
  * A label denotes at most ONE home: the claim route refuses a label that is taken under any listed root, so
  * resolving the candidates in order is a lookup over one well-defined key, not a fallback between mechanisms.
  * Defaults to just `AGENT_NAME_PARENT`.
  */
-export const AGENT_NAME_PARENTS: readonly string[] = (process.env.NEXT_PUBLIC_AGENT_NAME_PARENTS || AGENT_NAME_PARENT)
-  .split(',').map((s) => s.trim()).filter(Boolean);
+export const AGENT_NAME_PARENTS: readonly string[] = ((r) => (r.length > 0 ? r : [AGENT_NAME_PARENT]))(knownRoots(process.env.NEXT_PUBLIC_AGENT_NAME_PARENTS || AGENT_NAME_PARENT));
 
 /** The candidate full names a bare label may resolve to, typed-first. */
 export function candidateNamesForLabel(label: string): string[] {
@@ -94,7 +105,7 @@ export function candidateNamesForLabel(label: string): string[] {
 }
 
 /**
- * Typed suffixes the claim flow may offer next to the legacy `AGENT_NAME_PARENT` (spec 346 §4).
+ * The typed suffixes the claim flow may offer (spec 346 §4) — every claim is under one of them.
  *
  * DERIVED, not declared: a suffix is claimable exactly when this chain has a provisioned root for it —
  * which is what `permissionlessSubregistries` in the deployment JSON records (`AddTypedRoots.s.sol` writes
@@ -138,8 +149,8 @@ export function nameLabel(name: string): string {
  *  not sign in by name (2026-09-01). It also hardcoded the literal parent instead of this deployment's.
  *
  *  The grammar already knows the difference, so ask it: anything `parseAgentName` accepts — canonical
- *  (`x.me`), scoped (`x.svc@y.org`) or legacy (`x.impact`, `x.demo.agent`) — is qualified and is used as
- *  given. Only a BARE label takes this deployment's parent. A dotted string the grammar rejects is
+ *  (`x.me`), scoped (`x.svc@y.org`) or legacy (`x.demo.agent`) — is qualified and is used as
+ *  given. Only a BARE label takes this deployment's person root. A dotted string the grammar rejects is
  *  returned untouched: it resolves to nothing, which is the honest answer for a malformed name and
  *  better than inventing a third name out of it.
  */
@@ -151,17 +162,18 @@ export function qualifiedAgentName(raw: string): string {
   return n.includes('.') ? n : `${n}.${AGENT_NAME_PARENT}`;
 }
 
-/** The root a NEW person claim goes under: `.me` once this deployment lists it as claimable, else the legacy parent. */
-export const NEW_PERSON_TLD: string = CLAIMABLE_TLDS.includes('me') ? 'me' : AGENT_NAME_PARENT;
+/** The root a NEW person claim goes under: `.me`. (It was "`.me` once claimable, else the legacy parent"; there is
+ *  no legacy parent to fall to — a deployment without a `.me` root refuses the claim, `subregistryForTld`.) */
+export const NEW_PERSON_TLD: string = 'me';
 
-/** Normalize any name/label to a full name for a NEW claim: a typed name stays typed (normalized); a legacy
- *  `<label>.<AGENT_NAME_PARENT>` stays as given; a bare label becomes `<label>.<NEW_PERSON_TLD>`. To find the home an
- *  EXISTING label denotes, resolve `candidateNamesForLabel` instead (`resolveHomeNameForLabel` in connect-client). */
+/** Normalize any name/label to a full name for a NEW claim: a typed name stays typed (normalized); anything else
+ *  is read as a label and becomes `<label>.<NEW_PERSON_TLD>`. To find the home an EXISTING label denotes, resolve
+ *  `candidateNamesForLabel` instead (`resolveHomeNameForLabel` in connect-client). */
 export function toAgentName(nameOrLabel: string): string {
   const n = nameOrLabel.trim().toLowerCase();
   const p = parsedOrNull(n);
   if (p && (p.kind === 'canonical' || p.kind === 'scoped')) return p.normalized;
-  return n.endsWith(`.${AGENT_NAME_PARENT}`) ? n : `${nameLabel(n)}.${NEW_PERSON_TLD}`;
+  return `${nameLabel(n)}.${NEW_PERSON_TLD}`;
 }
 
 /** The deployment's agent directory (spec 346 §7 registry URN) the Studio lists agents in — e.g.

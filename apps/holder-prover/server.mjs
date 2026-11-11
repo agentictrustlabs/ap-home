@@ -8,12 +8,18 @@
 // the mandate (on chain: signature, revocation, caveats) and allowed THIS digest for THIS venue and predicate. Without a
 // mandate that covers the statement, nothing is signed. This service holds no wire of its own and decides nothing.
 //
+// WHOSE KEY (spec 445 §3.2, audit H-8). The runtime names the HOLDER — the person in whose vault it read the credential —
+// and sends the chain the child descends from. The release verifies that chain before every signature: its root is
+// granted by the holder (her signature, read through the UniversalSignatureValidator), unrevoked, in window, and the
+// audience / predicate program / issuer facet are within EVERY link, her standing wire included. The holder is never
+// read out of the wire it is used to judge: a wire's own delegator says who signed it, not whose device key this is.
+//
 // PREPARE IS SLOW AND BIG (≈16 s, ≈45 MB) and a Prepare used twice links two presentations (`comm_W_shared`), so each is
 // used ONCE. A small in-memory pool keeps one spare per (credential, predicate program), rebuilt in the background after
 // each use; a container woken from sleep starts empty and the first presentation pays for its own Prepare.
 //
 //   GET  /health
-//   POST /present   (Bearer PROVER_SECRET)  { credential, device, request, standing, mandate, actor } → { presentation }
+//   POST /present   (Bearer PROVER_SECRET)  { credential, device, request, standing, mandate, actor, holder } → { presentation }
 //   POST /warm      (Bearer PROVER_SECRET)  { credential, request }  → prepares a spare in the background
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -82,17 +88,20 @@ async function takePrepared(credential, request) {
 }
 
 async function present(body) {
-  const { credential, device, request, standing, mandate, actor } = body;
+  const { credential, device, request, standing, mandate, actor, holder } = body;
   if (!credential?.jwt || !device?.keyId || !request || !standing?.wire || !mandate || !actor) return { status: 400, body: { error: 'credential, device, request, standing, mandate and actor are required' } };
+  if (typeof holder !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(holder)) return { status: 400, body: { error: 'holder is required: the Smart Agent address of the person whose credential this is' } };
   const predicateDigest = predicateDigestOf(request);
   const statement = { audience: request.audience, predicateDigest, issuerKeyId: credential.issuerKeyId };
   const m = { ...mandate, salt: BigInt(mandate.salt) };
+  // Her standing wire, as stored (its salt a string) — the parent the child names. The chain is `[child, standing]`.
+  const parent = { ...standing.wire, salt: BigInt(String(standing.wire.salt)) };
   const decisions = [];
   const signer = await createAkcsEs256Signer(
     { baseUrl: device.baseUrl, tenantId: device.tenantId, tokenProvider: staticTokenProvider(loadSecret(HOLDER_TOKEN)), acceptedProtectionLevels: ['CVM_WRAPPED', 'CVM_DERIVED'] },
     { keyId: device.keyId, signingPurpose: 'ES256_SHA256' },
   );
-  const release = createPresentationRelease({ mandate: m, actor, enforcers: standing.enforcers, checks: checksFor(Number(standing.chainId), standing.delegationManager), now: () => Math.floor(Date.now() / 1000), signer, evidence, onDecision: (d) => decisions.push(d.decision.decision) });
+  const release = createPresentationRelease({ mandate: m, holder: holder.toLowerCase(), chain: [m, parent], actor, enforcers: standing.enforcers, checks: checksFor(Number(standing.chainId), standing.delegationManager), now: () => Math.floor(Date.now() / 1000), signer, evidence, onDecision: (d) => decisions.push(d.decision.decision) });
   const t = Date.now();
   const prepared = await takePrepared(credential, request);
   const tp = Date.now() - t;

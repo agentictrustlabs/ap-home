@@ -105,7 +105,7 @@ test('email invite: Alice invites from Commons; nameless invitee joins, DMs Alic
   // wire holds exactly two entries — Alice (the inviter) and the org SA. Reaching any other current
   // member is covered only by the gate resolving the org class against the live roster; if this
   // send prompts for approval, the class is broken. ──
-  const coMember = 'rich-global.impact';
+  const coMember = 'rich-global.me';
   await invitee.getByPlaceholder(/public agent name/i).fill(coMember);
   await invitee.getByPlaceholder(/subject/i).fill('Hello from a co-member');
   await invitee.getByPlaceholder('Message…').fill(`We share a community — from ${orgLocalName}, never individually approved.`);

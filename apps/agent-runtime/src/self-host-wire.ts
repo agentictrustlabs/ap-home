@@ -21,7 +21,7 @@ export interface SelfHostWireChain {
   chainId: number;
   delegationManager: Address;
   validator: Address;
-  enforcers: { timestamp: string; allowedMethods: string };
+  enforcers: { timestamp: string; allowedMethods: string; allowedTargets: string };
   readContract: (args: { address: Address; abi: readonly unknown[]; functionName: string; args: readonly unknown[] }) => Promise<unknown>;
   validatorAbi: readonly unknown[];
   isRevokedAbi: readonly unknown[];
@@ -44,7 +44,7 @@ export function isDelegationWire(x: unknown): x is DelegationWireV1 {
 export async function verifySelfHostReadWire(chain: SelfHostWireChain, agent: Address, delegate: Address, wire: DelegationWireV1): Promise<string | null> {
   if (wire.delegator.toLowerCase() !== agent.toLowerCase()) return `the wire's delegator is ${wire.delegator}, not ${agent}`;
   if (wire.delegate.toLowerCase() !== delegate.toLowerCase()) return `the wire's delegate is ${wire.delegate}; this runtime's read key is ${delegate}`;
-  const shape = checkSessionWireShape(wire, chain.enforcers, Math.floor(Date.now() / 1000), { skill: HARNESS_READ_SKILL });
+  const shape = checkSessionWireShape(wire, chain.enforcers, Math.floor(Date.now() / 1000), { target: agent, skill: HARNESS_READ_SKILL });
   if (shape) return shape;
   const d = wireToDelegation(wire);
   const hash = hashDelegation(d, chain.chainId, chain.delegationManager);

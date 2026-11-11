@@ -97,6 +97,7 @@ describe('the reader-pass vend', () => {
   });
 });
 
+import { createPresentationRelease, hashDelegation, type Delegation } from '@agenticprimitives/delegation';
 import { buildReaderStanding, readerChildMandate, readerPredicateDigest, readerProofDeclaration, readerProofRequest, READER_PROOF_EXTENSION_URI } from '../src/reader-pass.js';
 describe('presenting a reader pass (W4)', () => {
   const ENF = { delegationManager: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7', timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1', payment: '0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE' } as never;
@@ -128,6 +129,57 @@ describe('presenting a reader pass (W4)', () => {
     expect(String(child.delegate).toLowerCase()).toBe(RUNTIME);
     await expect(readerChildMandate(standing, { actor: RUNTIME, audience: AUD, day: today + 40, issuerKeyId: 'issuer-key:sd-jwt:lbsb-1' }, sign)).rejects.toThrow(/does not cover/);
     await expect(readerChildMandate(standing, { actor: RUNTIME, audience: 'https://other.example', day: today, issuerKeyId: 'issuer-key:sd-jwt:lbsb-1' }, sign)).rejects.toThrow(/does not cover/);
+  });
+
+  // Spec 445 §3.2 — the release as the holder's prover builds it (apps/holder-prover/server.mjs): the runtime names the
+  // HOLDER and the prover hands the release the chain `[child, standing]`, salts parsed back from the wire's strings.
+  describe('the release the prover builds: her wire is verified before every signature', () => {
+    const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
+    const statement = { audience: AUD, predicateDigest: readerPredicateDigest(today), issuerKeyId: 'issuer-key:sd-jwt:lbsb-1' };
+    const releaseFor = async (o: { holder: Address; revoked?: (d: Delegation) => boolean }) => {
+      const mandate = await readerChildMandate(standing, { actor: RUNTIME, audience: AUD, day: today, issuerKeyId: 'issuer-key:sd-jwt:lbsb-1' }, sign);
+      const m = { ...mandate, salt: BigInt(String(mandate.salt)) } as unknown as Delegation;
+      const parent = { ...standing.wire, signature: `0x${'22'.repeat(65)}`, salt: BigInt(String(standing.wire.salt)) } as unknown as Delegation;
+      const asked: string[] = [];
+      const release = createPresentationRelease({
+        mandate: m, holder: o.holder, chain: [m, parent], actor: RUNTIME, enforcers: standing.enforcers,
+        checks: {
+          isRevoked: async (d) => o.revoked?.(d) ?? false,
+          verifySignature: async ({ signer }) => { asked.push(signer.toLowerCase()); return true; },
+          delegationDigest: (d) => hashDelegation(d, 34348, DM),
+        },
+        now: () => Math.floor(Date.now() / 1000),
+        signer: { sign: async () => new Uint8Array(64) },
+      });
+      return { release, asked, parent };
+    };
+
+    it('allows the statement under her wire, and asks for HER signature on it', async () => {
+      const { release, asked } = await releaseFor({ holder: PERSON });
+      const d = await release.judge(statement);
+      expect(d.decision).toBe('allow');
+      expect(asked).toContain(PERSON);
+    });
+
+    it('refuses when the wire is somebody else\'s — the holder is named by the runtime, never read from the wire', async () => {
+      const { release } = await releaseFor({ holder: '0x9999999999999999999999999999999999999999' as Address });
+      const d = await release.judge(statement);
+      expect(d.decision).toBe('deny');
+      expect(d.decision === 'deny' && d.reasons[0]?.code).toBe('chain-root-not-principal');
+    });
+
+    it('refuses the next presentation once her standing wire is revoked', async () => {
+      let revoked = false;
+      const { release, parent } = await releaseFor({ holder: PERSON, revoked: (d) => revoked && d.salt === parent.salt });
+      expect((await release.judge(statement)).decision).toBe('allow');
+      revoked = true;
+      expect((await release.judge(statement)).decision).toBe('deny');
+    });
+
+    it('refuses an audience her wire does not name, whatever the statement says', async () => {
+      const { release } = await releaseFor({ holder: PERSON });
+      expect((await release.judge({ ...statement, audience: 'https://other.example' })).decision).toBe('deny');
+    });
   });
 
   it('a card declares what it accepts; a challenge URL off the audience\'s origin is no declaration', () => {

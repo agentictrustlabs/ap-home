@@ -27,7 +27,7 @@ const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a${
 const sign = async (digest: Hex): Promise<Hex> => { const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${alice.homeSession}` }, body: JSON.stringify({ digest }) })); if (!b.signature) throw new Error('persona-sign refused'); return b.signature; };
 
 const orgs = ((await j(await fetch(`${HOME}/connect/related-orgs?surface=any`, { headers: { authorization: `Bearer ${alice.homeSession}` } }))).orgs ?? []) as Array<{ orgAgent: string; orgName: string; kind?: string; relationship?: string }>;
-const team = orgs.find((o) => /playwright-demo-team/i.test(o.orgName) && o.relationship === 'steward');
+const team = orgs.find((o) => /playwright-demo[-.]team/i.test(o.orgName) && o.relationship === 'steward');
 if (!team) throw new Error('alice does not steward playwright-demo-team');
 const TEAM = team.orgAgent.toLowerCase() as Address;
 console.log(`team ${team.orgName} ${TEAM}`);

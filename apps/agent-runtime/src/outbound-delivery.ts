@@ -115,6 +115,8 @@ export interface OutboundDeliveryInput {
   personSA: Address;
   /** The recipient AGENT being called. Must be inside the transport grant's `allowedTargets`. */
   recipientSA: Address;
+  /** The chain the message is bound to (RUNB-4: a message is valid at its recipient, on its chain, and nowhere else). */
+  chainId: number;
   /** The TRANSPORT grant (person → person), already signed. Travels as `delegation`; spent, never minted. */
   transportGrant: unknown;
   /**
@@ -183,6 +185,9 @@ export async function deliverOutbound(input: OutboundDeliveryInput): Promise<Out
     skill,
     bodyHash: hashDeliveryBody(input.payload),
     createdAt: Math.floor(nowMs / 1000),
+    // The bound envelope — MANDATORY (spec 445 decision 8): signed into the digest, refused anywhere else.
+    recipient: input.recipientSA,
+    chainId: input.chainId,
   };
   const signature = await input.signAsPerson(hashA2aMessage(unsigned));
   if (!signature || signature === '0x') {
