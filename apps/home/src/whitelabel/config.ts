@@ -297,6 +297,11 @@ const faithImpact: WhiteLabelConfig = {
         // Only start setup from a site you trust." Local vite is :5192 (5190/5191 are skill-web).
         'https://workbench.faithnet.io/',
         'http://localhost:5192/',
+        // ISL evaluation workbench (isl-discovery-harness, apps/isl-eval-workbench) signs in as this same client:
+        // its readers connect with their own Home (social or passkey) and are admitted by the workbench's own list.
+        // Local vite is :5197.
+        'https://isl-workbench.faithnet.io/',
+        'http://localhost:5197/',
       ],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create', 'service-agent-wire'],
