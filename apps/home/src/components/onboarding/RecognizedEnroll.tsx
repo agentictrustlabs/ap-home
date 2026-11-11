@@ -1,4 +1,5 @@
 'use client';
+import { INVITEE_EMAIL_KEY } from '../portal/EmailAuthCard';
 import { WorkingBar } from './WorkingBar';
 // Recognized-member fast-path for a relying-app site-login enroll (extends the ADR-0032 custody
 // boundary to the redirect path). An ALREADY-AUTHENTICATED member arriving at a connect request is
@@ -181,6 +182,17 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // No cookie → onUnrecognized → credential-first entry; after sign-in, EntryExperience re-enters the
       // recognized path (Step 3) and we run the ceremony on that fresh home session.
       if (!sso?.token) return onUnrecognized(); // not signed in → credential-first entry
+      // AN EMAILED INVITATION names its invitee by email (`login_hint`). Whoever is signed in on this browser is not
+      // evidence of who that is, so the email's own check runs first; once it has (this tab verified exactly that
+      // address as its own Home), the session it opened carries on as usual.
+      {
+        const hint = (enroll.loginHint ?? '').trim().toLowerCase();
+        if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(hint)) {
+          let verified = '';
+          try { verified = sessionStorage.getItem(INVITEE_EMAIL_KEY) ?? ''; } catch { /* blocked */ }
+          if (verified !== hint) return onUnrecognized();
+        }
+      }
       const profile = await fetchProfile(sso.token).catch(() => null);
       const addr = addressOf(profile?.agent);
       // A valid, DEPLOYED member is required to authorize a delegation; anything else → sign in fresh.

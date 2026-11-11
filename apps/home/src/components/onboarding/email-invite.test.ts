@@ -31,4 +31,12 @@ describe('invite by email, end to end in the Home', () => {
     expect(card).toContain('useState(initialEmail ??');
     expect(card).toContain('void start();');
   });
+  it('the invitation check never links the email to whoever is signed in, and a recognized session must have verified it', () => {
+    const card = readFileSync(join(__dirname, '..', 'portal', 'EmailAuthCard.tsx'), 'utf8');
+    expect(card).toContain("session && !asInvitee ? { authorization:");
+    expect(read('EntryExperience.tsx')).toContain('asInvitee: true');
+    const rec = read('RecognizedEnroll.tsx');
+    expect(rec).toContain('sessionStorage.getItem(INVITEE_EMAIL_KEY)');
+    expect(rec).toContain('if (verified !== hint) return onUnrecognized();');
+  });
 });

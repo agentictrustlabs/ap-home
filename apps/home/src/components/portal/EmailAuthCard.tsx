@@ -46,13 +46,20 @@ function passkeyOfferHost(homeName: string | null | undefined): boolean {
   return !home || home === label;
 }
 
-export function EmailAuthCard({ onLinked, initialEmail, autoStart }: {
+/** Set once an invitation's email is verified as its own Home; RecognizedEnroll then lets that session through. */
+export const INVITEE_EMAIL_KEY = 'ap:invitee-email-verified';
+
+export function EmailAuthCard({ onLinked, initialEmail, autoStart, asInvitee }: {
   /** Called with the verified address/number once it is LINKED to this home (spec 422 §3.3 records it as a channel). */
   onLinked?: (value: string) => void;
   /** The address an app already knows (an emailed invitation, `login_hint`): filled in for the person. */
   initialEmail?: string;
   /** Send the code at once, so the person sees only the code step (the invitation's "confirm your email"). */
   autoStart?: boolean;
+  /** AN INVITATION'S CHECK: verify as the person who owns this email, never as whoever is signed in here. Without it a
+   *  signed-in session turns the code into "add this email to MY account" (`status: 'linked'`), and an invitee on a
+   *  shared browser joins as somebody else. The verified email's own Home opens and replaces that session. */
+  asInvitee?: boolean;
 }) {
   const { session, openSession } = useSession();
   const [step, setStep] = useState<'email' | 'code' | 'existing-home' | 'passkey-offer'>('email');
@@ -160,11 +167,12 @@ export function EmailAuthCard({ onLinked, initialEmail, autoStart }: {
     try {
       const r = await fetch('/connect/email/verify', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...(session ? { authorization: `Bearer ${session.token}` } : {}) },
+        headers: { 'content-type': 'application/json', ...(session && !asInvitee ? { authorization: `Bearer ${session.token}` } : {}) },
         body: JSON.stringify({ email: email.trim().toLowerCase(), otp: otp.trim() }),
       });
       const d = (await r.json().catch(() => ({}))) as { status?: string; token?: string; custody?: boolean; error?: string };
       if (!r.ok) throw new Error(d.error ?? 'verification failed');
+      if (asInvitee) { try { sessionStorage.setItem(INVITEE_EMAIL_KEY, email.trim().toLowerCase()); } catch { /* blocked */ } }
       if (d.status === 'linked') {
         const linked = email.trim().toLowerCase();
         setStep('email'); setEmail(''); setOtp(''); setNote('Email added — it opens this home and is where we tell you about changes.');

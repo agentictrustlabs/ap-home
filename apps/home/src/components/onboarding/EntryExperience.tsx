@@ -870,7 +870,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
           )}
           {offers('email') && emailEnabled && (showEmail || soleMethod) && (
             <div style={{ margin: '.4rem 0 .2rem' }}>
-              <EmailAuthCard {...(hintedEmail ? { initialEmail: hintedEmail, autoStart: true } : {})} />
+              <EmailAuthCard {...(hintedEmail ? { initialEmail: hintedEmail, autoStart: true, asInvitee: true } : {})} />
             </div>
           )}
           {offers('phone') && phoneEnabled && (
