@@ -9,11 +9,14 @@
     "agents",
     "secrets",
     "deploy",
-    "custody"
+    "custody",
+    "home"
   ],
   "notes": [],
   "operatorNotes": [],
   "vercelProjectId": "prj_ygTZNdbDJVPnmw6Fy6SdYa1xnTVY",
   "homeHost": "isl-1-home.vercel.app",
-  "gatewayTokenHash": "aaa64dcb3e05f8ed4b59b13646c3f6b1c5cfbf77ec0bb5fb06362fe9cfce01cd"
+  "gatewayTokenHash": "aaa64dcb3e05f8ed4b59b13646c3f6b1c5cfbf77ec0bb5fb06362fe9cfce01cd",
+  "kvStoreId": "store_WzexgeRS2wokcNJG",
+  "kvConnected": true
 }
