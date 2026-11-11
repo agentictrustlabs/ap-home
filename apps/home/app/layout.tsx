@@ -10,7 +10,7 @@ import { GOOGLE_SITE_VERIFICATION, SITE_DESCRIPTION, SITE_KEYWORDS, SITE_ORIGIN 
 // vertical identity live in app config (whitelabel) + globals.css (ADR-0021).
 const inter = Inter({ subsets: ['latin'], variable: '--font-brand', display: 'swap' });
 
-const BRAND = process.env.NEXT_PUBLIC_BRAND_NAME || 'Impact';
+const BRAND = process.env.NEXT_PUBLIC_BRAND_NAME || 'Faithnet';
 // What a search engine and a link preview see (src/seo/site.ts owns the words and the origin). Pages that
 // have their own title (/about) extend the template; the portal keeps the front-door title. Indexing is
 // decided per path: the front door, /about and /llms.txt are indexable; every other route is stamped

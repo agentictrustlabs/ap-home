@@ -6,6 +6,9 @@
 import { A2A_DOMAIN, AGENT_NAME_PARENT, CONNECT_DOMAIN, HOME_MCP_ORIGIN, VAULT_SERVER_ID } from '../lib/domain';
 import type { WhiteLabelConfig } from './schema';
 
+/** The estate's brand, per deployment (NEXT_PUBLIC_BRAND_NAME): "Faithnet" on faithnet.me, "Hopenet" on the hopenet estate. */
+const BRAND_NAME = process.env.NEXT_PUBLIC_BRAND_NAME || 'Faithnet';
+
 /**
  * The relying origins a deployment adds to a client's registry, newest shape first.
  *
@@ -82,9 +85,9 @@ export function footerLinks(raw: string | undefined, defaults: ReadonlyArray<{ l
 const faithImpact: WhiteLabelConfig = {
   id: 'faith-impact',
   brand: {
-    // Deployment-configurable (NEXT_PUBLIC_BRAND_*) so the SAME code brands per host — "Impact" on
-    // impact-agent.me, "Faithnet" on faithnet.me — without a code change. Defaults preserve Impact.
-    name: process.env.NEXT_PUBLIC_BRAND_NAME || 'Impact',
+    // Deployment-configurable (NEXT_PUBLIC_BRAND_*) so the SAME code brands per estate — "Faithnet" on faithnet.me,
+    // "Hopenet" on the hopenet estate (impact-agent.me) — without a code change. "Impact" is retired as a brand (2026-11-11).
+    name: BRAND_NAME,
     community: process.env.NEXT_PUBLIC_BRAND_COMMUNITY || 'missional community',
     tagline: process.env.NEXT_PUBLIC_BRAND_TAGLINE || 'Your home in the missional community',
   },
@@ -749,7 +752,7 @@ const faithImpact: WhiteLabelConfig = {
     {
       client_id: 'demo-org',
       remembered_consent: 'on',
-      name: 'Impact',
+      name: BRAND_NAME,
       redirect_uris: ['https://agenticprimitives-demo-org.pages.dev/', 'http://localhost:5473/'],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create'],
@@ -1298,7 +1301,7 @@ const faithImpact: WhiteLabelConfig = {
   // {app} = the missional-community app asking for permission.
   copy: {
     // Arrival into your home.
-    arrivalTitle: 'Welcome to your Impact Community Home',
+    arrivalTitle: `Welcome to your ${BRAND_NAME} Community Home`,
     arrivalBody:
       "A place of your own in the missional community — where you oversee what you help lead, manage what you steward, and protect what's entrusted to you.",
     overviewTitle: "Here's how you'll get set up",

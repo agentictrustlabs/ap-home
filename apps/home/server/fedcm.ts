@@ -222,7 +222,7 @@ export const onAccounts = async ({ request, env }: FnContext): Promise<Response>
   }
   const account: FedcmAccount = {
     id: home.session.sub,
-    name: home.session.name ?? 'Your Impact account', // ≥1 of name/email/username/tel; we provide name
+    name: home.session.name ?? `Your ${process.env.NEXT_PUBLIC_BRAND_NAME || 'Faithnet'} account`, // ≥1 of name/email/username/tel; we provide name
   };
   return json(buildAccountsResponse([account]));
 };
