@@ -8870,9 +8870,12 @@ function buildUnsignedSiteGrant(
  *  by the caller — `0n` for an account being DEPLOYED in the same batch (a counterfactual account has no
  *  custody history), `readCustodyEpoch` for an existing one. */
 function orgApproveHashCall(env: Env, digest: Hex, epoch: bigint, account: Address): { to: Address; value: bigint; data: Hex } {
-  // Spec 410 §1 (generation 3): a self-call on `account` — it derives the key on chain; `epoch` is unused there.
+  // Spec 410 §1 (generation 3 and later): a self-call on `account` — it derives the key on chain; `epoch` is unused there.
+  // Generation 4 is named, never left to fall into the generation-2 branch: that branch calls the registry directly, which
+  // a generation-3+ registry refuses (`ApprovedHashRegistryOnlyViaAccount`) — seen live on imbnet's gen-4 org-create.
   const g = contractsGeneration(env);
-  return buildApproveHashKeyCall(env.APPROVED_HASH_REGISTRY as Address, digest, g === 1 ? { generation: 1 } : g === 3 ? { generation: 3, account } : { generation: 2, epoch });
+  const scheme = g === 1 ? { generation: 1 as const } : g === 2 ? { generation: 2 as const, epoch } : { generation: g, account };
+  return buildApproveHashKeyCall(env.APPROVED_HASH_REGISTRY as Address, digest, scheme);
 }
 /** Spec 408 — the estate's contract generation, a deployment fact (`CONTRACTS_GENERATION`); absent ⇒ 1. */
 export function contractsGeneration(env: Pick<Env, 'CONTRACTS_GENERATION'>): ContractsGeneration {
