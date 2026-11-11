@@ -54,7 +54,7 @@ const inDays = (d: number) => Math.floor(Date.now() / 1000) + d * 86_400;
 const FAR = inDays(300);
 const wire = (delegate: string, until = FAR) => ({
   delegator: PERSON, delegate, authority: '0x00', salt: '1', signature: '0x03',
-  caveats: (delegate === ASK ? askAsMeCaveats(until) : siteCaveats(until)).map((c) => ({ enforcer: c.enforcer, terms: c.terms })),
+  caveats: (delegate === ASK ? askAsMeCaveats(until, PERSON as `0x${string}`) : siteCaveats(until)).map((c) => ({ enforcer: c.enforcer, terms: c.terms })),
 });
 const reader = (over: Partial<RelyingApp> = {}) => ({
   client_id: 'reader', name: 'Reader', redirect_uris: [REDIRECT], allowed_scopes: ['openid', 'profile'],
