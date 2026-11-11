@@ -29,9 +29,12 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   });
 
   // Stash the PKCE verifier + nonce + relying-site context, keyed on `state`.
+  // Spec 445 (connect-auth): this IS the single-use login-attempt record `completeLogin` takes — it carries
+  // `state`, `redirectUri` and `createdAtMs` (the attempt's age is checked against the clock, not just the TTL),
+  // beside the relying-site context the callback needs.
   await env.AUTH_CODES.put(
     `oidc:${state}`,
-    JSON.stringify({ codeVerifier, nonce, aud, rpRedirect, linkToken }),
+    JSON.stringify({ state, codeVerifier, nonce, redirectUri: env.YOUVERSION_REDIRECT_URI, createdAtMs: Date.now(), aud, rpRedirect, linkToken }),
     { expirationTtl: 600 },
   );
 

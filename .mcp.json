@@ -1,6 +1,6 @@
 {
-  "$comment": "Claude Code reads this: the DEVELOPER MCP (spec 398 §10.4) — read-only; package exports, ontology terms, contract deployments, recipes, the doctor. Not the runtime MCP, not the Home MCP. Holds no key, reads no vault.",
+  "$comment": "Claude Code reads this: the DEVELOPER MCP (spec 398 §10.4) — read-only; package exports, ontology terms, contract deployments, recipes, the doctor. Not the runtime MCP, not the Home MCP. Holds no key, reads no vault, executes no code from this repository. Launched by PATH to the pinned local install (node_modules/@agenticprimitives/devkit) — never by an npx-style lookup of the bare name `ap`, an unscoped npm name this project does not own: a file path cannot fall through to the public registry. Run `pnpm install` first.",
   "mcpServers": {
-    "ap-dev": { "command": "npx", "args": ["ap", "mcp", "--root", "."] }
+    "ap-dev": { "command": "node", "args": ["node_modules/@agenticprimitives/devkit/bin/ap.mjs", "mcp", "--root", "."] }
   }
 }

@@ -12,13 +12,32 @@
 
 import { isCapabilityId } from '@agenticprimitives/capability-claims';
 import { apAuthorityExtension, runProvenanceExtension } from '@agenticprimitives/a2a';
-import { AgentNamingClient, parseSubdomainLabel, typedNameForLabel, parseTypedAgentHost as parseTypedHost, hostForName as hostFor, agentNameForHandle as nameForHandle } from '@agenticprimitives/agent-naming';
+import { AgentNamingClient, LEGACY_TLDS, confirmDnsHost, dnsHostReadings, isAgentTld, parseSubdomainLabel, parseTypedAgentHost as parseTypedHost, hostForName as hostFor, agentNameForHandle as nameForHandle, type DnsHostReads } from '@agenticprimitives/agent-naming';
 import type { Address } from '@agenticprimitives/types';
 
-/** The TLD names are claimed under. `alice` → `alice.impact`. (Deployment convention — the
- *  package owns naming primitives; the concrete TLD is an app concern, so it lives here, not in
- *  agent-naming.) */
-export const AGENT_NAME_PARENT = 'impact';
+/** The root a BARE label denotes: the person root. `alice` → `alice.me`, served at `alice.<zone>`. Every other
+ *  agent type is named under its own typed root and hosted at `<label>-<type>.<zone>` (spec 346 §5).
+ *  The untyped `.impact` root this used to default to was retired 2026-11-10: the naming package refuses it
+ *  (`unknown_tld`), so no default, list or claim path here may produce one. */
+export const AGENT_NAME_PARENT = 'me';
+
+/**
+ * The roots whose names take the BARE host `<label>.<zone>` on this deployment, in order
+ * (`AGENT_NAME_PARENTS`, else `AGENT_NAME_PARENT`, else `me`). ONE parser for every reader — the expression was
+ * repeated at six sites.
+ *
+ * A root the naming package does not know is DROPPED, loudly: a deployment whose var still says `me,impact`
+ * would otherwise throw `unknown_tld` on every bare host it serves the moment the pin moves. Dropping it is not
+ * a second mechanism — a name under a retired root is not a name — and the warning is the operator's cue to
+ * fix the var.
+ */
+export function nameParents(env: { AGENT_NAME_PARENTS?: string; AGENT_NAME_PARENT?: string }): string[] {
+  const listed = (env.AGENT_NAME_PARENTS || env.AGENT_NAME_PARENT || AGENT_NAME_PARENT).split(',').map((p) => p.trim().toLowerCase()).filter(Boolean);
+  const known = listed.filter((p) => isAgentTld(p) || (LEGACY_TLDS as readonly string[]).includes(p));
+  const dropped = listed.filter((p) => !known.includes(p));
+  if (dropped.length > 0) console.warn(`[host-context] AGENT_NAME_PARENT(S) lists ${dropped.map((d) => `".${d}"`).join(', ')} — not a naming root (retired or unknown); ignored. Remove it from the deployment's vars.`);
+  return known.length > 0 ? known : [AGENT_NAME_PARENT];
+}
 
 /** The public registrable base domain for personal endpoints. */
 export const DEFAULT_PUBLIC_BASE_DOMAIN = 'impact-agent.io';
@@ -44,14 +63,16 @@ export function parseAgentSubdomain(hostname: string | undefined, baseDomain: st
   return parseSubdomainLabel(hostname, baseDomain);
 }
 
-/** The `.agent` name for a subdomain label (`alice` → `alice.demo.agent`). */
+/** The person name for a subdomain label (`alice` → `alice.me`). */
 export function agentNameForLabel(label: string): string {
   return `${label}.${AGENT_NAME_PARENT}`;
 }
 
 // The typed-host projection and its inverse (spec 346 §5) live in `@agenticprimitives/agent-naming` since
 // spec 399 §4 — the Home's Card Studio derives the same host and once mirrored this file by hand. What stays
-// here is THIS deployment's binding: its legacy parent (`impact`) as the default the package never names.
+// here is THIS deployment's binding: its bare-host root (`me`) as the default the package never names.
+// `hostForName` returns null for a name with NO host on a shared zone (spec 445 / NAME-8): a reserved label, and
+// a bare-root label ending in `-<type>` — every caller treats null as "publishes nowhere here".
 export function parseTypedAgentHost(hostname: string | undefined, baseDomain: string, parent: string = AGENT_NAME_PARENT): { label: string; name: string } | null {
   return parseTypedHost(hostname, baseDomain, parent);
 }
@@ -67,19 +88,22 @@ export interface AgentHostContext {
   label: string | null;
   /** Resolved canonical Smart Agent address, or null if the name has no agent. */
   agent: Address | null;
-  /** The `.agent` name, or null on the apex. */
+  /** The agent's name, or null on the apex (and when the host is `ambiguous`). */
   name: string | null;
   /** Public endpoint origin (`https://alice.impact-agent.io`). */
   publicOrigin: string;
+  /** spec 445 / NAME-8 — two or more DIFFERENT agents hold names that read as this host (a typed
+   *  `<label>.<type>` and a bare `<label>-<type>.<root>`, or one label under two bare roots). The host is
+   *  REFUSED: `agent` and `name` are null, and this lists who holds what so an operator can settle it. */
+  ambiguous?: Array<{ name: string; address: Address }>;
 }
 
 interface HostEnv {
-  /** The legacy/person root a bare subdomain label maps to (default `impact`). */
+  /** The root a bare subdomain label maps to (default `me`). */
   AGENT_NAME_PARENT?: string;
-  /** spec 346 migration — an ORDERED list of person roots a bare label may denote (`me,impact`) while an
-   *  estate moves to `.me`. The Home's claim route keeps a label unique across these roots, so resolving them
-   *  in order is one lookup over a well-defined key, not a fallback between mechanisms. Overrides
-   *  AGENT_NAME_PARENT when set. */
+  /** The roots whose names take the bare host, when an estate serves more than one (`me,agent`). EVERY reading
+   *  of a host is resolved and two holders is a refusal (`confirmDnsHost`) — never a first-hit walk. Overrides
+   *  AGENT_NAME_PARENT when set. See `nameParents`. */
   AGENT_NAME_PARENTS?: string;
   RPC_URL?: string;
   CHAIN_ID?: string;
@@ -106,7 +130,8 @@ export async function resolveAgentHost(
   const hostname = new URL(req.url).hostname;
   // Parse against every zone we serve, not just the canonical one, so a host published before a zone move
   // still names its agent (the URL is inside the card's SIGNED bytes and cannot be edited in place).
-  const fromHost = domains.map((d) => parseTypedAgentHost(hostname, d, env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)).find((r) => r !== null) ?? null;
+  // Only the LABEL is taken from the host; which name it means is confirmed against the registry below.
+  const fromHost = domains.map((d) => parseTypedAgentHost(hostname, d, nameParents(env)[0]!)).find((r) => r !== null) ?? null;
   const label = injected && injected.trim() ? injected.trim().toLowerCase() : fromHost?.label ?? null;
   // The public origin echoes the host that was ASKED for, so a card served from the old zone keeps naming it.
   const servedDomain = domains.find((d) => hostname === d || hostname.endsWith(`.${d}`)) ?? baseDomain;
@@ -121,37 +146,59 @@ export async function resolveAgentHost(
  * resolves `<handle>` → the canonical Smart Agent address the same way the Host path
  * does. Typed handles (`x.t`, `x.t@c.u`) resolve through the agent-naming grammar (spec 346); `null` /
  * unparseable / subject-less forms → the generic (no-agent) context.
+ *
+ * A BARE LABEL IS A HOST LABEL, AND A HOST IS CONFIRMED BY RECORDS (spec 445 / NAME-8). `alice-home-church` reads
+ * as the typed `alice-home.church` AND as `alice-home-church.<root>` for each bare root; the parse is a hint.
+ * `confirmDnsHost` resolves EVERY reading against the name registry and answers one agent, none, or `ambiguous`
+ * — two different agents holding one host. Ambiguous is REFUSED here (no agent, the holders listed), where the
+ * ordered walk this replaced served whichever reading came first: a later typed claim took an existing name's
+ * host. A read that throws propagates — "could not read" is not "not registered".
  */
 export async function resolveAgentByLabel(
   label: string | null,
   env: HostEnv,
   publicOrigin: string,
+  /** The registry read (`name → agent`). Defaults to this deployment's `AgentNamingClient`; a test injects one. */
+  reads: DnsHostReads | null = namingReads(env),
 ): Promise<AgentHostContext> {
   const norm = label && label.trim() ? label.trim().toLowerCase() : null;
   if (!norm) return { label: null, agent: null, name: null, publicOrigin };
   const bare = !norm.includes('.') && !norm.includes('@') && !norm.includes('/');
-  const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
-  // A bare label denotes ONE home across the deployment's ordered person roots; anything else is one typed/legacy name.
-  // spec 346 §5: a DNS label ending in `-<type>` reads as that typed name FIRST, then as a literal label under
-  // the ordered roots — `alice-home-church` is `alice-home.church` before it is `alice-home-church.impact`.
-  // Both are real names on this estate, so the host asks the chain in that order rather than guessing once.
-  const typedFirst = bare ? typedNameForLabel(norm) ?? undefined : undefined;
-  const candidates = bare ? [...(typedFirst ? [typedFirst] : []), ...parents.map((p) => `${norm}.${p}`)] : [agentNameForHandle(norm, parents[0] ?? AGENT_NAME_PARENT)].filter((n): n is string => !!n);
-  if (candidates.length === 0) return { label: null, agent: null, name: null, publicOrigin };
+  const parents = nameParents(env);
 
-  if (env.RPC_URL && env.CHAIN_ID && env.AGENT_NAME_REGISTRY && env.AGENT_NAME_UNIVERSAL_RESOLVER) {
-    const client = new AgentNamingClient({
-      rpcUrl: env.RPC_URL,
-      chainId: Number(env.CHAIN_ID),
-      registry: env.AGENT_NAME_REGISTRY as `0x${string}`,
-      universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as `0x${string}`,
-    });
-    for (const name of candidates) {
-      const agent = await client.resolveName(name);
-      if (agent) return { label: norm, agent, name, publicOrigin };
-    }
+  if (!bare) {
+    // An explicit typed / dotted handle is ONE name — nothing to disambiguate.
+    const name = agentNameForHandle(norm, parents[0]!);
+    if (!name) return { label: null, agent: null, name: null, publicOrigin };
+    const agent = reads ? await reads.resolveName(name) : null;
+    return { label: norm, agent, name, publicOrigin };
   }
-  return { label: norm, agent: null, name: candidates[0]!, publicOrigin };
+
+  const zone = a2aCanonicalDomain(env);
+  const host = `${norm}.${zone}`;
+  const readings = dnsHostReadings(host, zone, parents);
+  // A reserved or malformed label (`www`, `api`, `mtls`, `edge`, a type word) names no agent: the generic endpoint.
+  if (readings.length === 0) return { label: null, agent: null, name: null, publicOrigin };
+  if (!reads) return { label: norm, agent: null, name: readings[0]!.name, publicOrigin };
+  const confirmed = await confirmDnsHost(host, zone, { bareRoots: parents, reads });
+  if (confirmed.status === 'confirmed') return { label: norm, agent: confirmed.address, name: confirmed.name, publicOrigin };
+  if (confirmed.status === 'ambiguous') {
+    const holders = confirmed.candidates.map(({ name, address }) => ({ name, address }));
+    console.warn(`[host-context] host label "${norm}" is AMBIGUOUS — refused: ${holders.map((h) => `${h.name} → ${h.address}`).join('; ')}`);
+    return { label: norm, agent: null, name: null, publicOrigin, ambiguous: holders };
+  }
+  return { label: norm, agent: null, name: readings[0]!.name, publicOrigin };
+}
+
+/** This deployment's registry read, or null when naming is not configured (the label then resolves to no agent). */
+function namingReads(env: HostEnv): DnsHostReads | null {
+  if (!(env.RPC_URL && env.CHAIN_ID && env.AGENT_NAME_REGISTRY && env.AGENT_NAME_UNIVERSAL_RESOLVER)) return null;
+  return new AgentNamingClient({
+    rpcUrl: env.RPC_URL,
+    chainId: Number(env.CHAIN_ID),
+    registry: env.AGENT_NAME_REGISTRY as `0x${string}`,
+    universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as `0x${string}`,
+  });
 }
 
 /** One A2A skill-card entry (A2A protocol shape). */
@@ -231,7 +278,7 @@ export const MOUNTED_PEER_SKILLS: A2aSkill[] = [
   {
     id: 'library.granted.read',
     name: 'Read a document under a grant',
-    description: 'Read ONE document of this agent’s Library (private or public) under a grant its owner signed to you: a delegated task whose delegation is FROM this agent TO you, with a time window, allowedTargets naming this agent, allowedMethods naming library.granted.read, and a VAULT_RECORD_SCOPE caveat naming the document (`vault:content.artifact.<id>`) or a folder (`vault:content.folder:<path>/*`). Input { "id": string, "offset"?: number }; the artifact carries the text in pages of 12,000 characters and the grant read under. Requires a delegation; a document outside it is answered exactly as one that does not exist.',
+    description: 'Read ONE document of this agent’s Library (private or public) under a grant its owner signed to you: a delegated task whose delegation is FROM this agent TO you, with a time window, allowedTargets naming this agent, allowedMethods naming library.granted.read, and a VAULT_RECORD_SCOPE caveat naming the document (its content-artifact record id) or a folder (a content-folder path with a trailing wildcard). Input { "id": string, "offset"?: number }; the artifact carries the text in pages of 12,000 characters and the grant read under. Requires a delegation; a document outside it is answered exactly as one that does not exist.',
     tags: ['library', 'delegated', 'a2a'],
   },
   // Spec 436 §5.5 — THE DAY'S PULSE a context agent keeps. Mounted for every agent, as the shelf is: an agent

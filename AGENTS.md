@@ -24,7 +24,7 @@ restate a rule in your own words (ADR-0063 §8).
 | Define the capability model once; UX behaviour and agent surfaces are generated from it (specs 354/355/359) | `@agenticprimitives/devkit/rules/one-capability-model-generates-both.md` | `sha256:50d46f01e41c…` |
 | Domain relationships live in the ontology T-box, not in prompts or app tables (spec 355) | `@agenticprimitives/devkit/rules/ontology-drives-behavior.md` · `.cursor/rules/ontology-drives-behavior.mdc` | `sha256:1324bb1aec2d…` |
 | service-agent-birthrights | `@agenticprimitives/devkit/rules/service-agent-birthrights.md` | `sha256:0a1601d625aa…` |
-| Service agents sign with a DELEGATE key under a ceremony-minted wire — never custody the identity they act as (ADR-0019) | `@agenticprimitives/devkit/rules/service-agent-signing.md` · `.cursor/rules/service-agent-signing.mdc` | `sha256:3f41d62dc56a…` |
+| Service agents sign with a DELEGATE key under a ceremony-minted wire — never custody the identity they act as (ADR-0019) | `@agenticprimitives/devkit/rules/service-agent-signing.md` · `.cursor/rules/service-agent-signing.mdc` | `sha256:3e72aeb79c7d…` |
 | Capability as canonical noun; qualify every standards-specific "skill" (ADR-0050, ADR-0051) | `@agenticprimitives/devkit/rules/skill-terminology.md` · `.cursor/rules/skill-terminology.mdc` | `sha256:c28873bc0594…` |
 | Prefer vault-backed authority and standards-based ontology patterns | `@agenticprimitives/devkit/rules/vault-and-ontology.md` · `.cursor/rules/vault-and-ontology.mdc` | `sha256:825116963a48…` |
 | vault-is-the-record-apps-hold-references | `@agenticprimitives/devkit/rules/vault-is-the-record-apps-hold-references.md` | `sha256:e6a6e859a160…` |

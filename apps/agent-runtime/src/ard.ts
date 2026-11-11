@@ -4,7 +4,7 @@
 // well-known path, the trust schema) is the registry projection's — `@agenticprimitives/registry-kit/projection`
 // (spec 399 §4) — imported, never restated; the per-host ENTRY shape stays this app's. MCP is never an entry (ADR-0057).
 
-import { ARD_WELL_KNOWN_PATH, ARD_CONTEXT_URL, ARD_A2A_CARD_TYPE, AP_TRUST_SCHEMA } from '@agenticprimitives/registry-kit/projection';
+import { ARD_WELL_KNOWN_PATH, ARD_CONTEXT_URL, ARD_A2A_CARD_TYPE, AP_TRUST_SCHEMA, ardAgentIdentifier } from '@agenticprimitives/registry-kit/projection';
 export { ARD_WELL_KNOWN_PATH, ARD_CONTEXT_URL, ARD_A2A_CARD_TYPE, AP_TRUST_SCHEMA };
 
 export interface HostArdInput {
@@ -31,8 +31,11 @@ export function ardHostManifest(input: HostArdInput): { '@context': unknown; ent
   const label = ((input.name ?? '').split('@')[0]?.split('.')[0] ?? '').toLowerCase().replace(/[^a-z0-9._-]/g, '') || input.agent.toLowerCase();
   const capabilities = Array.from(new Set((input.skills ?? []).map((s) => s.id).filter(Boolean)));
   const queries = Array.from(new Set((input.skills ?? []).flatMap((s) => s.examples ?? []).filter((q) => typeof q === 'string' && q.trim()))).slice(0, 5);
+  // Spec 445: the identifier is the Smart Agent address (the canonical id), never a label — two agents named alike on one host must not collide.
+  const identifier = ardAgentIdentifier(input.agent);
+  if (!identifier) throw new Error('an ARD entry is identified by a Smart Agent address');
   const entry: Record<string, unknown> = {
-    identifier: `urn:air:${input.host}:agent:${label}`,
+    identifier,
     displayName: input.displayName || input.name || label,
     type: ARD_A2A_CARD_TYPE,
     url: `https://${input.host}/.well-known/agent-card.json`,
@@ -48,6 +51,7 @@ export function ardHostManifest(input: HostArdInput): { '@context': unknown; ent
       ...(input.registryReceiptUri ? { attestations: [{ type: 'ap-registry-receipt', uri: input.registryReceiptUri }] } : {}),
     },
     'ap:canonicalAgentId': input.agent,
+    ...(label ? { 'ap:handle': label } : {}),
     ...(input.agentType ? { 'ap:agentType': input.agentType } : {}),
     ...(input.cardDigest ? { 'ap:cardDigest': input.cardDigest, 'ap:cardSource': input.cardSource ?? 'live' } : {}),
   };

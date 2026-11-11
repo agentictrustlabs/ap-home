@@ -103,10 +103,13 @@ export async function inspectInvitation(
   });
 
   const fresh = checkFreshness({
+    agentId: pub.agentId,
     channelId: pub.channelId,
-    sequence: pub.sequence,
+    // The invitation travels as JSON, where a bigint is a decimal string; the freshness check is strict about the type (spec 445).
+    sequence: typeof pub.sequence === 'bigint' ? pub.sequence : (/^\d+$/.test(String(pub.sequence)) ? BigInt(String(pub.sequence)) : (pub.sequence as never)),
     previousDigest: pub.previousDigest,
     digest: pub.digest,
+    keyEpoch: pub.keyEpoch, // agent-wide epoch (spec 445 NAME-3); no prior floor is known on a first read
     issuedAt: pub.issuedAt,
     notBefore: pub.notBefore,
     expiresAt: pub.expiresAt,

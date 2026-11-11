@@ -1,32 +1,33 @@
 // GET /connect/name?base=<label>[&tld=<suffix>] → the next free `<label>[N].<suffix>` +
-// its namehash node. `tld` defaults to the legacy AGENT_NAME_PARENT (`impact`); a typed suffix
+// its namehash node. `tld` defaults to the person root AGENT_NAME_PARENT (`me`); any suffix
 // (spec 346 — me/org/team/svc/workspace/treasury/registry) is accepted only when this deployment lists
-// it in CLAIMABLE_TLDS (i.e. the typed roots exist on its chain). Unknown → 400, never a silent default. Forced-unique via sequential suffix (spec 220 §5): alice ->
+// it in CLAIMABLE_TLDS (i.e. the typed roots exist on its chain). Unknown → 400, never a silent default.
+// A label the SDK's claim rule refuses (spec 445 / NAME-8 — reserved, or ending in `-<type>` under a bare-host
+// root) is refused here with the reason, before anything is deployed or signed. Forced-unique via sequential suffix (spec 220 §5): alice ->
 // alice2 -> alice3 … Read-only (AgentNamingClient.resolveName; null = free).
 //
 // GET /connect/name?label=<label>&exact=1 → claim the EXACT label or fail (spec 275
 // MAM-D4). Returns { name, node, label } when free; { error:'taken', taken:true } when
 // taken — NO suffix bump. Used by the home's multi-agent manager where the member types
 // the precise name they want for each Smart Agent.
-import { AgentNamingClient, namehash, isAgentTld, canonicalTld } from '@agenticprimitives/agent-naming';
+import { AgentNamingClient, namehash, isAgentTld, canonicalTld, labelClaimViolation } from '@agenticprimitives/agent-naming';
 import { json, type FnContext } from '../_lib/server-broker';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { protectingDomain } from './naming-ticket';
 import { AGENT_NAME_PARENT, AGENT_NAME_PARENTS, CLAIMABLE_TLDS } from '../../src/lib/domain';
 
-/** The suffix this request claims under: the legacy parent by default; a typed suffix only when claimable here. */
+/** The suffix this request claims under: the person root when none is named; always one claimable here. */
 function suffixFor(raw: string | null): { tld: string } | { error: string } {
-  if (!raw) return { tld: AGENT_NAME_PARENT };
-  const t = canonicalTld(raw.trim().toLowerCase()) ?? raw.trim().toLowerCase();
-  if (t === AGENT_NAME_PARENT) return { tld: t };
+  const asked = raw?.trim().toLowerCase() || AGENT_NAME_PARENT;
+  const t = canonicalTld(asked) ?? asked;
   if (isAgentTld(t) && CLAIMABLE_TLDS.includes(t)) return { tld: t };
-  return { error: `suffix ".${raw}" is not claimable on this deployment` };
+  return { error: `suffix ".${asked}" is not claimable on this deployment` };
 }
 
 function sanitize(base: string): string {
-  // Take the FIRST dot-segment first: a dotted base (e.g. `joe.impact`, if a caller passes a full name)
+  // Take the FIRST dot-segment first: a dotted base (e.g. `joe.me`, if a caller passes a full name)
   // must NEVER be flattened into one label (`joeimpact`) by stripping the dot — that produced the
-  // `joeimpact.impact` doubled-name bug. Then keep [a-z0-9-] only.
+  // `joeme.me` doubled-name bug. Then keep [a-z0-9-] only.
   const firstLabel = base.split('.')[0] ?? '';
   const s = firstLabel.toLowerCase().replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');
   return s.length >= 3 ? s.slice(0, 24) : 'agent';
@@ -71,6 +72,8 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (exact === '1' || exact === 'true') {
     const label = sanitize(url.searchParams.get('label') ?? url.searchParams.get('base') ?? '');
     const name = `${label}.${tld}`;
+    const unclaimable = labelClaimViolation(label, { root: tld });
+    if (unclaimable) return json({ error: unclaimable.code, detail: unclaimable.detail, label, name }, 400);
     if (await labelTaken(label)) {
       return json({ error: 'taken', taken: true, label, name }, 409);
     }
@@ -86,6 +89,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   for (let i = 1; i < 50; i++) {
     const candidate = i === 1 ? base : `${base}${i}`;
     const name = `${candidate}.${tld}`;
+    if (labelClaimViolation(candidate, { root: tld })) continue; // names no agent (NAME-8) — the next numbered label may
     if (!(await labelTaken(candidate))) {
       return json({ label: candidate, name, node: namehash(name), tld });
     }

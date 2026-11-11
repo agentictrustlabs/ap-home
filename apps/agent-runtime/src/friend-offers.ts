@@ -154,9 +154,9 @@ export interface FriendDeps {
   /** How long a just-approved grant is waited for on chain (chain-settle.ts); tests pass a no-op sleep. */
   settle?: { tries?: number; everyMs?: number; sleep?: (ms: number) => Promise<void> };
   /** The mandate's digest-binding caveat argued for THIS step (the harness's own helper, injected). */
-  digestBindingArgsFor: (caveat: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation?: 1 | 2 | 3 }) => Hex;
+  digestBindingArgsFor: (caveat: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation?: 1 | 2 | 3 | 4 }) => Hex;
   /** Spec 408 §1.4/§2.3 — the digests a step presents at redemption. */
-  stepDigests: (args: Record<string, unknown>, intent: Hex, stepRef: string, plan?: Hex, generation?: 1 | 2 | 3) => { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation: 1 | 2 | 3 };
+  stepDigests: (args: Record<string, unknown>, intent: Hex, stepRef: string, plan?: Hex, generation?: 1 | 2 | 3 | 4) => { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation: 1 | 2 | 3 | 4 };
 }
 
 /** One person's offer to another, whichever shape it is stored in (the new key first). */

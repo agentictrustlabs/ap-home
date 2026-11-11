@@ -50,7 +50,7 @@ export const PROVIDER_BILLING_URL: Record<LlmProvider, string> = {
   groq: 'https://console.groq.com/settings/billing',
   openai: 'https://platform.openai.com/settings/organization/billing/overview',
   xai: 'https://console.x.ai/',
-  gemini: 'https://aistudio.google.com/',
+  gemini: 'https://ai.studio/spend',  // the spend-cap page: Gemini's failure mode here is a monthly cap, not a rate limit
 };
 
 const PROVIDERS = new Set<string>(Object.keys(LABEL));

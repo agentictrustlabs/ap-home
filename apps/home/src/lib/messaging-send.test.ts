@@ -51,10 +51,10 @@ describe('the send goes to the person’s own agent', () => {
 
   it('sends only the recipient key the caller chose', async () => {
     stubFetch(() => ({ body: { ok: true } }));
-    await sendMessage({ person: ALICE, recipientName: 'bob.impact', bodyText: 'hi' });
+    await sendMessage({ person: ALICE, recipientName: 'bob.me', bodyText: 'hi' });
     // Not a chain the agent walks until something answers: exactly one way to name the recipient
     // arrives, so an unresolvable name fails rather than silently becoming a different send.
-    expect(calls[0]!.body.recipientName).toBe('bob.impact');
+    expect(calls[0]!.body.recipientName).toBe('bob.me');
     expect(calls[0]!.body.recipient).toBeUndefined();
     expect(calls[0]!.body.conversationId).toBeUndefined();
   });

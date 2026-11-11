@@ -60,7 +60,7 @@ describe('moving between agents by name', () => {
     { label: 'George Renner', self: true, href: '/', aliases: ['alice.me', 'alice'] },
     { label: 'missio-nexus.org', href: '/org/1' },
     { label: 'Somali Corridor Team', href: '/org/2' },
-    { label: 'somali-outreach-team.impact', href: '/org/3' },
+    { label: 'somali-outreach.team', href: '/org/3' },
   ];
   it('hears a switch and names its target', () => {
     expect(navigationTarget('switch to missio nexus organization')).toBe('missio nexus organization');

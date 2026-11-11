@@ -310,6 +310,9 @@ const OP_SCOPE: Record<Exclude<StudioOp, 'projection.recordPublication'>, Studio
   'binding.verify': 'agent.binding.verify',
 };
 
+/** How long an in-flight idempotency reservation holds the key (spec 445). */
+const IDEMPOTENCY_RESERVATION_TTL_MS = 60_000;
+
 export class StudioError extends Error {
   constructor(readonly status: number, readonly code: string, message?: string, readonly extra?: Record<string, unknown>) {
     super(message ?? code);
@@ -479,8 +482,17 @@ export class AgentCardStudio {
       if (prior.op !== op) throw new StudioError(409, 'idempotency_key_reused', `idempotency key already used by ${prior.op}`);
       return { ...prior.response, replayed: true };
     }
-    const response = await fn(m);
+    // Reserve BEFORE the work (a concurrent twin would otherwise both pass the read above); a reservation expires,
+    // so a crashed first attempt does not wedge the key forever.
+    const rkey = `${key}:reservation`;
+    const held = await this.deps.vault.get<{ at: number }>(rkey);
+    if (held && Date.now() - held.at < IDEMPOTENCY_RESERVATION_TTL_MS) throw new StudioError(409, 'idempotency_in_progress', 'a request with this idempotency key is still in progress');
+    await this.deps.vault.set(rkey, { at: Date.now() });
+    let response: Record<string, unknown>;
+    try { response = await fn(m); }
+    catch (e) { await this.deps.vault.set(rkey, { at: 0 }).catch(() => undefined); throw e; }
     await this.deps.vault.set(key, { op, response, at: this.now() });
+    await this.deps.vault.set(rkey, { at: 0 }).catch(() => undefined);
     return response;
   }
 
@@ -517,12 +529,22 @@ export class AgentCardStudio {
     return { canonicalAgentId: caip10(this.deps.env.chainId, caller.agent), objectId, actor: caller.principal, correlationId, privacyClass: 'audience', ...extra };
   }
 
+  /** Spec 445: an anchored profile that could not be FETCHED is a visible failure, never an absent profile —
+   *  a synthesized stand-in would be signed and published as if the agent had declared nothing. */
+  private async profileOrFail(agent: Address): Promise<{ profile: CanonicalAgentProfileV1; uri?: string } | null> {
+    try { return await this.deps.sources.profile(agent); }
+    catch (e) {
+      if (e instanceof Error && e.name === 'ProfileFetchError') throw new StudioError(502, 'profile_unreachable', `the anchored profile could not be fetched: ${e.message}`, { code: (e as { code?: string }).code });
+      throw e;
+    }
+  }
+
   // ── inherited base (spec 347 §4.3) ──
 
   private async inheritedBase(agent: Address, now: string): Promise<ReturnType<typeof inheritCardBase> & { live: Record<string, unknown>; primaryName?: string }> {
     const [live, prof, names, claims] = await Promise.all([
       this.deps.sources.liveCard(agent),
-      this.deps.sources.profile(agent),
+      this.profileOrFail(agent),
       this.deps.sources.names(agent),
       this.deps.sources.publicSkillClaims(agent),
     ]);
@@ -1241,7 +1263,7 @@ export class AgentCardStudio {
   /** Build the sealed input bundle (spec 347 §6.1) from canonical sources + the selected release. */
   private async inputBundle(agent: Address, stored: StoredProjectionV1): Promise<{ bundle: ProjectionInputBundleV1; release: A2AAgentCardReleaseV1 | null }> {
     const [prof, names, declared, claims, bindings] = await Promise.all([
-      this.deps.sources.profile(agent),
+      this.profileOrFail(agent),
       this.deps.sources.names(agent),
       this.deps.sources.derivedType(agent),
       this.deps.sources.publicSkillClaims(agent),

@@ -35,7 +35,7 @@
 
 import { generateKeyPairSync, createSign, createHash, randomBytes } from 'node:crypto';
 import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
-import { keccak256, toBytes, toHex, sha256, type Address, type Hex } from 'viem';
+import { keccak256, toBytes, toHex, sha256, createWalletClient, createPublicClient, defineChain, http, type Address, type Hex } from 'viem';
 import {
   ROOT_AUTHORITY,
   hashDelegation,
@@ -56,6 +56,9 @@ import {
 import {
   namehash,
   buildSubregistryRegisterCall,
+  buildSubregistryCommitCall,
+  generateClaimSecret,
+  SUBREGISTRY_MIN_COMMIT_AGE_SECONDS,
   buildSetPrimaryNameCall,
 } from '@agenticprimitives/agent-naming';
 import { buildExecuteBatchCallData, encodeWebAuthnSignature } from '@agenticprimitives/agent-account';
@@ -64,8 +67,9 @@ import { buildWebAuthnAssertion, hashToWebAuthnChallenge } from '@agenticprimiti
 // ─── config ──────────────────────────────────────────────────────────
 const EDGE_BASE = (process.env.EDGE_BASE ?? 'https://demo-edge-production.richardpedersen3.workers.dev').replace(/\/$/, '');
 const A2A_BASE = (process.env.A2A_BASE ?? 'https://demo-a2a-production.richardpedersen3.workers.dev').replace(/\/$/, '');
-const PERMISSIONLESS_SUBREGISTRY = '0x1B8ED8693738e1A9DD653FEE5430d49e00202Bb7' as Address; // .impact (demo-a2a)
-const NAME_PARENT = 'impact';
+// Persons are named under `.me` (spec 346); its subregistry comes from the deployment record (`D`). The hardcoded
+// `.impact` subregistry this used was retired 2026-11-10. NOTE: the claim below does not declare `atl:agentType`.
+const NAME_PARENT = 'me';
 const GOAL = process.env.GOAL ?? 'read my personal info';
 const RAILS = (process.env.RAILS ?? 'siwe,passkey,social').split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -76,6 +80,7 @@ type Deployments = {
   allowedTargetsEnforcer: Address;
   allowedMethodsEnforcer: Address;
   agentNameRegistry: Address;
+  permissionlessSubregistries?: Record<string, Address>;
 };
 let D: Deployments;
 let ENFORCERS: A2aEnforcers;
@@ -131,12 +136,12 @@ async function edgeRpc(handle: string, method: string, params: unknown, signAs?:
 
 /** A delegation-authorized task as a 1.0 `SendMessage` (spec 372 S4): the grant and the signed envelope
  *  ride the delegated-task extension, and the input is the message's data part. */
-const delegatedSend = (p: { delegation: unknown; requester: Address; message: { messageId: Hex; sender: Address; skill: string; bodyRef: unknown; bodyHash: Hex; signature: Hex; createdAt: number }; input: unknown }) => ({
+const delegatedSend = (p: { delegation: unknown; requester: Address; message: { messageId: Hex; sender: Address; skill: string; bodyRef: unknown; bodyHash: Hex; signature: Hex; createdAt: number; recipient: Address; chainId: number }; input: unknown }) => ({
   message: withDelegatedTask(
     { messageId: p.message.messageId, role: 'ROLE_USER' as const, parts: [delegatedInputPart(p.input)] },
     {
       delegation: p.delegation as never, requester: p.requester, skill: p.message.skill, sender: p.message.sender,
-      bodyHash: p.message.bodyHash, bodyRef: p.message.bodyRef as never, signature: p.message.signature, createdAt: p.message.createdAt,
+      bodyHash: p.message.bodyHash, bodyRef: p.message.bodyRef as never, signature: p.message.signature, createdAt: p.message.createdAt, recipient: p.message.recipient, chainId: p.message.chainId,
     },
   ),
 });
@@ -177,10 +182,27 @@ async function deriveAddress(body: Record<string, unknown>): Promise<Address> {
   return (d.smartAccountAddress ?? d.address) as Address;
 }
 
-/** executeBatch calldata that claims `<label>.impact` for `newOwner` (register + setPrimaryName), bundled
+/** executeBatch calldata that claims `<label>.me` for `newOwner` (register + setPrimaryName), bundled
  *  into the deploy userOp so an SA deploys + claims its handle in one signature. */
-function nameClaimCallData(label: string, newOwner: Address): Hex {
-  const register = buildSubregistryRegisterCall({ subregistry: PERMISSIONLESS_SUBREGISTRY, label, newOwner });
+async function nameClaimCallData(label: string, newOwner: Address): Promise<Hex> {
+  const subregistry = D.permissionlessSubregistries?.[NAME_PARENT];
+  if (!subregistry) throw new Error(`this deployment record has no .${NAME_PARENT} root (permissionlessSubregistries.${NAME_PARENT})`);
+  // Spec 445 / generation 4 (REG-5): a claim is COMMIT, wait, REVEAL — two transactions, so the reveal can no longer ride
+  // the deploy userOp alone. `commit` is open to any account: this script's own funded key sends it (NAME_COMMIT_KEY, an
+  // EOA supplied by whoever runs the script and never printed; RPC_URL its chain's node). Neither set ⇒ no label is claimed.
+  const key = process.env.NAME_COMMIT_KEY as Hex | undefined;
+  const rpc = process.env.RPC_URL;
+  if (!key || !rpc) throw new Error('claiming a label needs NAME_COMMIT_KEY (a funded EOA) and RPC_URL: the claim is commit → wait → reveal (spec 445 / REG-5)');
+  const secret = generateClaimSecret();
+  const commit = buildSubregistryCommitCall({ subregistry, chainId: D.chainId, label, newOwner, secret, root: NAME_PARENT });
+  const chain = defineChain({ id: D.chainId, name: 'estate', nativeCurrency: { name: 'native', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: [rpc] } } });
+  const wallet = createWalletClient({ account: privateKeyToAccount(key), chain, transport: http(rpc) });
+  const pub = createPublicClient({ chain, transport: http(rpc) });
+  const receipt = await pub.waitForTransactionReceipt({ hash: await wallet.sendTransaction({ to: commit.to, data: commit.data, value: 0n }) });
+  if (receipt.status !== 'success') throw new Error('the name commitment reverted');
+  const matureAt = (await pub.getBlock({ blockNumber: receipt.blockNumber })).timestamp + BigInt(SUBREGISTRY_MIN_COMMIT_AGE_SECONDS);
+  while ((await pub.getBlock()).timestamp <= matureAt) await sleep(2000);
+  const register = buildSubregistryRegisterCall({ subregistry, label, newOwner, secret, root: NAME_PARENT });
   const setPrimary = buildSetPrimaryNameCall({ registry: D.agentNameRegistry, node: namehash(`${label}.${NAME_PARENT}`) });
   return buildExecuteBatchCallData([register, setPrimary]) as Hex;
 }
@@ -190,7 +212,7 @@ interface CustodyRail {
   kind: 'siwe' | 'passkey' | 'social';
   /** Is this rail runnable in this environment? (social needs an interactive OAuth session.) */
   available(): Promise<boolean>;
-  /** Onboard the SA via this rail (deploy on-chain). Pass `claimLabel` to ALSO claim `<label>.impact` in the
+  /** Onboard the SA via this rail (deploy on-chain). Pass `claimLabel` to ALSO claim `<label>.me` in the
    *  same userOp — the owner/receiver in the cross-principal flow needs a resolvable handle. Returns the SA. */
   onboard(claimLabel?: string): Promise<Address>;
   /** Sign a 32-byte digest in the on-chain wire format THIS rail's SA validates (ERC-1271 via USV). */
@@ -208,7 +230,7 @@ function siweRail(): CustodyRail {
     async available() { return true; },
     async onboard(claimLabel?: string) {
       const body = { initMethod: 'eoa', owner: account.address };
-      const callData = claimLabel ? nameClaimCallData(claimLabel, await deriveAddress(body)) : undefined;
+      const callData = claimLabel ? await nameClaimCallData(claimLabel, await deriveAddress(body)) : undefined;
       sa = await deployAccount(body, (h) => account.sign({ hash: h }), callData);
       return sa;
     },
@@ -253,7 +275,7 @@ function passkeyRail(): CustodyRail {
     async available() { return true; },
     async onboard(claimLabel?: string) {
       const body = { initMethod: 'passkey', credentialIdDigest, pubKeyX: pubKeyX.toString(), pubKeyY: pubKeyY.toString(), rpIdHash };
-      const callData = claimLabel ? nameClaimCallData(claimLabel, await deriveAddress(body)) : undefined;
+      const callData = claimLabel ? await nameClaimCallData(claimLabel, await deriveAddress(body)) : undefined;
       sa = await deployAccount(body, async (h) => assertOver(h), callData);
       return sa;
     },
@@ -373,9 +395,11 @@ async function runRail(name: string): Promise<{ name: string; ok: boolean; detai
     bodyHash: hashBody(input),
     signature: '0x' as Hex,
     createdAt: now(),
+    recipient: B.sa as Address,
+    chainId: D.chainId,
   };
   message.signature = await rail.signDigest(
-    hashA2aMessage({ messageId: message.messageId, sender: A, skill: 'orchestrate', bodyHash: message.bodyHash, createdAt: message.createdAt }),
+    hashA2aMessage({ messageId: message.messageId, sender: A, skill: 'orchestrate', bodyHash: message.bodyHash, createdAt: message.createdAt, recipient: message.recipient, chainId: message.chainId }),
   );
 
   console.log(`  → POST message/send to EDGE /api/a2a/${B.label}`);
@@ -496,9 +520,9 @@ async function runCrossPrincipal(name: string): Promise<{ name: string; ok: bool
   const input = { goal: GOAL };
   const message = {
     messageId: rand32(), sender: bob, skill: 'orchestrate',
-    bodyRef: { owner: alice, recordType: 'pending' }, bodyHash: hashBody(input), signature: '0x' as Hex, createdAt: now(),
+    bodyRef: { owner: alice, recordType: 'pending' }, bodyHash: hashBody(input), signature: '0x' as Hex, createdAt: now(), recipient: alice as Address, chainId: D.chainId,
   };
-  message.signature = await bobRail.signDigest(hashA2aMessage({ messageId: message.messageId, sender: bob, skill: 'orchestrate', bodyHash: message.bodyHash, createdAt: message.createdAt })); // BOB signs
+  message.signature = await bobRail.signDigest(hashA2aMessage({ messageId: message.messageId, sender: bob, skill: 'orchestrate', bodyHash: message.bodyHash, createdAt: message.createdAt, recipient: message.recipient, chainId: message.chainId })); // BOB signs
 
   console.log(`  → POST message/send to EDGE /api/a2a/${aliceLabel}  (Alice signed the grant · Bob signs the message)`);
   let send: any;

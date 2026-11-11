@@ -23,6 +23,10 @@ import { AgentAccountClient, buildExecuteCallData } from '@agenticprimitives/age
 import { buildDeclareAgentTypeCalls } from '@agenticprimitives/agent-naming';
 import { createPublicClient, decodeEventLog, encodeFunctionData, http, keccak256, recoverMessageAddress, toBytes, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
+// Addresses default from the pinned deployment record (DEPLOYMENT, default faithchain), never a hard-coded generation:
+// a generation-1 literal here kept chartering against a factory the estate had left (spec 445 estate reset, 2026-11-11).
+const DEP = getDeployments((process.env.DEPLOYMENT ?? 'faithchain') as never) as unknown as Record<string, `0x${string}`>;
 
 const arg = (k: string): string | undefined => { const i = process.argv.indexOf(`--${k}`); return i >= 0 ? process.argv[i + 1] : undefined; };
 const salt = BigInt(arg('salt') ?? '0'); const display = arg('display') ?? 'service agent'; const dry = process.argv.includes('--dry-run');
@@ -39,7 +43,7 @@ const RPC = process.env.RPC_URL ?? (() => { console.error('RPC_URL is required')
 const relayFile = (process.env.RELAY_PRIVATE_KEY_FILE ?? '').replace(/^~/, process.env.HOME ?? '');
 const relayKey = (process.env.RELAY_PRIVATE_KEY ?? (relayFile ? readFileSync(relayFile, 'utf8').trim() : '')) as Hex;
 const envFile = process.env.CUSTODIAN_KEY_ENV_FILE ?? ''; const varName = process.env.CUSTODIAN_KEY_VAR ?? 'CUSTODIAN_PRIVATE_KEY';
-const fromRoster = persona ? ((JSON.parse(readFileSync('demo/personas.local.json', 'utf8')) as Record<string, { eoaPrivateKey?: string }>)[persona]?.eoaPrivateKey ?? '') : '';
+const fromRoster = persona ? ((JSON.parse(readFileSync(process.env.ROSTER ?? 'demo/personas.local.json', 'utf8')) as Record<string, { eoaPrivateKey?: string }>)[persona]?.eoaPrivateKey ?? '') : '';
 if (persona && !fromRoster) { console.error(`no persona ${persona} with a key in demo/personas.local.json`); process.exit(1); }
 const custodianKey = (fromRoster || process.env.CUSTODIAN_PRIVATE_KEY || (envFile ? (new RegExp(`^${varName}=['"]?(0x[0-9a-fA-F]{64})`, 'm').exec(readFileSync(envFile, 'utf8'))?.[1] ?? '') : '')) as Hex;
 
@@ -65,8 +69,8 @@ if (!/^0x[0-9a-fA-F]{64}$/.test(relayKey) || (!homeSign && !/^0x[0-9a-fA-F]{64}$
 const CHAIN_ID = Number(process.env.CHAIN_ID ?? 34348);
 // ENTRY_POINT / FACTORY are overridable like the rest: a second chain has its own factory (hopechain 0x73A7B878…), and a
 // charter against faithchain's factory there reverts at getAddressForAgentAccount before it can say why.
-const ENTRY_POINT = (process.env.ENTRY_POINT ?? '0xf7855250B3363AB7649B10957d8908A9AFcdD4B5') as Address; const FACTORY = (process.env.FACTORY ?? '0x464eEe7518c3c97DA570592481329E0627E9a3B8') as Address;
-const PROFILE_RESOLVER = (process.env.PROFILE_RESOLVER ?? '0xB03F7C06ad3274F584AB72794406D639c02A45e1') as Address; const PAYMASTER = (process.env.PAYMASTER ?? '0xbd93fEC6910ffD74F14709188b5a9B6C6965b2a7') as Address;
+const ENTRY_POINT = (process.env.ENTRY_POINT ?? DEP.entryPoint) as Address; const FACTORY = (process.env.FACTORY ?? DEP.agentAccountFactory) as Address;
+const PROFILE_RESOLVER = (process.env.PROFILE_RESOLVER ?? DEP.agentProfileResolver) as Address; const PAYMASTER = (process.env.PAYMASTER ?? DEP.smartAgentPaymaster) as Address;
 const localCustodian = /^0x[0-9a-fA-F]{64}$/.test(custodianKey) ? privateKeyToAccount(custodianKey) : null;
 const custodianAddress = (homeCustodian ?? localCustodian!.address.toLowerCase()) as Address;
 const signUserOp = homeSign ?? ((digest: Hex) => localCustodian!.signMessage({ message: { raw: digest } }));

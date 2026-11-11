@@ -20,8 +20,8 @@
   "altZones": [],
   "extraOrigins": [],
   "agents": {
-    "harness": "0x9ecE152FC241A4f9c7401eA478E630331f0C8012",
-    "interactions": "0x976f06Ad22d27930Fb28f75cE20E7132647E4c0C",
+    "harness": "0x0ee0d8142D7C1644B27F7A94160CD77D8695249f",
+    "interactions": "0x51d659D8845756F2F77cf3B5b17c544C6F73A382",
     "estate": "0xb60cedb3d95b97dcef5775c5e1391116525faf02"
   },
   "_extras": "This estate's own product choices. ORCHESTRATION_LLM is impact-agent's: the model the harness plans with, paid through the GEMINI_API_KEY the build installs.",

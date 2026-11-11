@@ -11,7 +11,7 @@ import { useSession } from '../../context/session';
 import { listManagedAgents } from '../../connect-client';
 import { Panel, Row, List, KeyValue, Button, Chip, Mono, Meta, ErrorNote, Note, Micro, type PanelState } from '../../ui';
 import { WorkingBar } from '../onboarding/WorkingBar';
-import { mintPairing, listPairings, cancelPairing, approvePairing, pairCommand, type PairingStateV1 } from '../../home/runtime-pairing';
+import { mintPairing, listPairings, cancelPairing, approvePairing, pairCommand, type PairingStateV1, type PairingListItemV1 } from '../../home/runtime-pairing';
 import { nameLabel } from '../../lib/domain';
 
 const AGENT_HINT: Record<string, string> = { 'claude-code-acp': 'Claude Code', 'acp-stub-agent': 'the stub agent', goose: 'goose' };
@@ -22,7 +22,7 @@ export function RuntimePairingPanel() {
   const { session, agentAddress, profile } = useSession();
   const me = (agentAddress ?? '') as Address;
   const [orgs, setOrgs] = useState<Array<{ agent: Address; name: string; stewardshipDelegation?: unknown }> | null>(null);
-  const [pairings, setPairings] = useState<PairingStateV1[] | null>(null);
+  const [pairings, setPairings] = useState<PairingListItemV1[] | null>(null);
   const [err, setErr] = useState('');
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState('');
@@ -157,6 +157,8 @@ export function RuntimePairingPanel() {
               <div style={{ marginTop: 8 }}>
                 <KeyValue rows={[
                   ['Runtime key', <Mono key="k">{p.claim.address}</Mono>],
+                  // RUNB-12 — the second factor: approve ONLY when the runtime printed this same number.
+                  ['Confirmation', <span key="c"><Mono>{p.confirmation ?? '—'}</Mono> <Meta>Approve only if your runtime printed this same number. If it did not, cancel the code.</Meta></span>],
                   ['Runs', agentWords(p.claim.agent)],
                   ['It will get', `a session wire to speak as ${p.options.member} for ${Math.round(p.options.validForSeconds / 86_400)} days · your steward link · its vault key · the runtime-member playbook${p.options.openMandate.length ? ` · an open mandate for ${p.options.openMandate.join(', ')}` : ''}${p.options.messagingTo.length ? ` · a messaging rail to ${p.options.messagingTo.length} recipient(s)` : ''}`],
                   ['You sign', 'each grant with your connected credential — revocable on your Grants screen'],

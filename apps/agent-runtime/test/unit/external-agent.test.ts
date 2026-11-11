@@ -92,3 +92,20 @@ describe('a registry NAME reaches its card through the name\'s records (spec 379
     expect(String(((await inv('external.agent.ask', { agent: 'mute.svc', question: 'x' }, {} as never)) as { refused: string }).refused)).toMatch(/publishes no A2A endpoint/);
   });
 });
+
+// RUN-16 (spec 445) — a card reached by NAME and not pinned is relied on only when its signature verifies on chain.
+describe('card trust for an unpinned name', () => {
+  const CARD = { protocolVersion: '1.0', name: 'Clock', description: 'tells time', supportedInterfaces: [{ url: 'https://clock.example/a2a', protocolBinding: 'JSONRPC', protocolVersion: '1.0' }], skills: [], capabilities: {}, defaultInputModes: ['text/plain'], defaultOutputModes: ['text/plain'], version: '1' };
+  const fetchImpl = (async () => new Response(JSON.stringify(CARD), { headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
+  const records = async () => ({ cardUri: 'https://clock.example/.well-known/agent-card.json' });
+  it('a card whose signature does NOT verify is refused, before anything is asked', async () => {
+    const invoke = externalAgentInvoker({ fetch: fetchImpl, nameRecords: records, cardTrustFor: () => ({ relyOnCard: true, verifyCardSignature: async () => false }) });
+    const out = await invoke('external.agent.ask', { agent: 'clock.svc', question: 'time?' }, {} as never) as { refused?: string };
+    expect(out.refused).toMatch(/signature does not verify against the agent's bound key/);
+  });
+  it('an unpinned card with relyOnCard and no verifier is refused (the default is not trust)', async () => {
+    const invoke = externalAgentInvoker({ fetch: fetchImpl, nameRecords: records, cardTrust: { relyOnCard: true } });
+    const out = await invoke('external.agent.ask', { agent: 'clock.svc', question: 'time?' }, {} as never) as { refused?: string };
+    expect(out.refused).toMatch(/neither pinned by digest nor signature-verified/);
+  });
+});

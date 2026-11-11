@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { generateBrokerKeypair, importJwks, mintAgentSession, verifyAgentSession } from '@agenticprimitives/connect';
+import { generateBrokerKeypair, importJwks, mintAgentSession, verifyAgentSession, verifyIdToken } from '@agenticprimitives/connect';
 import { resolveOrigin } from '../_lib/origin';
 import { onRequestPost } from './session-token';
 
@@ -88,7 +88,8 @@ describe('/connect/session-token — spec 426 §5 production seam', () => {
     expect(body.expires_in).toBe(3600);
     const { getServer } = await import('../_lib/server-broker');
     const { jwks } = await getServer(env);
-    const v = await verifyAgentSession(body.id_token, { keys: await importJwks(jwks), expectedAud: 'gc-engage', expectedIss: iss });
+    // An id_token is not an AgentSession (ING-4: typed apart) — it verifies as an id_token, with no nonce flow here (D5).
+    const v = await verifyIdToken(body.id_token, { keys: await importJwks(jwks), expectedAud: 'gc-engage', expectedIss: iss, expectedNonce: null });
     expect(v.ok).toBe(true);
   });
 

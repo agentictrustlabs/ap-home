@@ -158,7 +158,7 @@ const PROVIDER_FREE: Record<LlmProvider, boolean> = { anthropic: false, groq: tr
 const PROVIDER_KEY: Record<LlmProvider, keyof PlannerEnv> = { anthropic: 'ANTHROPIC_API_KEY', groq: 'GROQ_API_KEY', openai: 'OPENAI_API_KEY', xai: 'XAI_API_KEY', gemini: 'GEMINI_API_KEY' };
 
 /** The ordered allowlist. An entry this app cannot construct THROWS: a typo must not silently drop a model. */
-export function llmAllowlist(env: PlannerEnv): LlmProvider[] {
+export function llmAllowlist(env: Pick<PlannerEnv, 'ORCHESTRATION_LLM'>): LlmProvider[] {
   const raw = String(env.ORCHESTRATION_LLM ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   const out: LlmProvider[] = [];
   for (const id of raw) {
@@ -439,24 +439,24 @@ function groqClient(env: PlannerEnv): OpenAiCompatLike {
   // together they exceed one minute of the free plan's 8k; the host then asks for ~35s. Waiting that out once
   // is the difference between the question answering slowly and never — so the bound is a minute here, not
   // the adapter's 30s. A longer wait, or a second 429, still surfaces as the refusal it is.
-  return createFetchOpenAiCompatClient({ apiKey: env.GROQ_API_KEY!, baseUrl: env.ORCHESTRATION_GROQ_BASE_URL || GROQ_DEFAULTS.baseUrl, waitOn429UpToSeconds: 60 });
+  return createFetchOpenAiCompatClient({ apiKey: env.GROQ_API_KEY!, baseUrl: env.ORCHESTRATION_GROQ_BASE_URL || GROQ_DEFAULTS.baseUrl, waitOn429UpToSeconds: 60, provider: 'groq', allowedProviders: llmAllowlist(env) });
 }
 
 function openAiClient(env: PlannerEnv): OpenAiCompatLike {
   // `max_completion_tokens`: OpenAI's reasoning models REFUSE `max_tokens` outright (HTTP 400), so this is
   // the host's rule travelling as configuration, not a preference. The 429 wait stays the adapter's default —
   // a paid tier's minute is not the free plan's, and a long wait here would hide a real rate problem.
-  return createFetchOpenAiCompatClient({ apiKey: env.OPENAI_API_KEY!, baseUrl: env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl, tokenLimitParam: 'max_completion_tokens' });
+  return createFetchOpenAiCompatClient({ apiKey: env.OPENAI_API_KEY!, baseUrl: env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl, tokenLimitParam: 'max_completion_tokens', provider: 'openai', allowedProviders: llmAllowlist(env) });
 }
 
 export function geminiClient(env: PlannerEnv): OpenAiCompatLike {
   providerConfigured(env, 'gemini');
-  return createFetchOpenAiCompatClient({ apiKey: env.GEMINI_API_KEY!, baseUrl: env.ORCHESTRATION_GEMINI_BASE_URL || GEMINI_DEFAULTS.baseUrl });
+  return createFetchOpenAiCompatClient({ apiKey: env.GEMINI_API_KEY!, baseUrl: env.ORCHESTRATION_GEMINI_BASE_URL || GEMINI_DEFAULTS.baseUrl, provider: 'gemini', allowedProviders: llmAllowlist(env) });
 }
 
 export function xaiClient(env: PlannerEnv): OpenAiCompatLike {
   // Plain `max_tokens`, the adapter's default 429 wait: a paid API whose limits are per account, not a free minute.
-  return createFetchOpenAiCompatClient({ apiKey: env.XAI_API_KEY!, baseUrl: env.ORCHESTRATION_XAI_BASE_URL || XAI_DEFAULTS.baseUrl });
+  return createFetchOpenAiCompatClient({ apiKey: env.XAI_API_KEY!, baseUrl: env.ORCHESTRATION_XAI_BASE_URL || XAI_DEFAULTS.baseUrl, provider: 'xai', allowedProviders: llmAllowlist(env) });
 }
 
 /** spec 327 §4b / 334 §6 — prepend the org's steward-authored playbook AS CONTEXT, keeping the
@@ -526,9 +526,9 @@ export function gatewayOn(env: Pick<PlannerEnv, 'ORCHESTRATION_GATEWAY' | 'INFER
   return (env.ORCHESTRATION_GATEWAY ?? '').trim() === 'on' && !!env.INFERENCE_URL?.trim() && !!env.INFERENCE_APP_KEY?.trim();
 }
 const gatewayClients = new WeakMap<object, ModelClient>();
-export function gatewayModels(env: Pick<PlannerEnv, 'INFERENCE_URL' | 'INFERENCE_APP_KEY'>): ModelClient {
+export function gatewayModels(env: Pick<PlannerEnv, 'INFERENCE_URL' | 'INFERENCE_APP_KEY' | 'ORCHESTRATION_LLM'>): ModelClient {
   let c = gatewayClients.get(env as object);
-  if (!c) { c = createModelClient({ baseUrl: env.INFERENCE_URL!.trim(), credential: { kind: 'app-key', key: env.INFERENCE_APP_KEY!.trim() } }); gatewayClients.set(env as object, c); }
+  if (!c) { c = createModelClient({ baseUrl: env.INFERENCE_URL!.trim(), credential: { kind: 'app-key', key: env.INFERENCE_APP_KEY!.trim() }, allowedProviders: llmAllowlist(env) }); gatewayClients.set(env as object, c); }
   return c;
 }
 export type OnReceipt = (r: ReceiptSummaryV1) => void;
@@ -589,7 +589,7 @@ export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; 
   }
   return createAnthropicComposer({
       ...(opts?.onUsage ? { onUsage: opts.onUsage } : {}),
-    client: createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY! }),
+    client: createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY!, allowedProviders: llmAllowlist(env) }),
     ...(env.ORCHESTRATION_MODEL ? { model: env.ORCHESTRATION_MODEL } : {}),
     ...maxTokens,
     ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
@@ -659,7 +659,7 @@ export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; m
     return { planner, kind: 'groq', model: modelFor(env, 'groq') };
   }
   if (p === 'anthropic') {
-    const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY! });
+    const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY!, allowedProviders: llmAllowlist(env) });
     const planner = createAnthropicPlanner({
       ...(opts?.onUsage ? { onUsage: opts.onUsage } : {}),
       client,

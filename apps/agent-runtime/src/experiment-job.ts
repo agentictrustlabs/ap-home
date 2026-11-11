@@ -9,7 +9,7 @@
 import {
   validateReplaySet, replaySetDigest, criterionDigest, experimentPlan, validateExperimentPlan, DEFAULT_SELECTION_THRESHOLDS,
   type ReplaySetV1, type SelectionCriterionV1, type ExperimentPlanV1, type VariantRequestV1, type ExperimentRunV1, type StartingStateFixtureV1,
-} from '@agenticprimitives/evaluation';
+} from '@agenticprimitives/evaluation/experiment';
 import { validateRubricV1, type RubricV1 } from './rubric-judge.js';
 
 export type ExperimentStatusV1 = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
@@ -40,6 +40,9 @@ export interface ExperimentJobV1 {
   session: string;
   /** The deployment's own origin, so the object can dispatch to its own ask route. */
   origin: string;
+  /** Spec 445 decision 8 — the model providers this comparison may use (live tests: gemini). Absent ⇒ `['gemini']`; any other
+   *  name is refused by the comparison runner (it needs the runner's explicit non-gemini flag, which this lab never sets). */
+  allowedProviders?: string[];
   submittedAt: string;
 }
 
@@ -105,7 +108,7 @@ export async function parseExperimentRequest(raw: unknown, now: Date): Promise<{
   if (!Number.isInteger(repeats) || repeats < 1 || repeats > 10) return { ok: false, error: 'repeats must be an integer from 1 to 10' };
   const policy = b['policy'] === undefined ? undefined : (b['policy'] as 'primary' | 'any-fire');
   if (policy !== undefined && policy !== 'primary' && policy !== 'any-fire') return { ok: false, error: 'policy must be primary | any-fire' };
-  const planId = b['planId'] === undefined ? `${setR.set.id}@${setR.set.version}-${Object.keys(variants as object).join('+')}-${split}-r${repeats}` : String(b['planId']);
+  const planId = b['planId'] === undefined ? `${setR.set.id}.v${setR.set.version}-${Object.keys(variants as object).join('.')}-${split}-r${repeats}` : String(b['planId']);
   if (!/^[A-Za-z0-9][A-Za-z0-9._@+-]{0,120}$/.test(planId)) return { ok: false, error: 'planId: letters, digits and . _ @ + - only' };
   const fixtures = b['fixtures'] === undefined ? undefined : (b['fixtures'] as Record<string, StartingStateFixtureV1>);
   if (fixtures !== undefined && (!fixtures || typeof fixtures !== 'object' || Array.isArray(fixtures))) return { ok: false, error: 'fixtures must map a scenario id to its starting state' };

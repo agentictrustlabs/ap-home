@@ -26,7 +26,9 @@ describe('spec 434 W3 — the gateway switch', () => {
     expect(calls[0]?.url).toBe('https://inference.example/v1/generate');
     expect(calls[0]?.auth).toBe('Bearer apk_test');
     expect(calls[0]?.body.profile).toBe('planner-fast');
-    expect(JSON.stringify(calls[0]?.body)).not.toContain('gemini');
+    // The call names a PROFILE, never a vendor or a model; the only vendor word is the allow-list the gateway enforces (spec 445 model-client).
+    expect(JSON.stringify({ ...calls[0]?.body, context: undefined })).not.toContain('gemini');
+    expect(calls[0]?.body.context).toMatchObject({ allowedProviders: ['gemini'] });
     expect(receipts).toEqual(['rcpt-9']);
   });
   it('the composer, the structured call and the text stream take the gateway too', async () => {

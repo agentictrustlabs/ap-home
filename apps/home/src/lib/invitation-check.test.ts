@@ -53,6 +53,7 @@ async function publication(over: Partial<AgentServicePublicationV1> = {}): Promi
     publicationId: 'pub-0',
     channelId: CHANNEL,
     agentId: TARGET,
+    keyEpoch: 0,
     sequence: 3n,
     status: 'active',
     surfaces: [

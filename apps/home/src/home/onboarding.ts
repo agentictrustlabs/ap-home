@@ -229,11 +229,11 @@ async function buildBatchedPersonPlaneGrants(sa: Address): Promise<{ digests: He
     const info = (await fetch(`/mcp-bind/custody/vault-key/server-info?owner=${low}`).then((r) => r.json())) as {
       serverId?: string; serverKey?: string; kmsKeyRef?: string | null; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[];
     };
-    if (info?.kmsKeyRef) {
+    if (info?.kmsKeyRef && isRealVaultDelegate(info.serverKey)) {
       const params: VaultKeyCeremonyParams = {
         vaultId: info.serverId ?? MCP_SERVER_ID,
         kmsKeyRef: info.kmsKeyRef,
-        serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address,
+        serverKey: info.serverKey as Address,
         allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'],
         classificationCeiling: info.classificationCeiling ?? 'regulated.high',
         ops: info.ops ?? ['read', 'write'],
@@ -1236,8 +1236,8 @@ export async function givePermission(
 }
 
 /**
- * spec 266 delegated content trust — PER-CUSTODIAN: each signing identity (bsb.impact, lbsb.impact,
- * demo-validator.impact) is authorized only by WHOEVER CUSTODIES that SA. The connected custodian signs ONCE
+ * spec 266 delegated content trust — PER-CUSTODIAN: each signing identity (bsb.svc, lbsb.svc,
+ * demo-validator.svc) is authorized only by WHOEVER CUSTODIES that SA. The connected custodian signs ONCE
  * a delegation binding their SA → its KMS key; the content service verifies the SA actually signed it
  * (ERC-1271) before storing. `opts.targetSigner` scopes the ceremony to the single identity the custodian
  * connected as, so each runs a clean "1 of 1" (you can only delegate authority you hold). NO held key.
@@ -1402,6 +1402,11 @@ export async function bindVaultKey(
   }
 }
 
+/** A vault delegate is a real 20-byte address — never zero, never a precompile-range placeholder (`0x…01`). */
+function isRealVaultDelegate(a: unknown): a is string {
+  return typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a) && !/^0x0{39}[0-9a-f]$/i.test(a);
+}
+
 /**
  * One-call vault activation: provision the owner's per-person KEK (idempotent), discover this
  * server's delegate + authorized scope, then `bindVaultKey`. This is the whole spec-278 ceremony
@@ -1422,6 +1427,8 @@ export async function activateVault(
       classificationCeiling?: string;
       ops?: ('read' | 'write')[];
     };
+    // No placeholder delegate (spec 445): a vault-key authorization names this vault's REAL key, or it is not built.
+    if (!isRealVaultDelegate(info?.serverKey)) return { ok: false, error: 'this vault has not published its key (server-info names no real delegate) — vault activation is refused rather than bound to nobody' };
     // Phase C / NEW-C3 — the KEK-provision route wields the admin credential to mint a per-owner GCP KEK, so
     // it requires an OWNER-CONTROL PROOF (ERC-1271 over a freshness-bound challenge) rather than trusting the
     // body-supplied `owner`. Sign the same challenge the server re-derives (provisionChallengeHash). For KMS
@@ -1443,7 +1450,7 @@ export async function activateVault(
       {
         vaultId: info.serverId ?? MCP_SERVER_ID,
         kmsKeyRef: prov.kmsKeyRef,
-        serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address,
+        serverKey: info.serverKey as Address,
         allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'],
         classificationCeiling: info.classificationCeiling ?? 'regulated.high',
         ops: info.ops ?? ['read', 'write'],

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { subjectAddress, servesUnpublishedNames } from '../src/subject-address.js';
 
-const P = ['me', 'impact'];
+const P = ['me'];
 const A = { ownIngress: 'https://edge.faithnet.io', ownDomains: ['faithnet.ai', 'faithnet.io'], parents: P, servesUnpublished: true };
 const B = { ownIngress: 'https://edge-b.faithnet.io', ownDomains: ['b.faithnet.io'], parents: P, servesUnpublished: false };
 

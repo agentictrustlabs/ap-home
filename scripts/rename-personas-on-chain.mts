@@ -82,7 +82,13 @@ for (const [h, p] of Object.entries(T.roster)) {
   const calls = [...rec, buildSetPrimaryNameCall({ registry: T.dep.agentNameRegistry, node: newNode })];
   if (accounts.length) calls.push({ to: T.dep.agentNameResolver, value: 0n, data: encodeFunctionData({ abi: RESOLVER_ABI, functionName: 'setStringArrayAttribute', args: [newNode, P.accounts, [...accounts]] }) });
   if (oldNode) {
-    for (const pred of [P.addr, P.agentKind, P.displayName, P.accounts]) calls.push({ to: T.dep.agentNameResolver, value: 0n, data: encodeFunctionData({ abi: RESOLVER_ABI, functionName: 'unsetAttribute', args: [oldNode, pred] }) });
+    // Generation 4's AttributeStorage refuses to unset what was never set (`AttributeNotSet`), and one refusal reverts the
+    // whole batch: unset only the records the old node actually carries (asked as the account, which is who will send it).
+    for (const pred of [P.addr, P.agentKind, P.displayName, P.accounts]) {
+      const data = encodeFunctionData({ abi: RESOLVER_ABI, functionName: 'unsetAttribute', args: [oldNode, pred] });
+      const carried = await T.pc.call({ account: agent, to: T.dep.agentNameResolver, data }).then(() => true, () => false);
+      if (carried) calls.push({ to: T.dep.agentNameResolver, value: 0n, data });
+    }
     calls.push({ to: T.dep.agentNameRegistry, value: 0n, data: encodeFunctionData({ abi: REGISTRY_ABI, functionName: 'setOwner', args: [oldNode, root.address] }) });
   }
   const callData = buildExecuteBatchCallData(calls);
@@ -94,13 +100,26 @@ for (const [h, p] of Object.entries(T.roster)) {
   for (const log of receipt.logs) { try { const ev = decodeEventLog({ abi: [OP_EVENT], data: log.data, topics: log.topics }); if (ev.eventName === 'UserOperationEvent' && String(ev.args.sender).toLowerCase() === agent.toLowerCase()) ok = ev.args.success; } catch { /* another event */ } }
   if (receipt.status !== 'success') { console.error(`  handleOps reverted (tx ${receipt.transactionHash}) — validation; check the paymaster's EntryPoint deposit`); process.exit(1); }
   if (ok !== true) { console.error(`  the batch ${ok === false ? 'reverted inside the account' : 'left no UserOperationEvent'} (tx ${receipt.transactionHash})`); process.exit(1); }
+  let expired = false;
   if (oldNode) {
-    const tx = await rootWallet.writeContract({ address: T.dep.agentNameRegistry, abi: REGISTRY_ABI, functionName: 'renew', args: [oldNode, 1n] });
-    const r = await T.pc.waitForTransactionReceipt({ hash: tx }); if (r.status !== 'success') { console.error(`  expiring ${have} reverted (tx ${tx})`); process.exit(1); }
+    // REG-6 (spec 445): renew is the PARENT's act — `rootWallet` IS the `.${tld}` root's owner (asserted above), never the
+    // name's holder; the node was handed to the same key only so it could be expired.
+    // GENERATION 4: `renew` only EXTENDS an expiry (`ExpiryNotExtended` for anything at or below the current one), so the
+    // parent can no longer expire a node early. Simulate first; when the chain refuses, say so and leave the old node
+    // emptied and held by the root's owner — released in practice (no records, not the account's), expired only when its
+    // term runs out. Not a fallback: the same act, refused by this generation, reported by name.
+    const renewSim = await T.pc.simulateContract({ account: rootWallet.account!, address: T.dep.agentNameRegistry, abi: REGISTRY_ABI, functionName: 'renew', args: [oldNode, 1n] }).then(() => null, (e: unknown) => (e instanceof Error ? e.message.split('\n')[0] : String(e)));
+    if (renewSim) console.log(`  ${have} cannot be expired early on this chain (${renewSim.slice(0, 120)}) — emptied and held by the root's owner instead`);
+    else {
+      const tx = await rootWallet.writeContract({ address: T.dep.agentNameRegistry, abi: REGISTRY_ABI, functionName: 'renew', args: [oldNode, 1n] });
+      const r = await T.pc.waitForTransactionReceipt({ hash: tx }); if (r.status !== 'success') { console.error(`  expiring ${have} reverted (tx ${tx})`); process.exit(1); }
+      expired = true;
+    }
+    if (!expired) console.log(`  ${have} now resolves ${await T.naming.resolveName(have!).catch(() => null)}`);
   }
   const after = await T.naming.reverseResolve(agent).catch(() => null);
   const oldResolves = oldNode ? await T.naming.resolveName(have!).catch(() => null) : null;
-  if (after !== want || (oldNode && oldResolves && oldResolves !== ZERO)) { console.error(`  read-back: presents ${after ?? '""'}; ${have} resolves ${oldResolves} (tx ${receipt.transactionHash})`); process.exit(1); }
-  console.log(`  ${agent} presents ${want}; ${have ?? '—'} expired, resolves nobody (tx ${receipt.transactionHash})`); renamed++;
+  if (after !== want || (oldNode && oldResolves && oldResolves.toLowerCase() === agent.toLowerCase())) { console.error(`  read-back: presents ${after ?? '""'}; ${have} resolves ${oldResolves} (tx ${receipt.transactionHash})`); process.exit(1); }
+  console.log(`  ${agent} presents ${want}; ${have ?? "—"} ${oldNode && !expired ? "emptied and held by the root owner" : "expired, resolves nobody"} (tx ${receipt.transactionHash})`); renamed++;
 }
 console.log(`\ndone — ${renamed} renamed, ${same} already right.`);

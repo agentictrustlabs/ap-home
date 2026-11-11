@@ -22,7 +22,7 @@
 // authority verdict and the single-use request id. Both are squarely on the DO-local side of the table
 // (caches, request ids), and losing them is a rebuild, never a bereavement.
 
-import type { GatewayDeps } from '@agenticprimitives/fabric/cloudflare';
+import type { GatewayAuthenticator, GatewayCallerIdentity, GatewayDeps } from '@agenticprimitives/fabric/cloudflare';
 import { createToolRegistry, buildVaultTools } from '@agenticprimitives/fabric/cloudflare';
 import type { DekWrapper, Vault } from '@agenticprimitives/vault';
 
@@ -64,6 +64,55 @@ export interface MountedGatewayInput {
     { principal: string; sessionKey: string; delegationHash: string; epoch: string; manager: string } | null
   >;
   now?: () => string;
+  /**
+   * Spec 445 §3.4 (fabric audit DATA-3) — WHO IS CALLING, for the gateway's INGRESS (`fetch`, `deliver`,
+   * `receiveDelivery`, `postToChannel`, `joinChannel`, `applyEvent`, …). Build it with `mountedAuthenticator`.
+   *
+   * NOT NEEDED BY THE ONE OP MOUNTED TODAY: `inbox.get` calls `verifyAndCache` + `invokeFast`, which take a
+   * verdict and never an `AuthenticatedCaller`. Omitted ⇒ the gateway refuses every ingress
+   * (`authenticator_not_configured`), which is the right state while no ingress op is on the adoption ladder.
+   * An ingress op that climbs to `shadow` MUST pass this, from the admission `InteractionsDO` already ran.
+   */
+  authenticate?: GatewayAuthenticator;
+}
+
+/** What `InteractionsDO` established about the request it is serving, before it reaches the gateway. */
+export interface AdmittedGatewayCaller {
+  /** The agent PRESENTING the request (0x): the verified Home session's subject, or — for an in-Worker
+   *  internal op — the verified wire's delegate. NEVER a field of the request body. */
+  actor: string;
+  /** The lane this op rides, from the op → tier table the mount keeps (never from the request). */
+  tier: GatewayCallerIdentity['tier'];
+}
+
+/**
+ * The gateway's `authenticate` port for a mount inside `InteractionsDO` (spec 445 §3.4, DATA-3).
+ *
+ * A co-resident gateway receives no request of its own: `InteractionsDO` has already run application
+ * authentication, canonical resolution and admission for the request it is serving (ADR-0057) and knows three
+ * facts. This hands them over and adds nothing:
+ *
+ *   principal  THIS object's own agent — the address the Durable Object is named by, as CAIP-10. Never the
+ *              grant's delegator by itself and never a body field: the object answers for one principal.
+ *   actor      who presented the request — the session subject, or the verified wire's delegate.
+ *   tier       by op, from the mount's table — `communication` for a delivery or a post, `execution-fast`
+ *              for a read served on the warm path, `execution-orchestrated` for an orchestrated write.
+ *
+ * `admitted` is a FUNCTION read at call time, so one mount cannot carry an earlier request's caller into a
+ * later one; it returns null when the request was not admitted, and so does a malformed address or tier —
+ * the gateway then refuses (`unauthenticated`). The `Request` the port is handed is not read: nothing in it
+ * was verified by this path, and reading it would be the client-asserted identity DATA-3 removed.
+ */
+export function mountedAuthenticator(input: { chainId: number; principal: string; admitted: () => AdmittedGatewayCaller | null }): GatewayAuthenticator {
+  const isAddr = (v: unknown): v is string => typeof v === 'string' && /^0x[0-9a-fA-F]{40}$/.test(v);
+  const caip = (a: string) => `eip155:${input.chainId}:${a.toLowerCase()}`;
+  const TIERS: ReadonlyArray<GatewayCallerIdentity['tier']> = ['communication', 'execution-fast', 'execution-orchestrated'];
+  return async () => {
+    if (!Number.isInteger(input.chainId) || input.chainId <= 0 || !isAddr(input.principal)) return null;
+    const who = input.admitted();
+    if (!who || !isAddr(who.actor) || !TIERS.includes(who.tier)) return null;
+    return { principal: caip(input.principal), actor: caip(who.actor), tier: who.tier } as GatewayCallerIdentity;
+  };
 }
 
 /**
@@ -87,5 +136,6 @@ export function buildMountedGatewayDeps(input: MountedGatewayInput): GatewayDeps
     },
     tools: createToolRegistry(buildVaultTools()),
     vault: () => input.vault,
+    ...(input.authenticate ? { authenticate: input.authenticate } : {}),
   };
 }

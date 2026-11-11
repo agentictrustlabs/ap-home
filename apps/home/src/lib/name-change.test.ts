@@ -16,11 +16,11 @@ const held = (tld: string, typed = true, n = '1'): HeldRoot => ({ tld, node: nod
 
 describe('claimableSuffix', () => {
   it('offers the type’s suffix when the agent has not used it', () => {
-    expect(claimableSuffix({ tld: 'org' }, [held('impact', false)])).toEqual({ tld: 'org' });
+    expect(claimableSuffix({ tld: 'org' }, [held('agent', false)])).toEqual({ tld: 'org' });
   });
 
   it('offers nothing once that suffix is used — a second label there reverts', () => {
-    expect(claimableSuffix({ tld: 'org' }, [held('impact', false), held('org')])).toBeNull();
+    expect(claimableSuffix({ tld: 'org' }, [held('agent', false), held('org')])).toBeNull();
   });
 
   it('offers nothing when the deployment has no typed suffix for the kind', () => {
@@ -28,10 +28,10 @@ describe('claimableSuffix', () => {
   });
 
   it('never offers a suffix belonging to a different type, even when free', () => {
-    // A person holding only `.impact` must not be offered `.org` because it happens to be unclaimed:
+    // A person holding only an untyped legacy name must not be offered `.org` because it happens to be unclaimed:
     // the suffix states the on-chain agent type, and a mismatch fails closed at the registry.
     const forPerson = { tld: 'me' };
-    expect(claimableSuffix(forPerson, [held('impact', false)])).toEqual(forPerson);
+    expect(claimableSuffix(forPerson, [held('agent', false)])).toEqual(forPerson);
     expect(claimableSuffix(forPerson, [held('me')])).toBeNull();
   });
 
@@ -60,7 +60,7 @@ describe('clearingLeavesNoName', () => {
   });
 
   it('is false when another held name could be presented instead', () => {
-    expect(clearingLeavesNoName([held('impact', false), held('me', true, '2')])).toBe(false);
+    expect(clearingLeavesNoName([held('agent', false), held('me', true, '2')])).toBe(false);
   });
 });
 

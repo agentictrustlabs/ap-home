@@ -344,6 +344,14 @@ describe('resolveArchetypeMethod', () => {
     expect(String(out.error)).toMatch(/no SKILL.md for archetype "missing-role"/);
   });
 
+  it('declares NO price (spec 445 RUNB-6): no paymentGate is wired on the runtime, so a priced archetype would park forever', () => {
+    // a2a now PARKS a priced skill that has no gate (it used to run unpaid). This deployment prices no archetype and
+    // wires no PaymentGate; if an archetype is ever priced, wire a gate (verifySettlement) in a2a-task-do first.
+    const h = resolveArchetypeMethod(env(), '0xabc')('archetype.ontologist');
+    expect(h).toBeDefined();
+    expect((h as { payment?: unknown }).payment).toBeUndefined();
+  });
+
   it('REFUSES a body addressed to a different archetype than the skill', async () => {
     const h = resolveArchetypeMethod(env(), '0xabc')('archetype.ontologist');
     const { ctx: c } = ctx({ version: 'ap.archetype.work.v1', archetype: 'ontology-reviewer', stepGoal: 'do it' });

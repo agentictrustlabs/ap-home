@@ -7,12 +7,17 @@
 // States: minted → claimed (the runtime named its key) → completed (the Home wrote the record) → taken (the runtime
 // read it once). A code can only move forward; a claim by a second key, or a take by a key the record does not name,
 // is refused.
+import { notePairingMiss, pairingConfirmation, verifyPairingProof, PAIRING_MAX_TTL_SECONDS, type PairingMissLedgerV1, type PairingProofV1 } from '@agenticprimitives/runtime-member';
+
+export { pairingConfirmation };
 export const PAIRING_KEY = (code: string): string => `runtime.pairing:${code}`;
 export const PAIRING_INDEX_KEY = 'runtime.pairings';
 export const PAIRING_TTL_MS = 15 * 60_000;
 /** After completion the record waits this long for the runtime to take it, then the code expires with it. */
 export const PAIRING_TAKE_TTL_MS = 10 * 60_000;
 export const PAIRING_CAP = 20;
+/** DO-local count of misses (RUNB-12 attempt limit) — a rebuild, never a record. */
+export const PAIRING_MISS_KEY = 'runtime.pairing.misses';
 export const PAIRING_CODE_RE = /^([a-z0-9][a-z0-9-]{0,62})-([A-HJ-NP-Z2-9]{6})$/;
 
 export interface PairingOptionsV1 { member: string; workspace: string; validForSeconds: number; openMandate: string[]; messagingTo: string[]; wake: 'container' | 'poll' | { url: string } }
@@ -83,3 +88,30 @@ export function take(p: PairingStateV1, address: string, now = Date.now()): { ok
   const { record, ...rest } = p;
   return { ok: true, state: 'completed', record, next: { ...rest, state: 'taken', takenAt: new Date(now).toISOString() } };
 }
+
+// ── RUNB-12 (spec 445) — what binds a short code ────────────────────────────────────────────────────────────────────
+// 1. a code lives at most PAIRING_MAX_TTL_SECONDS (PAIRING_TTL_MS must not exceed it — the runtime refuses a longer one);
+// 2. five misses against one person's codes void every outstanding code of hers (`noteMiss`);
+// 3. the claim and the take are SIGNED by the key they name, bound to move + code + Home + moment (`checkProof`);
+// 4. the custodian sees the six-digit confirmation beside Approve (`confirmationOf`) and the runtime prints the same one.
+if (PAIRING_TTL_MS / 1000 > PAIRING_MAX_TTL_SECONDS) throw new Error('PAIRING_TTL_MS exceeds the package maximum (RUNB-12)');
+
+/** The Home's check of a move: null when the proof is fresh and signed by the key the request names. `home` is the
+ *  origin the runtime was talking to (the Home's proxy states it); it is part of what the runtime signed. */
+export async function checkProof(move: 'claim' | 'take', body: { code: string; address?: unknown; home?: unknown; proof?: unknown }, now = Date.now()): Promise<string | null> {
+  const address = String(body.address ?? '');
+  const home = String(body.home ?? '');
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return 'a key address is required';
+  if (!home) return 'the Home this move came through is required';
+  return verifyPairingProof({ move, code: body.code, address, home, proof: body.proof as PairingProofV1 | undefined, now });
+}
+
+/** A miss (a well-formed code that is not outstanding): the next ledger, and whether the limit is reached. */
+export function noteMiss(prev: unknown, now = Date.now()): { ledger: PairingMissLedgerV1; void: boolean } {
+  const l = prev && typeof prev === 'object' && (prev as PairingMissLedgerV1).v === 1 ? (prev as PairingMissLedgerV1) : null;
+  return notePairingMiss(l, now);
+}
+
+/** The number the Home shows beside Approve for a claimed code — the runtime prints the same one. */
+export const confirmationOf = (p: PairingStateV1): string | undefined =>
+  p.state === 'minted' ? undefined : pairingConfirmation(p.code, p.claim.address);

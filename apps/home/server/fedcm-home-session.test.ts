@@ -7,7 +7,7 @@ const ISS = 'https://www.faithnet.me';
 const SUB = 'eip155:34348:0xeef5ed02e052ee221afcbbd2708919473c4e2b28';
 const h = vi.hoisted(() => ({ jwks: null as unknown }));
 vi.mock('./_lib/server-broker', () => ({
-  getServer: async () => ({ jwks: h.jwks, directory: { agent: async () => ({ facets: { name: 'ruth.impact' } }) } }),
+  getServer: async () => ({ jwks: h.jwks, directory: { agent: async () => ({ facets: { name: 'ruth.me' } }) } }),
   resolveOrigin: () => 'https://www.faithnet.me',
   json: (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } }),
 }));
@@ -37,7 +37,7 @@ describe('what /fedcm takes as a Home session', () => {
     const t = await mintIdToken({ iss: ISS, sub: SUB as never, aud: 'some-app', ttlSeconds: 3600 }, signer);
     const r = await accounts(t);
     expect(r.status).toBe(401);
-    expect(await r.json()).toMatchObject({ reason: 'session_verify_failed:not_a_home_session' });
+    expect(await r.json()).toMatchObject({ reason: expect.stringContaining('typ must be "agent-session+jwt"') });
   });
 });
 

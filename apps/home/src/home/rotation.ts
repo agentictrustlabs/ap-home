@@ -22,7 +22,7 @@ import type { Address, Hex } from '@agenticprimitives/types';
 import { hashDelegation, reissueForRotation, lineageRecordType, wireSigning, type DelegationLineageV1, type LineageWire } from '@agenticprimitives/delegation';
 import { CHAIN_ID, CONTRACTS } from '../lib/chain';
 import { loadPasskey, storePasskey, clearPasskey, type DemoPasskey } from '../lib/passkey';
-import { registerPasskeyCredentialRef, rotateCredential, rotationAvailability, readCustodyMode, type SignHash } from '../connect-client';
+import { registerPasskeyCredentialRef, rotateCredential, rotationAvailability, readCustodyMode, readKeptModules, type KeptModules, type SignHash } from '../connect-client';
 import type { DelegationWire } from '../lib/delegation';
 import { actWireWords } from '../lib/act-as-me';
 import { auditGrantsThroughHarness, type GrantRow } from './grants-harness';
@@ -54,7 +54,7 @@ const toLineageWire = (w: DelegationWire): LineageWire => ({ delegator: w.delega
 const digestOf = (w: DelegationWire): Hex => hashDelegation({ ...w, salt: BigInt(String(w.salt)), caveats: w.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) }, CHAIN_ID, CONTRACTS.delegationManager);
 
 /** The reviewed list: every LIVE wire the person issued, from both stores, de-duplicated by digest. */
-export async function reviewedList(input: { person: Address; session: { token: string } }): Promise<{ ok: true; wires: ReviewedWire[]; warnings: string[] } | { ok: false; error: string }> {
+export async function reviewedList(input: { person: Address; session: { token: string } }): Promise<{ ok: true; wires: ReviewedWire[]; warnings: string[]; /** The "kept modules" section (spec 445, generation 4): what this rotation will re-affirm besides the wires. */ keptModules: KeptModules } | { ok: false; error: string }> {
   const warnings: string[] = [];
   const byDigest = new Map<string, ReviewedWire>();
   const audit = await auditGrantsThroughHarness({ person: input.person, session: input.session });
@@ -90,7 +90,11 @@ export async function reviewedList(input: { person: Address; session: { token: s
       byDigest.set(wk, { ...(byDigest.get(wk) ?? {}), digest: w.ref, kind: 'app', holder: row.delegate.toLowerCase(), holderName: row.appName ?? row.clientId, what: `act-as-me — ${actWireWords(w)}`, signed: wireSigning(w.wire), wire: w.wire, clientId: row.clientId, wireRef: w.ref, source: 'app-grants' });
     }
   }
-  return { ok: true, wires: [...byDigest.values()], warnings };
+  // The reviewed list's second section: the executor modules and non-canonical delegation manager the rotation will
+  // RE-AFFIRM under the new epoch (otherwise a retirement expels them). Unreadable ⇒ said, and the rotation re-reads.
+  let keptModules: KeptModules = { modules: [], delegationManager: null };
+  try { keptModules = await readKeptModules(input.person); } catch (e) { warnings.push(`the modules your account keeps could not be read (${e instanceof Error ? e.message : String(e)}) — the rotation will read them again, and stops if it cannot`); }
+  return { ok: true, wires: [...byDigest.values()], warnings, keptModules };
 }
 
 export interface RotationOutcome {
@@ -115,6 +119,8 @@ export async function rotateThisDevicePasskey(input: {
   signHash: SignHash;
   wires: ReviewedWire[];
   keep: ReadonlySet<string>;
+  /** The kept-modules section the person saw (from `reviewedList`); re-read from the account when omitted. */
+  kept?: KeptModules;
   label: string;
   onStep?: (s: string) => void;
   /** Spec 410 §1.2 step 5 — A HOME-TO-HOME MOVE: the new key was registered at ANOTHER Home (its rpId), and arrives as
@@ -173,8 +179,8 @@ export async function rotateThisDevicePasskey(input: {
   }
 
   const revoke = struck.filter((w) => w.wire).map((w) => w.wire!);
-  step(`Confirm with your current passkey — one signature retires it, ${input.add ? `adds the passkey from ${input.add.home}, ` : ''}re-approves ${reapprove.length} wire${reapprove.length === 1 ? '' : 's'}${revoke.length ? ` and revokes ${revoke.length}` : ''}…`);
-  const res = await rotateCredential(input.person, input.signHash, { add: fresh.ref, retire: { kind: 'passkey', credentialIdDigest: old.credentialIdDigest }, reapprove, revoke });
+  step(`Confirm with your current passkey — one signature retires it, ${input.add ? `adds the passkey from ${input.add.home}, ` : ''}re-approves ${reapprove.length} wire${reapprove.length === 1 ? '' : 's'}${input.kept && (input.kept.modules.length || input.kept.delegationManager) ? ` and re-affirms ${input.kept.modules.length} kept module${input.kept.modules.length === 1 ? '' : 's'}${input.kept.delegationManager ? ' + your delegation manager' : ''}` : ''}${revoke.length ? ` and revokes ${revoke.length}` : ''}…`);
+  const res = await rotateCredential(input.person, input.signHash, { add: fresh.ref, retire: { kind: 'passkey', credentialIdDigest: old.credentialIdDigest }, reapprove, revoke, ...(input.kept ? { kept: input.kept } : {}) });
   if (!res.ok) {
     // The chain did not move: the OLD passkey is still the credential, so it must be the one this device holds.
     storePasskey(old);

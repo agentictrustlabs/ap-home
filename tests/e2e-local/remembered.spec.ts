@@ -301,9 +301,9 @@ test.describe('the ways back to the sheet', () => {
   test('a pin for someone else', async ({ page, request }) => {
     const s = await signIn(page);
     await allow(page, s);
-    await chain(request, { name: 'ruth.impact' });
+    await chain(request, { name: 'ruth.me' });
     const answer = page.waitForResponse('**/oidc/remembered', { timeout: 15_000 }).catch(() => null);
-    await page.goto(enrollUrl(pkce().challenge, { agent_name: 'naomi.impact' }));
+    await page.goto(enrollUrl(pkce().challenge, { agent_name: 'naomi.me' }));
     // The page itself catches a pin that is not the session's, and asks who: either way, nothing passes.
     await answer;
     await expect(page.getByText(SHEET).or(page.getByText(/wallet|passkey|Google/i)).first()).toBeVisible();
@@ -313,13 +313,13 @@ test.describe('the ways back to the sheet', () => {
   test('a pin for this person passes, and the token carries the name from the chain', async ({ page, request }) => {
     const s = await signIn(page);
     await allow(page, s);
-    await chain(request, { name: 'ruth.impact' });
+    await chain(request, { name: 'ruth.me' });
     const { verifier, challenge } = pkce();
-    await page.goto(enrollUrl(challenge, { agent_name: 'ruth.impact' }));
+    await page.goto(enrollUrl(challenge, { agent_name: 'ruth.me' }));
     await page.waitForURL((u) => u.href.startsWith(READER_URL) || u.hostname.startsWith('ruth.'), { timeout: 40_000 });
     const code = new URL(page.url()).searchParams.get('code')!;
     const b = await (await request.post('/token', { data: { grant_type: 'authorization_code', code, code_verifier: verifier, client_id: READER, redirect_uri: READER_URL } })).json();
-    expect(JSON.parse(Buffer.from(b.id_token.split('.')[1], 'base64url').toString()).agent_name).toBe('ruth.impact');
+    expect(JSON.parse(Buffer.from(b.id_token.split('.')[1], 'base64url').toString()).agent_name).toBe('ruth.me');
   });
 
   test('prompt=consent', async ({ page }) => {
@@ -355,8 +355,8 @@ test.describe('the ways back to the sheet', () => {
   test('prompt=login naming a Home: asks who, and ends the recognition', async ({ page, context, request }) => {
     const s = await signIn(page);
     await allow(page, s);
-    await chain(request, { name: 'ruth.impact' });
-    await page.goto(enrollUrl(pkce().challenge, { prompt: 'login', agent_name: 'ruth.impact' }));
+    await chain(request, { name: 'ruth.me' });
+    await page.goto(enrollUrl(pkce().challenge, { prompt: 'login', agent_name: 'ruth.me' }));
     await expect.poll(async () => cookieNamed(context, 'ap_sid')).toBeUndefined();
     expect(page.url()).toContain('localhost');
   });

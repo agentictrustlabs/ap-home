@@ -61,7 +61,7 @@ export async function verifyIdTokenForRelyingClient(
     aud = typeof payload.aud === 'string' ? payload.aud : undefined;
   } catch { return null; }
   if (!iss || !isOwnIss(iss) || !aud || !(await resolveClient(env, aud))) return null;
-  const r = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud });
+  const r = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud, expectedNonce: null /* an id_token as an API bearer has no nonce flow (spec 445 D5) */ });
   if (!r.ok) return null;
   const sub = (r.claims.canonical_agent_id ?? r.claims.sub ?? '') as string;
   return (sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;

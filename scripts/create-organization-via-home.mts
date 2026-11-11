@@ -45,10 +45,13 @@ const j = async (r: Response) => { const t = await r.text(); try { return JSON.p
 const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: BY, client_id: 'demo-web' }) }));
 const session = String(si.homeSession ?? ''); const ME = String(si.agent ?? '').toLowerCase() as Address;
 if (!session || !/^0x[0-9a-f]{40}$/.test(ME)) fail(`no session for ${BY} at ${HOME}: ${JSON.stringify(si).slice(0, 200)}`);
-const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
+// A2A_DIRECT=1 talks to the runtime at A2A_URL instead of through the Home's /a2a rewrite: the genesis step waits on
+// its userOp receipt, and Vercel's external rewrite answers 502 ROUTER_EXTERNAL_TARGET_ERROR first (2026-11-11).
+const A2A_BASE = process.env.A2A_DIRECT ? (process.env.A2A_URL ?? 'https://a2a.faithnet.io').replace(/\/$/, '') : `${HOME}/a2a`;
+const csrfRes = await fetch(`${A2A_BASE}/auth/csrf`, { headers: { origin: HOME } });
 const csrf = (await j(csrfRes)) as { token?: string };
 const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0] ?? '', 'x-csrf-token': csrf.token ?? '' };
-const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
+const post = async (path: string, body: unknown) => j(await fetch(`${A2A_BASE}${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
 const sign = async (digest: Hex): Promise<Hex> => { const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}` }, body: JSON.stringify({ digest }) })); if (!b.signature) fail(`persona-sign: ${JSON.stringify(b).slice(0, 160)}`); return b.signature as Hex; };
 type Reply = { kind?: string; error?: string; text?: string; runRef?: string; resumeToken?: string; requirement?: MandateRequirementV1; delegator?: Address; delegate?: Address; alsoApprove?: Array<{ digest: Hex }>; prompt?: { kind?: string; prompt?: string; fields?: unknown; digest?: Hex; signer?: string; payload?: unknown; stepRef?: string }; result?: Record<string, unknown> };
 
@@ -95,6 +98,18 @@ if (!rep || rep.kind !== 'done') fail(`organization.create did not finish: ${JSO
 const finished = rep as Reply;
 const res = (finished.result ?? {}) as { agent?: string; name?: string; nameLater?: boolean; txHash?: string; kind?: string };
 if (!/^0x[0-9a-fA-F]{40}$/.test(String(res.agent ?? ''))) fail(`done, but the result names no agent: ${JSON.stringify(finished.result).slice(0, 400)}`);
+// Record the organization in the steward's private tree, exactly as the Home's Ask does on `done`
+// (apps/home/src/home/ask-record.ts recordCreatedAgent): without it the organization is real on chain but her Home
+// lists no organization, and every step that finds it by stewardship (enable-interactions-at, invite, issue) refuses.
+{
+  const created = finished.result as { agent: string; parent?: string; person?: string; kind?: string; name?: string; stewardshipDelegation?: unknown };
+  const rec = await fetch(`${HOME}/connect/related-orgs`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}` },
+    body: JSON.stringify({ person: created.person ?? ME, orgAgent: created.agent, orgName: created.name ?? '', purpose: created.kind ?? 'org', kind: created.kind ?? 'org', parent: created.parent ?? ME, ...(created.stewardshipDelegation ? { stewardshipDelegation: created.stewardshipDelegation } : {}) }),
+  });
+  if (!rec.ok) fail(`the organization ${created.agent} exists, but recording it in ${BY}'s tree failed: HTTP ${rec.status} ${(await rec.text()).slice(0, 200)}`);
+  console.log(`  recorded in ${BY}'s tree${created.stewardshipDelegation ? ' with the stewardship grant' : ' (no stewardship grant in the result)'}`);
+}
 Object.assign(note, { purpose: 'spec 444 W3 — the organization that issues its members\' credentials (an operator note, not a persona)', home: HOME, chainId: CHAIN, org: { label: LABEL, sa: res.agent, name: res.name ?? null, nameLater: res.nameLater === true, steward: BY, custodian: CUSTODIAN, txHash: res.txHash ?? null, kind: res.kind ?? 'org' }, createdAt: new Date().toISOString() });
 writeFileSync(NOTE, JSON.stringify(note, null, 2) + '\n');
 console.log(`\n✓ organization ${res.agent}${res.name ? ` (${res.name})` : ''}${res.nameLater ? ' — name deferred (rooted elsewhere)' : ''} — written to ${NOTE}`);

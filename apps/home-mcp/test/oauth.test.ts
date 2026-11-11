@@ -19,6 +19,7 @@ function memStore(): Store {
       case 'code.take': { const r = m.codes.get(key!); m.codes.delete(key!); return out(r); }
       case 'token.put': m.tokens.set(key!, row); return out(null);
       case 'token.get': { const r = m.tokens.get(key!); return out(r && r.exp > now ? r : null); }
+      case 'token.take': { const r = m.tokens.get(key!); m.tokens.delete(key!); return out(r && r.exp > now ? r : null); }
       case 'token.delete': m.tokens.delete(key!); return out(null);
       case 'person.put': m.persons.set(key!, row); return out(null);
       case 'person.get': return out(m.persons.get(key!));

@@ -33,7 +33,7 @@ const SHAPE = (process.env.SHAPE ?? 'edge') as 'edge' | 'zone';
 if (SHAPE !== 'edge' && SHAPE !== 'zone') throw new Error(`SHAPE must be 'edge' or 'zone', not ${SHAPE}`);
 const EDGE = (process.env.EDGE ?? '').replace(/\/$/, '');
 const BASE = process.env.BASE ?? '';
-const PARENTS = (process.env.AGENT_NAME_PARENTS ?? 'me,impact').split(',');
+const PARENTS = (process.env.AGENT_NAME_PARENTS ?? 'me').split(',');
 const [steward, ...names] = process.argv.slice(2);
 // `zone` needs no EDGE: the record names the agent's own host, not an ingress.
 if ((SHAPE === 'edge' && !EDGE) || !BASE || !steward || names.length === 0) throw new Error('usage: [SHAPE=edge|zone] EDGE=https://edge-b… BASE=b.faithnet.io place-on-deployment.mts <steward-handle> <name>…');

@@ -29,6 +29,8 @@ import {
   CONSULT_SKILL_CARD,
   AGENT_NAME_PARENT,
   DEFAULT_PUBLIC_BASE_DOMAIN,
+  nameParents,
+  resolveAgentByLabel,
 } from '../src/host-context.js';
 
 const BASE = DEFAULT_PUBLIC_BASE_DOMAIN;
@@ -81,7 +83,7 @@ describe('subdomain → label', () => {
 describe('label → agent name', () => {
   it('appends the deployment TLD', () => {
     expect(agentNameForLabel('alice')).toBe(`alice.${AGENT_NAME_PARENT}`);
-    expect(AGENT_NAME_PARENT).toBe('impact');
+    expect(AGENT_NAME_PARENT).toBe('me'); // the person root — the untyped `.impact` root was retired 2026-11-10
   });
 
   // The round trip that matters: whatever the host resolves to is what the name is built from, so a
@@ -89,7 +91,7 @@ describe('label → agent name', () => {
   it('round-trips from a hostname', () => {
     const label = parseAgentSubdomain(`alice.${BASE}`, BASE);
     expect(label).not.toBeNull();
-    expect(agentNameForLabel(label!)).toBe('alice.impact');
+    expect(agentNameForLabel(label!)).toBe('alice.me');
   });
 });
 
@@ -160,7 +162,7 @@ describe('the served Agent Card declares how to authenticate', () => {
   const ctx = {
     publicOrigin: 'https://alice.example.io',
     label: 'alice',
-    name: 'alice.impact',
+    name: 'alice.me',
     agent: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   } as unknown as Parameters<typeof buildA2aAgentCard>[0];
 
@@ -194,26 +196,27 @@ describe('the served Agent Card declares how to authenticate', () => {
 // spec 346 §5 — typed hosts + typed handles, next to the legacy single-label pattern (unchanged).
 describe('typed hosts and handles (spec 346)', () => {
   const BASE = 'impact-agent.io';
-  it('parseTypedAgentHost: single label stays the legacy name; <label>.<type>.<base> is a typed root name', () => {
-    expect(parseTypedAgentHost(`alice.${BASE}`, BASE)).toEqual({ label: 'alice', name: 'alice.impact' });
+  it('parseTypedAgentHost: single label is the person name; <label>.<type>.<base> is a typed root name', () => {
+    expect(parseTypedAgentHost(`alice.${BASE}`, BASE)).toEqual({ label: 'alice', name: 'alice.me' });
     expect(parseTypedAgentHost(`discovery.registry.${BASE}`, BASE)).toEqual({ label: 'discovery.registry', name: 'discovery.registry' });
     expect(parseTypedAgentHost(`northern-colorado.team.${BASE}:443`, BASE)).toEqual({ label: 'northern-colorado.team', name: 'northern-colorado.team' });
     expect(parseTypedAgentHost(`a.b.${BASE}`, BASE)).toBeNull(); // unknown type level
     expect(parseTypedAgentHost(`a.b.c.${BASE}`, BASE)).toBeNull();
     expect(parseTypedAgentHost(BASE, BASE)).toBeNull();
     expect(parseTypedAgentHost(`evil-${BASE}`, BASE)).toBeNull();
-    // a deployment that cut persons over to `.me` passes its parent explicitly — one parent, never a list
+    // the parent may be passed explicitly — one parent, never a list
     expect(parseTypedAgentHost(`alice.${BASE}`, BASE, 'me')).toEqual({ label: 'alice', name: 'alice.me' });
     expect(agentNameForHandle('alice', 'me')).toBe('alice.me');
   });
   it('agentNameForHandle: legacy label, typed canonical, scoped (@ and path), legacy dotted; roots/type-nodes are subject-less', () => {
-    expect(agentNameForHandle('alice')).toBe('alice.impact');
+    expect(agentNameForHandle('alice')).toBe('alice.me');
     expect(agentNameForHandle('RPedersen.me')).toBe('rpedersen.me');
     expect(agentNameForHandle('vault.svc@richcanvas.org')).toBe('vault.svc@richcanvas.org');
     expect(agentNameForHandle('richcanvas.org/vault.svc')).toBe('vault.svc@richcanvas.org');
     expect(agentNameForHandle('field.ws@richcanvas.org')).toBe('field.workspace@richcanvas.org');
-    expect(agentNameForHandle('alice.impact')).toBe('alice.impact');
-    expect(agentNameForHandle('me')).toBe('me.impact'); // a bare label is always the legacy root's label — typed roots are never addressed by a bare word
+    expect(agentNameForHandle('alice.agent')).toBe('alice.agent');
+    expect(agentNameForHandle('alice.impact')).toBeNull(); // a retired root is an unknown root — no name
+    expect(agentNameForHandle('org')).toBe('org.me'); // a bare word is always a label under the bare root — typed roots are never addressed by a bare word
     expect(agentNameForHandle('svc.richcanvas.org')).toBeNull();
     expect(agentNameForHandle('alice.ai')).toBeNull();
     expect(agentNameForHandle('')).toBeNull();
@@ -236,7 +239,7 @@ describe('typed hosts are one label and reverse cleanly (spec 346 §5, 2026-08-3
   });
   it('round-trips hostForName → parseTypedAgentHost for every typed suffix', () => {
     for (const name of ['x.team', 'x.svc', 'x.workspace', 'x.treasury', 'x.registry', 'x.church', 'x.circle', 'x.org']) {
-      const host = hostForName(name, base, ['me', 'impact'])!;
+      const host = hostForName(name, base, ['me'])!;
       expect(host.split('.').length).toBe(3); // one label under the zone
       expect(parseTypedAgentHost(host, base, 'me')?.name).toBe(name);
     }
@@ -248,7 +251,7 @@ describe('a zone move keeps already-published hosts parseable (spec 346 §5)', (
   it('publishes at the canonical zone and still serves the older one', () => {
     expect(a2aCanonicalDomain(env)).toBe('faithnet.ai');
     expect(a2aBaseDomains(env)).toEqual(['faithnet.ai', 'faithnet.io']);
-    expect(hostForName('fort-morgan-household.church', a2aCanonicalDomain(env), ['me', 'impact'])).toBe('fort-morgan-household-church.faithnet.ai');
+    expect(hostForName('fort-morgan-household.church', a2aCanonicalDomain(env), ['me'])).toBe('fort-morgan-household-church.faithnet.ai');
     for (const zone of a2aBaseDomains(env)) {
       expect(parseTypedAgentHost(`fort-morgan-household-church.${zone}`, zone, 'me')?.name).toBe('fort-morgan-household.church');
     }
@@ -275,5 +278,68 @@ describe('the card advertises the agent\'s NAME on the edge path, not its DNS la
       34348,
     ) as { supportedInterfaces: Array<{ url: string }> };
     expect(card.supportedInterfaces[0]!.url).toBe('https://alice.faithnet.ai/api/a2a');
+  });
+});
+
+// spec 445 / NAME-8 — a host is CONFIRMED BY RECORDS: every reading of the label is resolved, and two holders is a
+// refusal. The ordered walk this replaced served whichever reading came first, so a later typed claim
+// (`alice-home.church`) took the host of an existing bare name (`alice-home-church.<root>`), or the reverse.
+describe('host → agent is confirmed against the registry, and an ambiguous host is refused (spec 445 / NAME-8)', () => {
+  const A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as const;
+  const B = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' as const;
+  const env = { A2A_PUBLIC_BASE_DOMAIN: 'faithnet.ai', AGENT_NAME_PARENTS: 'me' };
+  const reads = (held: Record<string, string>) => {
+    const asked: string[] = [];
+    return { asked, resolveName: async (name: string) => { asked.push(name); return (held[name] ?? null) as `0x${string}` | null; } };
+  };
+
+  it('a bare label is the person name under the bare root', async () => {
+    const r = reads({ 'alice.me': A });
+    expect(await resolveAgentByLabel('alice', env, 'https://alice.faithnet.ai', r)).toMatchObject({ label: 'alice', agent: A, name: 'alice.me' });
+  });
+
+  it('a `-<type>` label resolves EVERY reading — the typed name alone is served', async () => {
+    const r = reads({ 'alice-home.church': A });
+    const ctx = await resolveAgentByLabel('alice-home-church', env, 'https://x', r);
+    expect(ctx).toMatchObject({ agent: A, name: 'alice-home.church' });
+    expect(r.asked.sort()).toEqual(['alice-home-church.me', 'alice-home.church']); // both asked, not first-hit
+  });
+
+  it('two different agents holding one host ⇒ refused, holders listed, nobody served', async () => {
+    const r = reads({ 'alice-home.church': A, 'alice-home-church.me': B });
+    const ctx = await resolveAgentByLabel('alice-home-church', env, 'https://x', r);
+    expect(ctx.agent).toBeNull();
+    expect(ctx.name).toBeNull();
+    expect(ctx.ambiguous?.map((h) => h.name).sort()).toEqual(['alice-home-church.me', 'alice-home.church']);
+  });
+
+  it('the same agent under both readings is one agent, not an ambiguity', async () => {
+    const r = reads({ 'alice-home.church': A, 'alice-home-church.me': A });
+    expect((await resolveAgentByLabel('alice-home-church', env, 'https://x', r)).agent).toBe(A);
+  });
+
+  it('a reserved label is the generic endpoint — it names no agent and is never read', async () => {
+    const r = reads({ 'www.me': A });
+    expect(await resolveAgentByLabel('www', env, 'https://x', r)).toMatchObject({ label: null, agent: null, name: null });
+    expect(r.asked).toEqual([]);
+  });
+
+  it('an explicit typed handle is one name; an unregistered label keeps its first reading and no agent', async () => {
+    const r = reads({ 'vault.svc': A });
+    expect(await resolveAgentByLabel('vault.svc', env, 'https://x', r)).toMatchObject({ agent: A, name: 'vault.svc' });
+    expect(await resolveAgentByLabel('nobody', env, 'https://x', r)).toMatchObject({ label: 'nobody', agent: null, name: 'nobody.me' });
+  });
+
+  it('a read that throws propagates — "could not read" is not "not registered"', async () => {
+    await expect(resolveAgentByLabel('alice', env, 'https://x', { resolveName: async () => { throw new Error('rpc down'); } })).rejects.toThrow('rpc down');
+  });
+
+  it('a retired root left in the deployment\'s list is dropped, never hashed (the `.impact` root, 2026-11-10)', async () => {
+    expect(nameParents({ AGENT_NAME_PARENTS: 'me,impact' })).toEqual(['me']);
+    expect(nameParents({ AGENT_NAME_PARENTS: 'impact' })).toEqual(['me']);
+    expect(nameParents({})).toEqual(['me']);
+    const r = reads({ 'alice.me': A });
+    await resolveAgentByLabel('alice', { ...env, AGENT_NAME_PARENTS: 'me,impact' }, 'https://x', r);
+    expect(r.asked).toEqual(['alice.me']);
   });
 });

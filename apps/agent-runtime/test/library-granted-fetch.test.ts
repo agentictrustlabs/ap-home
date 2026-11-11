@@ -89,7 +89,7 @@ async function signingWireOf(skills: string[] = [LIBRARY_GRANTED_READ]): Promise
     delegator: WORKSPACE, delegate: SESSION_KEY, authority: `0x${'f'.repeat(64)}` as Hex, salt: 11n, signature: '0x',
     caveats: [
       buildCaveat(E.timestamp, encodeTimestampTerms(0, NOW + 86_400)),
-      buildCaveat(E.allowedTargets, encodeAllowedTargetsTerms([WORKSPACE])),
+      buildCaveat(E.allowedTargets, encodeAllowedTargetsTerms([PUBLISHER])), // RUN-9: the wire names the RECEIVING agent
       buildCaveat(E.allowedMethods, encodeAllowedMethodsTerms(skills.map((s) => skillSelector(s)))),
     ],
   };
@@ -136,7 +136,7 @@ function publisherDouble(seen: Seen) {
         if (keccak256(toBytes(JSON.stringify(input))) !== ext.bodyHash) return deny('body hash mismatch');
         const sigOk = await verifySessionWrappedSignature({
           signer: ext.sender as Address, digest: hashA2aMessage(toProfileMessage(message, ext) as never), signature: ext.signature,
-          enforcers: { timestamp: E.timestamp, allowedMethods: E.allowedMethods },
+          enforcers: { timestamp: E.timestamp, allowedMethods: E.allowedMethods, allowedTargets: E.allowedTargets }, target: PUBLISHER,
           verifyDelegationSig: async (d) => ecdsa({ signer: d.delegator, digest: hashDelegation(d, CHAIN, DM), signature: d.signature as Hex }),
           isRevoked: async () => false,
           skill: ext.skill,
@@ -153,7 +153,7 @@ function publisherDouble(seen: Seen) {
   };
 }
 
-const envOf = (seen: Seen) => ({ A2A_TASKS: publisherDouble(seen), TIMESTAMP_ENFORCER: E.timestamp, ALLOWED_METHODS_ENFORCER: E.allowedMethods, A2A_INTERNAL_MARKER: 'marker-for-tests-0123456789abcdef' } as unknown as Env);
+const envOf = (seen: Seen) => ({ A2A_TASKS: publisherDouble(seen), TIMESTAMP_ENFORCER: E.timestamp, ALLOWED_METHODS_ENFORCER: E.allowedMethods, ALLOWED_TARGETS_ENFORCER: E.allowedTargets, CHAIN_ID: String(CHAIN), A2A_INTERNAL_MARKER: 'marker-for-tests-0123456789abcdef' } as unknown as Env);
 const signRaw = async ({ hash }: { hash: Hex }) => sign({ hash, privateKey: SESSION_PK, to: 'hex' });
 
 /** The workspace's agent, its steward the person who chartered it. */
@@ -276,8 +276,8 @@ describe('library.granted.fetch — the workspace reads what a publisher granted
 
   it('WHY NOT THE SESSION LEAF: the DEL-001 leaf (signAsAgent) has no allowedMethods, so no A2A gate would take a message under it', () => {
     const { leaf } = buildSessionDelegation({ delegator: WORKSPACE, sessionKeyAddress: SESSION_KEY, presentsTo: [OTHER], validUntil: NOW + 3600, enforcers: { timestamp: E.timestamp, value: E.value }, chainId: CHAIN, delegationManager: DM });
-    expect(checkSessionWireShape({ ...leaf, salt: leaf.salt.toString() } as never, { timestamp: E.timestamp, allowedMethods: E.allowedMethods }, NOW, { skill: LIBRARY_GRANTED_READ }))
-      .toBe('session wire must carry an allowedMethods caveat');
+    expect(checkSessionWireShape({ ...leaf, salt: leaf.salt.toString() } as never, { timestamp: E.timestamp, allowedMethods: E.allowedMethods, allowedTargets: E.allowedTargets }, NOW, { skill: LIBRARY_GRANTED_READ, target: PUBLISHER }))
+      .toMatch(/session wire (must carry an allowedMethods caveat|carries a caveat this ve)/); // RUN-9: the leaf's value caveat is now refused as unknown
   });
 
   it('is a READ — no capability, no mandate, no ceremony — and never an action tool a plan can carry as an act', () => {

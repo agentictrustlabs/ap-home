@@ -162,7 +162,8 @@ export interface MintDemoTokenResult {
   grant_ref: McpGrantBundleV1['id'];
 }
 
-const DEFAULT_SCOPES = ['mcp:invoke', 'vault:read', 'vault:pii:read'];
+// D7 (spec 445): OAuth carries no vault authority — the bearer asks to INVOKE; the Web3 gates decide what is read.
+const DEFAULT_SCOPES = ['mcp:invoke'];
 const DEFAULT_TTL_SECONDS = 300;
 
 /**

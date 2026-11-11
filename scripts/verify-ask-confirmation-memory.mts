@@ -14,7 +14,7 @@
  * makes the question come back. Nothing here is signed: the memory is written on the turn that supplied
  * the choice, and every run is left at `authority_required` — a remembered choice never reaches a verifier.
  *
- * Defaults are alice's live estate, which already holds a natural ambiguity: `somali-corridor-team.impact`
+ * Defaults are alice's live estate, which already holds a natural ambiguity: `somali-corridor.team`
  * and "Somali Corridor Team" are both teams she stewards. No contrived records.
  */
 import type { Hex } from 'viem';

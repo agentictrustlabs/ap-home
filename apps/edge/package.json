@@ -13,12 +13,12 @@
   },
   "dependencies": {
     "@agenticprimitives/agentic-authorization": "0.0.0-alpha.4",
-    "@agenticprimitives/surface-catalog": "0.0.0-alpha.5",
-    "@agenticprimitives/edge-cloudflare": "0.0.0-alpha.22",
-    "@agenticprimitives/edge-runtime": "0.0.0-alpha.22",
-    "@agenticprimitives/rate-control": "0.0.0-alpha.5",
-    "@agenticprimitives/rate-control-cloudflare": "0.0.0-alpha.5",
-    "@agenticprimitives/admission": "0.0.0-alpha.21"
+    "@agenticprimitives/surface-catalog": "0.0.0-alpha.6",
+    "@agenticprimitives/edge-cloudflare": "0.0.0-alpha.23",
+    "@agenticprimitives/edge-runtime": "0.0.0-alpha.23",
+    "@agenticprimitives/rate-control": "0.0.0-alpha.6",
+    "@agenticprimitives/rate-control-cloudflare": "0.0.0-alpha.6",
+    "@agenticprimitives/admission": "0.0.0-alpha.22"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260605.1",

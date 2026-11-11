@@ -7,7 +7,7 @@
 // deliver it via the §4a single-use code. YouVersion is a PUBLIC PKCE client (no client_secret) and is
 // KMS-custodied exactly like Google — the demo-a2a bridge derives the custodian from (iss, sub), so the
 // only differences from the Google handler are the provider module, the env vars, and `via=youversion`.
-import { completeLogin, oidcFacetId } from '@agenticprimitives/connect-auth/youversion';
+import { completeLogin, oidcFacetId, type OidcLoginAttemptStore, type OidcLoginAttemptV1 } from '@agenticprimitives/connect-auth/youversion';
 import { newAuthCode, validateRedirectUri, importJwks, mintAgentSession } from '@agenticprimitives/connect';
 import { verifySession } from '../../_lib/home-session';
 import type { CanonicalAgentId, CredentialPrincipal } from '@agenticprimitives/types';
@@ -109,30 +109,32 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // stash is spent, so a link opened in the wrong browser does not also ruin the sign-in in the right one.
   if (!(await startedInThisBrowser(request, state))) return json({ error: 'sign_in_started_elsewhere', message: 'This sign-in was started in another browser. Please start again here.' }, 403);
 
-  // Auth Call 3 (/token): we now have the code — consume the single-use stash and exchange it.
-  const stashKey = `oidc:${state}`;
-  const stashRaw = await env.AUTH_CODES.get(stashKey);
-  await env.AUTH_CODES.delete(stashKey);
-  if (!stashRaw) return json({ error: 'unknown or expired state' }, 400);
-  const stash = JSON.parse(stashRaw) as {
-    codeVerifier: string;
-    nonce: string;
-    aud: string;
-    rpRedirect?: string;
-    linkToken?: string;
+  // Auth Call 3 (/token): we now have the code. Spec 445 (connect-auth): the sign-in is bound to ONE server-side
+  // attempt — `completeLogin` TAKES the record (an atomic read-and-delete: of two concurrent callbacks exactly one gets
+  // it), checks its age, and redeems the code with THAT attempt's PKCE verifier. The relying-site context rides in the
+  // same record, so it is read from what was taken, never from a second look-up.
+  type Stash = OidcLoginAttemptV1 & { aud: string; rpRedirect?: string; linkToken?: string };
+  const held: { stash?: Stash } = {};
+  const attempts: OidcLoginAttemptStore = {
+    async take(st) {
+      if (!env.AUTH_CODES.take) throw new Error('the KV has no atomic take — a single-use login attempt cannot be held');
+      const raw = await env.AUTH_CODES.take(`oidc:${st}`);
+      if (!raw) return null;
+      held.stash = JSON.parse(raw) as Stash;
+      return held.stash;
+    },
   };
 
   // Token exchange (PUBLIC PKCE — NO client secret) + id_token verification.
   const result = await completeLogin({
     code,
     returnedState: state,
-    expectedState: state,
-    expectedNonce: stash.nonce,
-    codeVerifier: stash.codeVerifier,
-    redirectUri: env.YOUVERSION_REDIRECT_URI,
+    attempts,
     clientId: env.YOUVERSION_CLIENT_ID,
   });
   if (!result.ok) return json({ error: `OIDC verification failed: ${result.reason}` }, 401);
+  const stash = held.stash;
+  if (!stash) return json({ error: 'unknown or expired state' }, 400); // unreachable: an ok result took the record
 
   const principal: CredentialPrincipal = {
     kind: 'oidc',

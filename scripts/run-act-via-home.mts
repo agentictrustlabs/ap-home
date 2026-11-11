@@ -51,10 +51,13 @@ const j = async (r: Response) => { const t = await r.text(); try { return JSON.p
 const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: BY, client_id: 'demo-web' }) }));
 const session = String(si.homeSession ?? ''); const ME = String(si.agent ?? '').toLowerCase() as Address;
 if (!session || !/^0x[0-9a-f]{40}$/.test(ME)) fail(`no session for ${BY} at ${HOME}: ${JSON.stringify(si).slice(0, 200)}`);
-const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
+// A2A_DIRECT=1 talks to the runtime at A2A_URL instead of through the Home's /a2a rewrite: the genesis step waits on
+// its userOp receipt, and Vercel's external rewrite answers 502 ROUTER_EXTERNAL_TARGET_ERROR first (2026-11-11).
+const A2A_BASE = process.env.A2A_DIRECT ? (process.env.A2A_URL ?? 'https://a2a.faithnet.io').replace(/\/$/, '') : `${HOME}/a2a`;
+const csrfRes = await fetch(`${A2A_BASE}/auth/csrf`, { headers: { origin: HOME } });
 const csrf = (await j(csrfRes)) as { token?: string };
 const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0] ?? '', 'x-csrf-token': csrf.token ?? '' };
-const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
+const post = async (path: string, body: unknown) => j(await fetch(`${A2A_BASE}${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
 const sign = async (digest: Hex): Promise<Hex> => { const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}` }, body: JSON.stringify({ digest }) })); if (!b.signature) fail(`persona-sign: ${JSON.stringify(b).slice(0, 160)}`); return b.signature as Hex; };
 type Reply = { kind?: string; error?: string; text?: string; runRef?: string; resumeToken?: string; requirement?: MandateRequirementV1; delegator?: Address; delegate?: Address; alsoApprove?: Array<{ digest: Hex }>; prompt?: { kind?: string; prompt?: string; fields?: unknown; digest?: Hex; signer?: string; payload?: unknown; stepRef?: string }; result?: Record<string, unknown> };
 
@@ -102,4 +105,17 @@ if (!rep || (rep.kind !== 'done' && rep.kind !== 'answer')) fail(`${TOOL} did no
 const finished = rep as Reply;
 console.log(`\n✓ ${TOOL} → ${finished.kind}: ${String(finished.text ?? '').slice(0, 300)}`);
 console.log(JSON.stringify(finished.result ?? {}).slice(0, 1500));
+// An invitation is recorded in the organization's vault by the Home after `done` (apps/home/src/home/ask-record.ts
+// recordInvitation — the private half the invitee's directory reads); a headless run must do the same, or the invitee
+// is told "this organization has not authorized you to join".
+if (TOOL === 'organization.membership.invite') {
+  const inv = (finished.result ?? {}) as { org?: string; invitee?: string; memberAccessDelegation?: unknown; facets?: Record<string, unknown>; relationshipOffer?: unknown };
+  if (!inv.org || !inv.invitee || !inv.memberAccessDelegation) fail(`invite finished without a member-access grant to record: ${JSON.stringify(inv).slice(0, 300)}`);
+  const rec = await fetch(`${HOME}/connect/org-invite/agent`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}` },
+    body: JSON.stringify({ org: inv.org!.toLowerCase(), agent: inv.invitee!.toLowerCase(), memberAccessDelegation: inv.memberAccessDelegation, ...(inv.facets ?? {}), ...(inv.relationshipOffer ? { relationshipOffer: inv.relationshipOffer } : {}) }),
+  });
+  if (!rec.ok) fail(`the invitation was issued but recording it in the organization's vault failed: HTTP ${rec.status} ${(await rec.text()).slice(0, 200)}`);
+  console.log('  invitation recorded in the organization\'s vault');
+}
 if (OUT) { writeFileSync(OUT, JSON.stringify({ tool: TOOL, args: ARGS, result: finished.result ?? null, at: new Date().toISOString() }, null, 2) + '\n', { mode: 0o600 }); console.log(`written ${OUT}`); }

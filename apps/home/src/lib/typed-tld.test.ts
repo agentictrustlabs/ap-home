@@ -1,8 +1,8 @@
 /**
  * Every kind a person can CREATE lands on a typed root.
  *
- * The create form showed ".impact" — the legacy root — while the claim underneath already used the typed
- * one for the kind. So "New organization" promised `phone-6111.impact` and produced `phone-6111.org`.
+ * The create form showed an untyped legacy root while the claim underneath already used the typed
+ * one for the kind. So "New organization" promised one suffix and produced `phone-6111.org`.
  * Worse than a cosmetic mismatch: the suffix names the derived TYPE (spec 346), and a legacy root carries
  * NONE — so the form was advertising the one property that would later stop the agent being listed.
  *
@@ -10,7 +10,7 @@
  * root fails here rather than quietly falling back to a rootless name.
  */
 import { describe, it, expect } from 'vitest';
-import { typedTldForKind } from '../connect-client';
+import { typedTldForKind, tldOfKind } from '../connect-client';
 import { CLAIMABLE_TLDS } from './domain';
 
 /** The kinds the Stewardship surfaces actually create today. */
@@ -28,8 +28,9 @@ const CREATABLE = [
 describe('a created agent is named under its own type', () => {
   for (const [kind, tld] of CREATABLE) {
     it(`${kind} → .${tld}`, () => {
-      // Deployment-gated: a root this Home does not list as claimable yields undefined, and the caller
-      // falls back to the legacy parent deliberately rather than claiming under a root that is not there.
+      // Deployment-gated: a root this Home does not list as claimable yields undefined, and the claim is
+      // REFUSED — there is no untyped root to fall to (retired 2026-11-10). The label still shows the kind's suffix.
+      expect(tldOfKind(kind)).toBe(tld);
       if (!CLAIMABLE_TLDS.includes(tld)) {
         expect(typedTldForKind(kind)).toBeUndefined();
         return;

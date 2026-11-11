@@ -69,7 +69,7 @@ async function callerSa({ request, env }: FnContext): Promise<string | null> {
     aud = typeof payload.aud === 'string' ? payload.aud : undefined;
   } catch { return null; }
   if (!iss || !ownIssuer(request, env)(iss) || !aud || !(await resolveClient(env, aud))) return null;
-  const idv = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud });
+  const idv = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud, expectedNonce: null /* an id_token as an API bearer has no nonce flow (spec 445 D5) */ });
   if (!idv.ok) return null;
   const sub = (idv.claims.canonical_agent_id ?? idv.claims.sub ?? '') as string;
   return (sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;

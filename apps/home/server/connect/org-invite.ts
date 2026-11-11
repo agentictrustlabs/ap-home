@@ -61,7 +61,7 @@ export async function callerFromInviteAuth(env: FnContext['env'], request: Reque
     aud = typeof payload.aud === 'string' ? payload.aud : undefined;
   } catch { return null; }
   if (!iss || !issOk(iss) || !aud || !(await resolveClient(env, aud))) return null;
-  const idv = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud });
+  const idv = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud, expectedNonce: null /* an id_token as an API bearer has no nonce flow (spec 445 D5) */ });
   if (!idv.ok) return null;
   const sub = (idv.claims.canonical_agent_id ?? idv.claims.sub ?? '') as string;
   const person = (sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();

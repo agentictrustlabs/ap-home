@@ -66,25 +66,29 @@ function demoHmacSigner(secret: string): (receiptHash: Sha256) => Promise<Receip
 // standard tooling: recoverMessageAddress({ message: receiptHash, signature })
 // === proof.signer. Transport + signer address memoized per isolate.
 let _kms: { transport: GcpKmsTransport; signer: `0x${string}` } | undefined;
+async function kmsState(sa: ServiceAccount, keyName: string): Promise<{ transport: GcpKmsTransport; signer: `0x${string}` }> {
+  if (!_kms) {
+    const transport = createGcpKmsTransport(sa);
+    const pem = await transport.getPublicKeyPem(keyName);
+    _kms = { transport, signer: addressFromSpkiPem(pem) as `0x${string}` };
+  }
+  return _kms;
+}
 function kmsEip191Signer(
   serviceAccountJson: string,
   keyName: string,
 ): (receiptHash: Sha256) => Promise<ReceiptProof> {
   const sa: ServiceAccount = parseServiceAccountJson(serviceAccountJson);
   return async (receiptHash) => {
-    if (!_kms) {
-      const transport = createGcpKmsTransport(sa);
-      const pem = await transport.getPublicKeyPem(keyName);
-      _kms = { transport, signer: addressFromSpkiPem(pem) as `0x${string}` };
-    }
+    const k = await kmsState(sa, keyName);
     const digest = hexToBytes(hashMessage(receiptHash));
     const signature = await gcpSignDigest({
       serviceAccount: sa,
       cryptoKeyVersionName: keyName,
       digest,
-      transport: _kms.transport,
+      transport: k.transport,
     });
-    return { type: 'eip191-kms-secp256k1', signature, signer: _kms.signer };
+    return { type: 'eip191-kms-secp256k1', signature, signer: k.signer };
   };
 }
 
@@ -166,10 +170,10 @@ async function storeReceipt(
  * write is fail-soft (the receipt is evidence, not the decision — the audit
  * trail's fail-closed classes are spec 291 §5's, not this demo path's).
  */
-export function buildReceiptsConfig(
+export async function buildReceiptsConfig(
   env: ReceiptsEnv,
   ctx: { correlationId?: string },
-): { receipts: ReceiptsConfig; holder: { receipt?: VerificationReceiptV1 } } {
+): Promise<{ receipts: ReceiptsConfig; holder: { receipt?: VerificationReceiptV1 } }> {
   const holder: { receipt?: VerificationReceiptV1 } = {};
   const secret = env.VERIFICATION_RECEIPT_SECRET?.trim();
   const kmsKey = env.VERIFICATION_RECEIPT_KMS_KEY?.trim();
@@ -177,6 +181,10 @@ export function buildReceiptsConfig(
   // EIP-191 signer when a key is configured (counterparty-verifiable offline
   // via ecrecover); else demo-hmac (host-verifiable only, demo-grade); else
   // unsigned (integrity-only). Never a runtime fallback between them.
+  const kmsSigner =
+    kmsKey && env.GCP_SERVICE_ACCOUNT_JSON
+      ? (await kmsState(parseServiceAccountJson(env.GCP_SERVICE_ACCOUNT_JSON), kmsKey)).signer
+      : undefined;
   const sign =
     kmsKey && env.GCP_SERVICE_ACCOUNT_JSON
       ? kmsEip191Signer(env.GCP_SERVICE_ACCOUNT_JSON, kmsKey)
@@ -184,11 +192,12 @@ export function buildReceiptsConfig(
         ? demoHmacSigner(secret)
         : undefined;
   const receipts: ReceiptsConfig = {
-    // The verifying service identity. The demo host has no service SA wired
-    // on this ingress yet, so the audience URN names the verifier; with the
-    // KMS signer configured, proof.signer carries the recoverable KMS key
-    // address (the service-SA facet binding is G-5's territory).
-    verifier: env.MCP_AUDIENCE,
+    // The verifying service identity — and, since DATA-8 (spec 445), the `expectedSigner` a counterparty verifies
+    // against: the body's `verifier` must BE the signer. With the KMS signer configured that is the KMS key's
+    // address (owner decision: the expected signer is the KMS address, not the audience URN). The audience URN
+    // stays the verifier only where nothing can be checked against it (demo-hmac / unsigned: host-verifiable
+    // or inspect-only).
+    verifier: kmsSigner ?? env.MCP_AUDIENCE,
     policyVersion: 'demo-mcp/mcp-v2/1',
     ...(sign ? { sign } : {}),
     statusEvidence: () => latestBlockEvidence(env.RPC_URL),

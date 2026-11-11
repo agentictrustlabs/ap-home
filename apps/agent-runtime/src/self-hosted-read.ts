@@ -8,7 +8,7 @@ import type { Address, Hex } from 'viem';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { signedSelfHostRead } from './self-host-wire.js';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
-import { a2aBaseDomains, AGENT_NAME_PARENT } from './host-context.js';
+import { a2aBaseDomains, nameParents } from './host-context.js';
 import { nameRecordsReader, subjectAddress, servesUnpublishedNames } from './subject-address.js';
 
 export interface SelfHostedReadEnv {
@@ -39,7 +39,7 @@ export async function selfHostOriginOf(env: SelfHostedReadEnv, addressee: Addres
       const naming = new AgentNamingClient({ rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID), registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address, ...(env.PROFILE_RESOLVER ? { profileResolver: env.PROFILE_RESOLVER as Address } : {}) });
       const name = await naming.reverseResolve(addressee);
       const r = name ? await records(name) : null;
-      const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p: string) => p.trim()).filter(Boolean);
+      const parents = nameParents(env);
       const where = subjectAddress(name, r, { ownIngress: env.DEMO_EDGE_URL?.trim() || selfOrigin, ownDomains: a2aBaseDomains(env), parents, servesUnpublished: servesUnpublishedNames(env) });
       if (where.where === 'wire') {
         const host = new URL(where.cardUrl).origin;

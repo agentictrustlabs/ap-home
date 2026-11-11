@@ -44,12 +44,12 @@ if (home && by) {
 }
 const REG = [
   { type: 'function', name: 'rotateSigner', stateMutability: 'nonpayable', inputs: [{ name: 'estateId', type: 'bytes32' }, { name: 'to', type: 'address' }], outputs: [] },
-  { type: 'function', name: 'signerOf', stateMutability: 'view', inputs: [{ name: 'estateId', type: 'bytes32' }], outputs: [{ type: 'address' }] },
+  { type: 'function', name: 'declaredSignerOf', stateMutability: 'view', inputs: [{ name: 'estateId', type: 'bytes32' }], outputs: [{ type: 'address' }] },
 ] as const;
 const chain = { id: CHAIN_ID, name: 'c', nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: [RPC] } } } as const;
 const pc = createPublicClient({ chain, transport: http(RPC) });
-const cur = String(await pc.readContract({ address: registry, abi: REG, functionName: 'signerOf', args: [estateId] })).toLowerCase();
-console.log(`estate ${estateId.slice(0, 12)}… · signerOf is ${cur}\n  rotating ${from} → ${to}, signed by ${who}`);
+const cur = String(await pc.readContract({ address: registry, abi: REG, functionName: 'declaredSignerOf', args: [estateId] })).toLowerCase();
+console.log(`estate ${estateId.slice(0, 12)}… · declaredSignerOf is ${cur}\n  rotating ${from} → ${to}, signed by ${who}`);
 if (cur !== from) { console.error(`  ${from} is not the current signer — only the current signer may rotate (nothing sent)`); process.exit(1); }
 if (dry) { console.log('  would send the rotation userOp'); process.exit(0); }
 const client = new AgentAccountClient({ rpcUrl: RPC, chainId: CHAIN_ID, entryPoint: ENTRY_POINT, factory: FACTORY });
@@ -60,4 +60,4 @@ const { receipt } = await client.submitCallUserOp(built.userOp, privateKeyToAcco
 let ok: boolean | null = null;
 for (const log of receipt.logs) { try { ok = decodeEventLog({ abi: [OP_EVENT], data: log.data, topics: log.topics }).args.success as boolean; } catch { /* another event */ } }
 if (receipt.status !== 'success' || ok === false) { console.error(`  the rotation userOp failed (tx ${receipt.transactionHash})`); process.exit(1); }
-console.log(`  done (tx ${receipt.transactionHash}) — signerOf is now ${String(await pc.readContract({ address: registry, abi: REG, functionName: 'signerOf', args: [estateId] }))}`);
+console.log(`  done (tx ${receipt.transactionHash}) — declaredSignerOf is now ${String(await pc.readContract({ address: registry, abi: REG, functionName: 'declaredSignerOf', args: [estateId] }))}`);

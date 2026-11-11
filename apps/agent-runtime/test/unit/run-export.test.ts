@@ -103,6 +103,15 @@ describe('exportRun', () => {
       expect(sp.attributes['ap.prov.bundle.id']).toBe(doc.id);
     }
   });
+  it('RUN-19 — with EXPORT_DIGEST_SALT the exported digests are keyed: they differ from the unsalted ones, and are stable under the same salt', async () => {
+    const plain = JSON.stringify(await firewalledSpans(record));
+    const a = JSON.stringify(await firewalledSpans(record, { EXPORT_DIGEST_SALT: 'a-deployment-secret-salt' }));
+    const b = JSON.stringify(await firewalledSpans(record, { EXPORT_DIGEST_SALT: 'a-deployment-secret-salt' }));
+    const other = JSON.stringify(await firewalledSpans(record, { EXPORT_DIGEST_SALT: 'another-deployment-salt' }));
+    expect(a).toBe(b);
+    expect(a).not.toBe(other);
+    expect(a).not.toBe(plain);
+  });
   it('the served spans are the firewalled ones', async () => {
     const spans = await firewalledSpans(record);
     expect(spans[1]!.attributes['ap.receipt.digest']).toMatch(/^0x[0-9a-f]{64}$/);

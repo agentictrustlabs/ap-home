@@ -17,7 +17,7 @@ import {
 import { A2A_ANY_SKILL, checkSessionWireShape, hashA2aMessage, skillSelector, verifySessionWrappedSignature } from '@agenticprimitives/a2a';
 import { delegatedInput, readDelegatedTask, toProfileMessage, type MessageV1 } from '@agenticprimitives/a2a/standard';
 import { InteractionsDO } from '../src/interactions-do.js';
-import { SERVICE_SIGNING_WIRE_KEY, SERVICE_SIGNING_WIRE_SKILLS, serviceSigningWireError, wireCovering } from '../src/agent-signing-wire.js';
+import { SERVICE_SIGNING_WIRE_KEY, SERVICE_SIGNING_WIRE_SKILLS, serviceSigningWireError, serviceWireKey, serviceWireTarget, wireCovering } from '../src/agent-signing-wire.js';
 import { grantedLibraryRead, libraryEntryScope, libraryInvoker, LIBRARY_GRANTED_FETCH, LIBRARY_GRANTED_READ, type LibraryEntry, type LibraryToolDeps } from '../src/library-tools.js';
 import { grantedReadSender } from '../src/library-granted-fetch.js';
 import type { Env, IncomingDelegation } from '../src/index.js';
@@ -53,7 +53,7 @@ let jwks: unknown;
 let brokerSigner: CryptoKey;
 async function mint(sub: string) {
   const enc = new TextEncoder();
-  const si = `${b64url(enc.encode(JSON.stringify({ alg: 'ES256', kid: KID, typ: 'JWT' })))}.${b64url(enc.encode(JSON.stringify({ iss: BROKER_ISS, aud: AUD, sub: `eip155:${CHAIN}:${sub}`, iat: NOW, exp: NOW + 3600, jti: crypto.randomUUID() })))}`;
+  const si = `${b64url(enc.encode(JSON.stringify({ alg: 'ES256', kid: KID, typ: 'agent-session+jwt' })))}.${b64url(enc.encode(JSON.stringify({ iss: BROKER_ISS, aud: AUD, sub: `eip155:${CHAIN}:${sub}`, iat: NOW, exp: NOW + 3600, jti: crypto.randomUUID(), assurance: 'onchain-confirmed', principal: { kind: 'passkey', id: 'test', assurance: 'onchain-confirmed' } })))}`;
   const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, brokerSigner, enc.encode(si));
   return `${si}.${b64url(new Uint8Array(sig))}`;
 }
@@ -74,14 +74,15 @@ beforeEach(() => {
 });
 afterEach(() => restoreFetch());
 
-/** The wire exactly as the Home's `issueAgentSigningWire` builds it: timestamp, allowedTargets [agent], allowedMethods. */
+/** The wire exactly as the Home's `issueServiceLibraryReadWire` builds it (RUN-9, one wire per receiving agent): timestamp,
+ *  allowedTargets [the PUBLISHER it is presented at], allowedMethods. */
 async function wireOf(o: { delegator?: Address; delegate?: Address; selectors?: Hex[]; signer?: Hex; targets?: Address[]; salt?: bigint } = {}): Promise<IncomingDelegation> {
   const delegator = o.delegator ?? WORKSPACE;
   const unsigned: Delegation = {
     delegator, delegate: o.delegate ?? SESSION_KEY, authority: `0x${'f'.repeat(64)}` as Hex, salt: o.salt ?? 21n, signature: '0x',
     caveats: [
       buildCaveat(E.timestamp, encodeTimestampTerms(0, NOW + 180 * 86_400)),
-      buildCaveat(E.allowedTargets, encodeAllowedTargetsTerms(o.targets ?? [delegator])),
+      buildCaveat(E.allowedTargets, encodeAllowedTargetsTerms(o.targets ?? [PUBLISHER])),
       buildCaveat(E.allowedMethods, encodeAllowedMethodsTerms(o.selectors ?? [skillSelector(LIBRARY_GRANTED_READ) as Hex])),
     ],
   };
@@ -99,7 +100,7 @@ function workspaceObject(o: { isService?: boolean; seed?: Record<string, unknown
     BROKER_ISS, BROKER_JWKS_URL: `${BROKER_ISS}/.well-known/jwks.json`, DEMO_SSO_AUD: AUD, A2A_INTERNAL_MARKER: MARKER,
   };
   const obj = new InteractionsDO(
-    { storage: { async get(k: string) { return storage.get(k); }, async put(k: string, v: unknown) { storage.set(k, v); }, async delete(k: string) { storage.delete(k); } } } as never,
+    { storage: { async get(k: string) { return storage.get(k); }, async put(k: string, v: unknown) { storage.set(k, v); }, async delete(k: string) { storage.delete(k); }, async list(o: { prefix?: string } = {}) { return new Map([...storage].filter(([k]) => k.startsWith(o.prefix ?? ''))); } } } as never,
     env as never,
     {
       erc1271: (account, digest, signature) => ecdsa(account, digest, signature),
@@ -126,13 +127,13 @@ describe('the service signing wire — the store (signing.wireEnable)', () => {
     expect(r.body.ok).toBe(true);
     expect(r.body.hash).toBe(hashDelegation({ ...(wire as never as Delegation), salt: 21n }, CHAIN, DM));
     expect(r.body.skills).toEqual(['library.granted.read']);
-    expect(w.storage.get(SERVICE_SIGNING_WIRE_KEY)).toMatchObject({ hash: r.body.hash, sessionKey: SESSION_KEY, enabledBy: PERSON });
+    expect(w.storage.get(serviceWireKey(PUBLISHER))).toMatchObject({ hash: r.body.hash, sessionKey: SESSION_KEY, enabledBy: PERSON });
     expect(w.storage.has('routing.orgWire')).toBe(false); // never the org consult wire's key
-    const found = await w.internal('internal.signing.wire', { skill: LIBRARY_GRANTED_READ });
+    const found = await w.internal('internal.signing.wire', { skill: LIBRARY_GRANTED_READ, target: PUBLISHER });
     expect(found.from).toBe(SERVICE_SIGNING_WIRE_KEY);
-    expect(checkSessionWireShape(found.wire, { timestamp: E.timestamp, allowedMethods: E.allowedMethods }, NOW, { skill: LIBRARY_GRANTED_READ })).toBeNull();
+    expect(checkSessionWireShape(found.wire, { timestamp: E.timestamp, allowedMethods: E.allowedMethods, allowedTargets: E.allowedTargets }, NOW, { skill: LIBRARY_GRANTED_READ, target: PUBLISHER })).toBeNull();
     // status hands back the full struct (the Home needs it to revoke on chain)
-    const st = await w.call('signing.wireStatus', {});
+    const st = await w.call('signing.wireStatus', { target: PUBLISHER });
     expect(st.body).toMatchObject({ ok: true, wirePresent: true, sessionKey: SESSION_KEY, hash: r.body.hash });
     expect(st.body.wire.signature).toBe(wire.signature);
   });
@@ -142,7 +143,7 @@ describe('the service signing wire — the store (signing.wireEnable)', () => {
     const r = await w.call('signing.wireEnable', { delegation: await wireOf({ signer: STRANGER_PK }) });
     expect(r.status).toBe(403);
     expect(r.body.error).toBe(`the signing wire's signature does not verify against ${WORKSPACE} — only the credential that custodies this service agent can sign it`);
-    expect(w.storage.has(SERVICE_SIGNING_WIRE_KEY)).toBe(false);
+    expect(w.storage.has(serviceWireKey(PUBLISHER))).toBe(false);
   });
 
   it('the ANY-SKILL sentinel is refused at store', async () => {
@@ -152,7 +153,7 @@ describe('the service signing wire — the store (signing.wireEnable)', () => {
     expect(r.body.error).toBe('a service signing wire must never carry the any-skill sentinel');
     const mixed = await w.call('signing.wireEnable', { delegation: await wireOf({ selectors: [skillSelector(LIBRARY_GRANTED_READ) as Hex, A2A_ANY_SKILL as Hex] }) });
     expect(mixed.body.error).toBe('a service signing wire must never carry the any-skill sentinel');
-    expect(w.storage.has(SERVICE_SIGNING_WIRE_KEY)).toBe(false);
+    expect(w.storage.has(serviceWireKey(PUBLISHER))).toBe(false);
   });
 
   it('OTHER selectors are refused at store — alongside the library read, or instead of it', async () => {
@@ -162,13 +163,15 @@ describe('the service signing wire — the store (signing.wireEnable)', () => {
     expect(extra.body.error).toMatch(/^a service signing wire names exactly library\.granted\.read — this one names other methods too \(0x/);
     const consultOnly = await w.call('signing.wireEnable', { delegation: await wireOf({ selectors: [skillSelector('discussion.consult') as Hex] }) });
     expect(consultOnly.body.error).toBe('session wire allowedMethods does not name the library.granted.read selector');
-    expect(w.storage.has(SERVICE_SIGNING_WIRE_KEY)).toBe(false);
+    expect(w.storage.has(serviceWireKey(PUBLISHER))).toBe(false);
   });
 
   it('refuses a wire to another delegate, aimed at another target, already revoked, or for an agent that is not a service', async () => {
     const w = workspaceObject();
     expect((await w.call('signing.wireEnable', { delegation: await wireOf({ delegate: PERSON }) })).body.error).toBe('the signing wire\'s delegate must be the interactions-session key');
-    expect((await w.call('signing.wireEnable', { delegation: await wireOf({ targets: [PUBLISHER] }) })).body.error).toBe('the signing wire\'s allowedTargets must name exactly this service agent');
+    expect((await w.call('signing.wireEnable', { delegation: await wireOf({ targets: [WORKSPACE] }) })).body.error).toMatch(/not this service agent/); // RUN-9: a wire naming only the sender reaches no publisher
+    expect((await w.call('signing.wireEnable', { delegation: await wireOf({ targets: [PUBLISHER, PERSON] }) })).body.error).toMatch(/exactly one receiving agent/);
+    expect((await w.call('signing.wireEnable', { target: PERSON, delegation: await wireOf() })).body.error).toMatch(/names 0x.*, not the receiving agent/);
     const wire = await wireOf();
     w.revoked.add(hashDelegation({ ...(wire as never as Delegation), salt: 21n }, CHAIN, DM).toLowerCase());
     expect((await w.call('signing.wireEnable', { delegation: wire })).body.error).toBe('the signing wire is already revoked on-chain');
@@ -182,7 +185,7 @@ describe('the service signing wire — the store (signing.wireEnable)', () => {
     const w = workspaceObject();
     const r = await w.obj.fetch(new Request(`https://do/interactions/${WORKSPACE}/signing.wireEnable`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ delegation: await wireOf() }) }));
     expect(r.status).toBeGreaterThanOrEqual(400);
-    expect(w.storage.has(SERVICE_SIGNING_WIRE_KEY)).toBe(false);
+    expect(w.storage.has(serviceWireKey(PUBLISHER))).toBe(false);
   });
 
   it('the internal lookup is in-Worker only', async () => {
@@ -196,12 +199,12 @@ describe('the org consult wire is untouched', () => {
   it('an org\'s routing.orgWire is not clobbered; each method finds the wire that names it; internal.consult.orgWire is unchanged', async () => {
     const orgWire = await wireOf({ selectors: [skillSelector('discussion.consult') as Hex, skillSelector('archetype.ontologist') as Hex], salt: 5n });
     // An agent that holds both (possible only for one that is a service AND ran routing-enable — the keys are separate).
-    const w = workspaceObject({ seed: { 'routing.orgWire': { wire: orgWire, hash: '0xorg', sessionKey: SESSION_KEY, enabledBy: PERSON, enabledAt: 'then' }, state: { grant: { delegator: WORKSPACE, delegate: SESSION_KEY, authority: `0x${'0'.repeat(64)}`, caveats: [], salt: '0', signature: '0x' } } } });
+    const w = workspaceObject({ seed: { [`routing.orgWire:${PUBLISHER}`]: { target: PUBLISHER, wire: orgWire, hash: '0xorg', sessionKey: SESSION_KEY, enabledBy: PERSON, enabledAt: 'then' }, state: { grant: { delegator: WORKSPACE, delegate: SESSION_KEY, authority: `0x${'0'.repeat(64)}`, caveats: [], salt: '0', signature: '0x' } } } });
     expect((await w.call('signing.wireEnable', { delegation: await wireOf() })).status).toBe(200);
-    expect((w.storage.get('routing.orgWire') as { wire: unknown }).wire).toEqual(orgWire);
-    expect((await w.internal('internal.signing.wire', { skill: 'discussion.consult' })).from).toBe('routing.orgWire');
-    expect((await w.internal('internal.signing.wire', { skill: 'archetype.ontologist' })).wire).toEqual(orgWire);
-    expect((await w.internal('internal.signing.wire', { skill: LIBRARY_GRANTED_READ })).from).toBe(SERVICE_SIGNING_WIRE_KEY);
+    expect((w.storage.get(`routing.orgWire:${PUBLISHER}`) as { wire: unknown }).wire).toEqual(orgWire);
+    expect((await w.internal('internal.signing.wire', { skill: 'discussion.consult', target: PUBLISHER })).from).toBe('routing.orgWire');
+    expect((await w.internal('internal.signing.wire', { skill: 'archetype.ontologist', target: PUBLISHER })).wire).toEqual(orgWire);
+    expect((await w.internal('internal.signing.wire', { skill: LIBRARY_GRANTED_READ, target: PUBLISHER })).from).toBe(SERVICE_SIGNING_WIRE_KEY);
   });
 
   it('wireCovering: with only an org wire that lacks the method, that wire is returned so the signer\'s shape check says what is missing', async () => {
@@ -220,14 +223,14 @@ describe('revocation (signing.wireClear)', () => {
   it('a LIVE wire is not cleared by a session; once revoked on chain it is', async () => {
     const w = workspaceObject();
     const en = await w.call('signing.wireEnable', { delegation: await wireOf() });
-    const live = await w.call('signing.wireClear', {});
+    const live = await w.call('signing.wireClear', { target: PUBLISHER });
     expect(live.status).toBe(409);
     expect(live.body.error).toMatch(/still live — its custodian revokes it on chain first/);
-    expect(w.storage.has(SERVICE_SIGNING_WIRE_KEY)).toBe(true);
+    expect(w.storage.has(serviceWireKey(PUBLISHER))).toBe(true);
     w.revoked.add(String(en.body.hash).toLowerCase());
-    expect((await w.call('signing.wireClear', {})).body).toEqual({ ok: true, cleared: true });
-    expect(w.storage.has(SERVICE_SIGNING_WIRE_KEY)).toBe(false);
-    expect((await w.internal('internal.signing.wire', { skill: LIBRARY_GRANTED_READ })).wire).toBeNull();
+    expect((await w.call('signing.wireClear', { target: PUBLISHER })).body).toEqual({ ok: true, cleared: true });
+    expect(w.storage.has(serviceWireKey(PUBLISHER))).toBe(false);
+    expect((await w.internal('internal.signing.wire', { skill: LIBRARY_GRANTED_READ, target: PUBLISHER })).wire).toBeNull();
   });
 });
 
@@ -281,7 +284,7 @@ function publisherTasks(seen: { senders: string[]; tasks: Map<string, { sender: 
         if (keccak256(toBytes(JSON.stringify(input))) !== ext.bodyHash) return deny('body hash mismatch');
         const ok = await verifySessionWrappedSignature({
           signer: ext.sender as Address, digest: hashA2aMessage(toProfileMessage(message, ext) as never), signature: ext.signature,
-          enforcers: { timestamp: E.timestamp, allowedMethods: E.allowedMethods },
+          enforcers: { timestamp: E.timestamp, allowedMethods: E.allowedMethods, allowedTargets: E.allowedTargets }, target: PUBLISHER,
           verifyDelegationSig: async (d) => ecdsa(d.delegator, hashDelegation(d, CHAIN, DM), d.signature as Hex),
           isRevoked: async (d) => seen.revokedWire.has(hashDelegation(d, CHAIN, DM).toLowerCase()),
           skill: ext.skill,
@@ -298,6 +301,8 @@ function publisherTasks(seen: { senders: string[]; tasks: Map<string, { sender: 
 }
 
 describe('end to end — the minted wire signs #76\'s fetch', () => {
+  // RUN-9 (spec 445): the wire names the PUBLISHER it is presented at (one wire per receiving agent), so the publisher's gate
+  // takes it; the sender reads the wire FOR that publisher.
   it('the publisher\'s gate accepts the message as the workspace\'s, and the real granted read answers', async () => {
     const w = workspaceObject();
     expect((await w.call('signing.wireEnable', { delegation: await wireOf() })).status).toBe(200);
@@ -313,7 +318,7 @@ describe('end to end — the minted wire signs #76\'s fetch', () => {
     expect(seen.senders).toEqual([WORKSPACE]);
 
     // REVOKED on chain ⇒ the publisher's gate refuses the next message under it, at once.
-    const st = await w.call('signing.wireStatus', {});
+    const st = await w.call('signing.wireStatus', { target: PUBLISHER });
     seen.revokedWire.add(String(st.body.hash).toLowerCase());
     const after = (await libraryInvoker(deps, WORKSPACE, PERSON)(LIBRARY_GRANTED_FETCH, { publisher: PUBLISHER, id: 'art-restricted', grant: await grantToWorkspace() }, ctx)) as Record<string, any>;
     expect(after.read).toBe(false);
@@ -328,5 +333,31 @@ describe('end to end — the minted wire signs #76\'s fetch', () => {
     expect(sent.ok).toBe(false);
     expect((sent as { refused: string }).refused).toMatch(/holds no signing wire of its own .* its custodian signs one at their Home \(\/workspace-read\)/);
     expect(seen.senders).toEqual([]);
+  });
+});
+
+
+describe('the org routing wire is ONE PER RECEIVING AGENT (RUN-9, owner decision)', () => {
+  const MEMBER_A = PUBLISHER;
+  const MEMBER_B = ('0x' + 'b7'.repeat(20)) as Address;
+  const consult = [skillSelector('discussion.consult') as Hex];
+
+  it('a wire minted for member A is stored under A, handed out only for A, and refused at member B\'s gate', async () => {
+    const wireA = await wireOf({ selectors: consult, targets: [MEMBER_A], salt: 31n });
+    const w = workspaceObject({ seed: { [`routing.orgWire:${MEMBER_A}`]: { target: MEMBER_A, wire: wireA, hash: '0xa', sessionKey: SESSION_KEY, enabledBy: PERSON, enabledAt: 'then' }, state: { grant: { delegator: WORKSPACE, delegate: SESSION_KEY, authority: `0x${'0'.repeat(64)}`, caveats: [], salt: '0', signature: '0x' } } } });
+    expect((await w.internal('internal.signing.wire', { skill: 'discussion.consult', target: MEMBER_A })).wire).toEqual(wireA);
+    expect((await w.internal('internal.signing.wire', { skill: 'discussion.consult', target: MEMBER_B })).wire).toBeNull(); // no wire for B — never A's
+    expect((await w.internal('internal.signing.wire', { skill: 'discussion.consult' })).wire).toBeNull(); // no target, no org wire
+    // the receiving agent verifies ITS OWN target: A's wire passes at A and is refused at B
+    const enf = { timestamp: E.timestamp, allowedMethods: E.allowedMethods, allowedTargets: E.allowedTargets };
+    expect(checkSessionWireShape(wireA as never, enf, NOW, { skill: 'discussion.consult', target: MEMBER_A })).toBeNull();
+    expect(checkSessionWireShape(wireA as never, enf, NOW, { skill: 'discussion.consult', target: MEMBER_B })).toMatch(/target/i);
+  });
+
+  it('the store check (routing-enable) reads ONE target: an org-only wire names the sender (refused), several agents name none (refused)', async () => {
+    const orgOnly = await wireOf({ selectors: consult, targets: [WORKSPACE] });
+    expect(serviceWireTarget(orgOnly, E.allowedTargets)).toBe(WORKSPACE.toLowerCase()); // == the org ⇒ routing-enable refuses ("name the RECEIVING agent")
+    expect(serviceWireTarget(await wireOf({ selectors: consult, targets: [MEMBER_A, MEMBER_B] }), E.allowedTargets)).toBeNull();
+    expect(serviceWireTarget(await wireOf({ selectors: consult, targets: [MEMBER_B] }), E.allowedTargets)).toBe(MEMBER_B.toLowerCase());
   });
 });

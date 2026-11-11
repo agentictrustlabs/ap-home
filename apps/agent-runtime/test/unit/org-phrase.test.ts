@@ -10,7 +10,7 @@ describe('orgPhraseOf', () => {
   it('carries a TYPED name whole — the dot is part of the name, not the end of the sentence (spec 366 R3)', () => {
     // Excluding the dot meant no typed name ever reached the step, and the roster read fell to the
     // addressee: bob's own empty roster was narrated as alice-home-church's.
-    expect(orgPhraseOf('who are the members of alice-home-church.impact')).toBe('alice-home-church.impact');
+    expect(orgPhraseOf('who are the members of alice-home.church')).toBe('alice-home.church');
     expect(orgPhraseOf('who are the members of calvary.org?')).toBe('calvary.org');
     expect(orgPhraseOf('who are the members of calvary.org.')).toBe('calvary.org');
     expect(orgPhraseOf('pay every member of missio-nexus.org 1 usdc')).toBe('missio-nexus.org');

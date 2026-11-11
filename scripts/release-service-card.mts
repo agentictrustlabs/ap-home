@@ -31,6 +31,7 @@
  *
  * Example: scripture-resolver.svc --by ruth --card-host scripture.faithnet.io
  */
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
 import { issueVaultRecordScopeDelegation, toWire } from '../apps/home/src/lib/delegation';
 import { MCP_SERVER_ID } from '../apps/home/src/lib/inbox-delivery';
 import { generateA2ACardSigningKey, signA2ACard, signedCardContentDigest, smartAgentCardBindingDigest } from '@agenticprimitives/agent-profile/a2a';
@@ -68,7 +69,7 @@ const mutation = (extra: Record<string, unknown> = {}) => ({ idempotencyKey: cry
 
 // ── the agent, by name, from the chain ────────────────────────────────────────────────────────────────
 const pub = createPublicClient({ transport: http(RPC) });
-const UR = (process.env.UNIVERSAL_RESOLVER ?? '0xF343054e046A4145ccae499ECB28197394eE0798') as Address;
+const UR = (process.env.UNIVERSAL_RESOLVER ?? (getDeployments((process.env.DEPLOYMENT ?? 'faithchain') as never) as unknown as Record<string, string>).agentNameUniversalResolver) as Address;
 const ACC = [
   { type: 'function', name: 'isCustodian', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'bool' }] },
 ] as const;
@@ -172,6 +173,17 @@ for (let pass = 0; pass < 3 && v.errors > 0; pass++) {
     const card = got.draft?.card ?? {};
     const paths = [...new Set(ds.filter((d) => d.code === 'CATALOG_DIVERGENCE').map((d) => `/${String(d.sourcePointer ?? '').split('/').filter(Boolean)[0] ?? ''}`))].filter((x) => x !== '/');
     await patch(paths.map((path) => ({ op: 'replace', path, value: card[path.slice(1)] })), `overrode ${paths.join(' ')} — a self-hosted service's own surface, asserted by ${by}`);
+  } else if (has('VAULT_REFERENCE_DETECTED')) {
+    // The runtime's served skill text names a record-scope SHAPE (`vault:content.artifact.<id>`) as documentation,
+    // and the public-card validator rightly refuses anything that reads like a vault pointer. The steward restates
+    // the field without the scheme literal — an override recorded as theirs, never a validator talked out of it.
+    // (Root cause: apps/agent-runtime/src/host-context.ts `library.granted.read` description; spec 445 gen-4 rebuild.)
+    const got = await studio<{ draft?: { card?: Record<string, unknown> } }>('card.get', { cardResourceId: cardId });
+    const at = (ptr: string): unknown => ptr.split('/').filter(Boolean).reduce<unknown>((o, k) => (o as Record<string, unknown> | undefined)?.[k], got.draft?.card);
+    const ops = ds.filter((d) => d.code === 'VAULT_REFERENCE_DETECTED').map((d) => String(d.sourcePointer)).filter((p) => typeof at(p) === 'string')
+      .map((path) => ({ op: 'replace', path, value: String(at(path)).replace(/`?vault:[^\s`)]*`?/g, 'the record named in the grant') }));
+    if (!ops.length) break;
+    await patch(ops, `restated ${ops.map((o) => o.path).join(' ')} without a vault-scheme literal — asserted by ${by}`);
   } else if (has('CAPABILITY_UNVERIFIED')) {
     // A capability claimed without runtime evidence. The honest move is to stop claiming it, not to assert it
     // harder: `pushNotifications` and `streaming` are DERIVED, and a card that claims them without a wired sender

@@ -114,7 +114,7 @@ test.describe('the Ask does what the buttons do', () => {
 
   test('the Ask says when this credential cannot authorize the realm it is standing in', async ({ page, request }) => {
     // Northern Colorado Field sits in alice's tree but is custodied by another persona's credential.
-    await asAlice(page, request, '/org/0x3d653cbab0c99b1513439758eb2eac2039caa6e1/members');
+    await asAlice(page, request, '/org/0x4f654b59c87502b2f0b5c60aef705a2cfa8b97e9/members');
     await page.getByTestId('ask-toggle').click();
     await expect(page.getByTestId('ask-flyout')).toContainText(/different credential custodies this agent/i, { timeout: 30_000 });
   });

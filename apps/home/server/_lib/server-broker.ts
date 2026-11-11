@@ -18,6 +18,10 @@ export interface KVNamespace {
   get(key: string): Promise<string | null>;
   put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
   delete(key: string): Promise<void>;
+  /** Read AND delete in ONE atomic step (Redis GETDEL): of two concurrent takes of a key exactly one gets the value.
+   *  Single-use records (an OIDC login attempt, spec 445) are spent through this, never through get + delete. The
+   *  Vercel adapter implements it; a KV without it cannot hold a single-use record. */
+  take?(key: string): Promise<string | null>;
   /** Cloudflare-KV-shaped prefix listing. The Vercel adapter backs it with Upstash SCAN (app/_lib/kv.ts).
    *  Used to enumerate a custodian's `related:<sa>:*` records (demo-selves). Cursor-paged; a batch may be
    *  partial or empty, so callers loop until `list_complete`. */

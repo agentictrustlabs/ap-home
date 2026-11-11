@@ -1,0 +1,56 @@
+{
+  "purpose": "the cast of Snowfall at the Belvedere — each character a PERSON agent of a real demo person, never their default (an operator note, not a persona)",
+  "chainId": 34348,
+  "cast": [
+    {
+      "role": "returnee",
+      "character": "Ilse Varrow",
+      "name": "ilse-elena.me",
+      "sa": "0x45accd1a5ceb394fbe600e23f62e12bda34b6c20",
+      "custodian": "elena"
+    },
+    {
+      "role": "household",
+      "character": "Teodor Maske",
+      "name": "teodor-dave.me",
+      "sa": "0x41fcaac3c31314ca2b464be954fcad107c96fb00",
+      "custodian": "dave"
+    },
+    {
+      "role": "agency",
+      "character": "Margit Sollen",
+      "name": "margit-carol.me",
+      "sa": "0x14572db96f86ee70ac9e43855a0c1faf617f3cc5",
+      "custodian": "carol"
+    },
+    {
+      "role": "funder",
+      "character": "Anselm Dray",
+      "name": "anselm-bob.me",
+      "sa": "0xd1deaf0e9248399767fb6fb8695262007a81c419",
+      "custodian": "bob"
+    },
+    {
+      "role": "researcher",
+      "character": "Dr Wren Ashcombe",
+      "name": "wren-alice.me",
+      "sa": "0x9d379a1a94d008ec336b1bb70322d33ee3f1bb10",
+      "custodian": "alice"
+    },
+    {
+      "role": "convener",
+      "character": "Bram Oakes",
+      "name": "bram-nathan.me",
+      "sa": "0x724ae84ddcc2278aaab26a9f4b1e9cb0ff4f8e09",
+      "custodian": "nathan"
+    },
+    {
+      "role": "adversary",
+      "character": "Caspar Lune",
+      "name": "caspar-david-1.me",
+      "sa": "0xb0a5095edfb77647248b533031aea7c218b9ba22",
+      "custodian": "david"
+    }
+  ],
+  "charteredAt": "2026-11-11T11:58:06.097Z"
+}

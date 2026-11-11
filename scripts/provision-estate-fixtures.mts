@@ -181,7 +181,7 @@ async function bindVaultKey(s: Session, sa: Address, name: string): Promise<void
   const challenge = keccak256(toBytes(['demo-mcp:vault-key-provision:v1', sa, String(issuedAt)].join('\n')));
   const prov = await j(await fetch(`${HOME}/mcp-bind/custody/vault-key/provision`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ owner: sa, issuedAt, proof: await s.sign(challenge) }) })) as { ok?: boolean; kmsKeyRef?: string; error_description?: string; detail?: string };
   if (!prov.ok || !prov.kmsKeyRef) fail(`${name}: vault key provision — ${prov.error_description ?? prov.detail ?? 'failed'}`);
-  const params = { vaultId: String(info.serverId ?? '').trim() || fx.vaultServerId, kmsKeyRef: prov.kmsKeyRef!, serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address, allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'], classificationCeiling: info.classificationCeiling ?? 'regulated.high', ops: info.ops ?? ['read', 'write'] as ('read' | 'write')[] };
+  const params = { vaultId: String(info.serverId ?? '').trim() || fx.vaultServerId, kmsKeyRef: prov.kmsKeyRef!, serverKey: realServerKey(info.serverKey), allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'], classificationCeiling: info.classificationCeiling ?? 'regulated.high', ops: info.ops ?? ['read', 'write'] as ('read' | 'write')[] };
   const { delegation, digest, expiresAt } = buildVaultKeyAuthorization(sa, params);
   delegation.signature = await s.sign(digest);
   const bound = await j(await fetch(`${HOME}/mcp-bind/custody/vault-key/bind`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ owner: sa, vaultId: params.vaultId, kmsKeyRef: params.kmsKeyRef, allowedResources: params.allowedResources, classificationCeiling: params.classificationCeiling, ops: params.ops, expiresAt, authorization: toWire(delegation) }) })) as { ok?: boolean; reason?: string; error?: string };
@@ -304,3 +304,9 @@ members = await roster();
 console.log(`  the roster now: ${members.replace(/\s+/g, ' ').slice(0, 200)}`);
 
 console.log(`\n✓ the fixture stands at ${HOME}: ${fx.org.handle}${fx.peerOrg ? ` · ${fx.peerOrg.handle}` : ''} · ${fx.treasuries.own} · ${fx.treasuries.ownOther} · ${fx.treasuries.payee} · members ${fx.people.member}, ${fx.people.member2}.`);
+
+/** The vault's REAL delegate (spec 445): a vault-key authorization naming `0x…01` delegates to nobody. Refuse, never default. */
+function realServerKey(k: unknown): `0x${string}` {
+  if (typeof k !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(k) || /^0x0{39}[0-9a-f]$/i.test(k)) throw new Error('vault server-info names no real delegate (set VAULT_KEY_SERVER_DELEGATE on the vault) — refusing to bind to a placeholder');
+  return k as `0x${string}`;
+}

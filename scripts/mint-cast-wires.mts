@@ -25,13 +25,16 @@
  * room's `MYSTERY_CAST_WIRES` secret. Nothing here is a persona and nothing here is a key.
  */
 import { hashDelegation, buildCaveat, encodeTimestampTerms, encodeAllowedTargetsTerms, encodeAllowedMethodsTerms, ROOT_AUTHORITY, type Delegation, type Caveat } from '@agenticprimitives/delegation';
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { keccak256, toBytes, type Address, type Hex } from 'viem';
 
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-const CHAIN = 34348;
-const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
-const ENFORCERS = { timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41' } as const;
+const HOME = (process.env.HOME_URL ?? 'https://www.faithnet.me').replace(/\/$/, '');
+// Addresses from the pinned deployment record (DEPLOYMENT, default faithchain) — never a hard-coded generation (spec 445 gen-4 rebuild).
+const D = getDeployments((process.env.DEPLOYMENT ?? 'faithchain') as never) as unknown as Record<string, string> & { chainId: number };
+const CHAIN = Number(D.chainId);
+const DM = D.delegationManager as Address;
+const ENFORCERS = { timestamp: D.timestampEnforcer, allowedTargets: D.allowedTargetsEnforcer, allowedMethods: D.allowedMethodsEnforcer } as const;
 /** The card room's session key — the delegate of the house wire, and now of every character's. */
 const SESSION_KEY = (process.env.HOUSE_SESSION_KEY ?? '0x4A99377a047FB39e2AcBBF100a81A4aA564b104a') as Address;
 const NOTE_PATH = process.env.NOTE ?? 'demo/cast.faithnet.json';

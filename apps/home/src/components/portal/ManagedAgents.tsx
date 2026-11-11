@@ -11,8 +11,7 @@ import { FleetLines } from './FleetLines';
 import { fundThroughHarness } from '../../home/fund-harness';
 import { createPublicClient, http, formatUnits } from 'viem';
 import { baseSepolia } from 'viem/chains';
-import { AGENT_NAME_PARENT } from '../../lib/domain';
-import { typedTldForKind, createManagedAgent, nameManagedAgent, personSignHash, listManagedAgents, invalidateRelatedOrgs, signsWithoutPrompt, type AgentKind, type ManagedAgent, type CreateManagedAgentResult } from '../../connect-client';
+import { typedTldForKind, tldOfKind, createManagedAgent, nameManagedAgent, personSignHash, listManagedAgents, invalidateRelatedOrgs, signsWithoutPrompt, type AgentKind, type ManagedAgent, type CreateManagedAgentResult } from '../../connect-client';
 import { BusyButton } from '../shared/BusyButton';
 import { PrimaryPayee } from './PrimaryPayee';
 import { assignDefaultArchetype } from '../../home/default-archetype';
@@ -439,7 +438,7 @@ export function CreateAgentForm({
             style={{ flex: 1, padding: '.35rem .5rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }}
           >
             {choices.map((c) => (
-              <option key={c.kind} value={c.kind}>{c.label} · .{typedTldForKind(c.kind)?.tld ?? AGENT_NAME_PARENT}</option>
+              <option key={c.kind} value={c.kind}>{c.label} · .{tldOfKind(c.kind)}</option>
             ))}
           </select>
         </label>
@@ -447,12 +446,11 @@ export function CreateAgentForm({
       <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
         <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={nameRequired ? 'name (required)' : 'name (optional)'} disabled={busy}
           style={{ flex: 1, padding: '.4rem .55rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }} />
-        {/* The suffix this agent will ACTUALLY be named under. It was hardcoded `.impact` — the legacy
-            root — while the claim already used the typed one for the kind (`typedTldForKind`), so the
-            form promised `.impact` and produced `.org`. Worse than cosmetic: the suffix names the derived
-            TYPE (spec 346), and `.impact` carries none, so the label said "this will not be listable"
-            about an agent that would be. */}
-        <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.{typedTldForKind(kind)?.tld ?? AGENT_NAME_PARENT}</span>
+        {/* The suffix this agent will ACTUALLY be named under. It was once hardcoded to an untyped
+            legacy root while the claim already used the typed one for the kind, so the form promised one
+            suffix and produced another. The suffix names the derived TYPE (spec 346), so it is the kind's
+            own root (`tldOfKind`), always. */}
+        <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.{tldOfKind(kind)}</span>
       </div>
       {/* ap-town spec 431 — a name on a priced ending is bought from YOUR treasury for the new agent. */}
       {kindNameIsBought(kind) && label.trim().length >= 3 && (
@@ -536,12 +534,11 @@ export function NameAgentForm({
       <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
         <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="name" disabled={busy}
           style={{ flex: 1, padding: '.4rem .55rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }} />
-        {/* The suffix this agent will ACTUALLY be named under. It was hardcoded `.impact` — the legacy
-            root — while the claim already used the typed one for the kind (`typedTldForKind`), so the
-            form promised `.impact` and produced `.org`. Worse than cosmetic: the suffix names the derived
-            TYPE (spec 346), and `.impact` carries none, so the label said "this will not be listable"
-            about an agent that would be. */}
-        <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.{typedTldForKind(kind)?.tld ?? AGENT_NAME_PARENT}</span>
+        {/* The suffix this agent will ACTUALLY be named under. It was once hardcoded to an untyped
+            legacy root while the claim already used the typed one for the kind, so the form promised one
+            suffix and produced another. The suffix names the derived TYPE (spec 346), so it is the kind's
+            own root (`tldOfKind`), always. */}
+        <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.{tldOfKind(kind)}</span>
       </div>
       {/* ap-town spec 431 — a name on a priced ending is bought from YOUR treasury for the new agent. */}
       {kindNameIsBought(kind) && label.trim().length >= 3 && (

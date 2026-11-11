@@ -113,6 +113,7 @@ const envelope = {
   messageId, sender: ALICE, skill: SKILL,
   bodyRef: { owner: RECIPIENT, recordType: 'pending' }, bodyHash,
   signature: '0x' as Hex, createdAt: Math.floor(Date.now() / 1000),
+  recipient: RECIPIENT, chainId: CHAIN, // RUNB-4: the message names its recipient and chain (signed)
 };
 envelope.signature = await sign(hashA2aMessage(envelope as never));
 

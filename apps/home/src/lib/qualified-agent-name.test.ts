@@ -26,9 +26,9 @@ describe('qualifiedAgentName', () => {
   });
 
   it('leaves a legacy name as given', () => {
-    // `.impact` and `.demo.agent` parse as `legacy`, NOT `canonical` — a check for canonical alone
+    // `.agent` and `.demo.agent` parse as `legacy`, NOT `canonical` — a check for canonical alone
     // would have sent every legacy name back down the append path.
-    expect(qualifiedAgentName('phone-6115.impact')).toBe('phone-6115.impact');
+    expect(qualifiedAgentName('phone-6115.agent')).toBe('phone-6115.agent');
     expect(qualifiedAgentName('foo.demo.agent')).toBe('foo.demo.agent');
   });
 
@@ -46,6 +46,8 @@ describe('qualifiedAgentName', () => {
     // the exact failure mode being removed. Returning it unchanged resolves to nothing, honestly.
     expect(qualifiedAgentName('x.org')).toBe('x.org');
     expect(qualifiedAgentName('weird.zzz')).toBe('weird.zzz');
+    // A RETIRED root (`.impact`, 2026-11-10) is an unknown root like any other: untouched, resolves to nothing.
+    expect(qualifiedAgentName('phone-6115.impact')).toBe('phone-6115.impact');
   });
 
   it('is empty for empty input rather than a bare parent', () => {

@@ -16,6 +16,10 @@ import { AgentAccountClient, buildExecuteCallData } from '@agenticprimitives/age
 import { buildRegisterProfileCall } from '@agenticprimitives/agent-profile';
 import { createPublicClient, decodeEventLog, encodeFunctionData, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
+// Addresses default from the pinned deployment record (DEPLOYMENT, default faithchain), never a hard-coded generation:
+// a generation-1 literal here kept chartering against a factory the estate had left (spec 445 estate reset, 2026-11-11).
+const DEP = getDeployments((process.env.DEPLOYMENT ?? 'faithchain') as never) as unknown as Record<string, `0x${string}`>;
 
 const arg = (k: string): string | undefined => { const i = process.argv.indexOf(`--${k}`); return i >= 0 ? process.argv[i + 1] : undefined; };
 const estate = arg('estate'); const persona = arg('custodian-persona'); const home = (arg('home') ?? '').trim(); const signer = arg('signer')?.toLowerCase(); const salt = BigInt(arg('salt') ?? '2'); const dry = process.argv.includes('--dry-run');
@@ -24,14 +28,14 @@ const RPC = process.env.RPC_URL ?? (() => { console.error('RPC_URL is required')
 const relayFile = (process.env.RELAY_PRIVATE_KEY_FILE ?? '').replace(/^~/, process.env.HOME ?? '');
 const relayKey = (process.env.RELAY_PRIVATE_KEY ?? (relayFile ? readFileSync(relayFile, 'utf8').trim() : '')) as Hex;
 if (!/^0x[0-9a-fA-F]{64}$/.test(relayKey)) { console.error('RELAY_PRIVATE_KEY or RELAY_PRIVATE_KEY_FILE is required'); process.exit(1); }
-const roster = JSON.parse(readFileSync('demo/personas.local.json', 'utf8')) as Record<string, { eoaPrivateKey?: string }>;
+const roster = JSON.parse(readFileSync(process.env.ROSTER ?? 'demo/personas.local.json', 'utf8')) as Record<string, { eoaPrivateKey?: string }>;
 if (!roster[persona]?.eoaPrivateKey) { console.error(`no persona ${persona} with a key in demo/personas.local.json`); process.exit(1); }
 const custodian = privateKeyToAccount(roster[persona]!.eoaPrivateKey as Hex);
 const relay = privateKeyToAccount(relayKey);
 
 const CHAIN_ID = Number(process.env.CHAIN_ID ?? 34348);
-const ENTRY_POINT = '0xf7855250B3363AB7649B10957d8908A9AFcdD4B5' as Address; const FACTORY = '0x464eEe7518c3c97DA570592481329E0627E9a3B8' as Address;
-const PROFILE_RESOLVER = (process.env.PROFILE_RESOLVER ?? '0xB03F7C06ad3274F584AB72794406D639c02A45e1') as Address; const PAYMASTER = (process.env.PAYMASTER ?? '0xbd93fEC6910ffD74F14709188b5a9B6C6965b2a7') as Address;
+const ENTRY_POINT = DEP.entryPoint as Address; const FACTORY = DEP.agentAccountFactory as Address;
+const PROFILE_RESOLVER = (process.env.PROFILE_RESOLVER ?? DEP.agentProfileResolver) as Address; const PAYMASTER = (process.env.PAYMASTER ?? DEP.smartAgentPaymaster) as Address;
 const P = { homepage: keccak256(toBytes('atl:homepage')), projectionSigner: keccak256(toBytes('atl:projectionSigner')) };
 const ABI = [
   { type: 'function', name: 'isRegistered', stateMutability: 'view', inputs: [{ name: 'agent', type: 'address' }], outputs: [{ type: 'bool' }] },
@@ -79,4 +83,4 @@ for (const c of calls) {
   if (ok === false) { console.error(`  ${c.what}: the userOp reverted inside the account (tx ${receipt.transactionHash})`); process.exit(1); }
   console.log(`  ${c.what}: done (tx ${receipt.transactionHash})`);
 }
-console.log(`\n>>> next, as the DEPLOYER (it owns the .estate root), in Ring 0 packages/contracts:\n    ESTATE_LABEL=${estate} ESTATE_AGENT=${agent} AGENT_NAME_REGISTRY=0x60E949D52660A9D4143ecB0fdA56c0457f20aED9 AGENT_NAME_RESOLVER=0xa5855906C0De3813E74BEe201973071e0c844115 forge script script/AddEstateName.s.sol:AddEstateName --rpc-url "$RPC" --private-key "$KEY" --broadcast`);
+console.log(`\n>>> next, as the DEPLOYER (it owns the .estate root), in Ring 0 packages/contracts:\n    ESTATE_LABEL=${estate} ESTATE_AGENT=${agent} AGENT_NAME_REGISTRY=${DEP.agentNameRegistry} AGENT_NAME_RESOLVER=${DEP.agentNameResolver} forge script script/AddEstateName.s.sol:AddEstateName --rpc-url "$RPC" --private-key "$KEY" --broadcast`);

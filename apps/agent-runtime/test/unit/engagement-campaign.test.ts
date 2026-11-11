@@ -75,6 +75,7 @@ describe('runEngagementCampaign', () => {
         sent.push(candidate);
         return { ok: true, message: answers[candidate]!(probe) as never };
       },
+      verifySignature: async () => true, // spec 445: the reducer needs signature evidence; the fixture's offer carries a stand-in signature
       now: () => Date.parse('2026-09-08T10:00:00Z'),
     }, { campaignId: 'camp_1', capability: CAP, words: 'Pay 1 USDC to nathan.treasury', budget: { maxCandidates: 5, offersWanted: 1, deadlineMs: 600_000 } });
     expect(sent).toEqual([OTHER, SVC]); // the one declaring the capability is asked first

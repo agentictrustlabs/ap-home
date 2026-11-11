@@ -20,6 +20,7 @@ import { A2aWireAdapter, hashA2aMessage, type A2aMessage, type A2aTransport } fr
 import type { Address, Hex } from '@agenticprimitives/types';
 import type { VaultRef as A2aVaultRef } from '@agenticprimitives/a2a';
 import { mintDeliveryGrant, MESSAGING_DELIVER_SKILL } from './delivery-grant';
+import { CHAIN_ID } from '../lib/chain';
 
 export interface A2aDeliverInput {
   /** The sending person's SA — delegator, message sender, and the account both signatures verify against. */
@@ -120,6 +121,9 @@ export async function deliverOverA2a(input: A2aDeliverInput): Promise<A2aDeliver
     skill,
     bodyHash: input.bodyHash,
     createdAt: Math.floor(nowMs / 1000),
+    // RUNB-4 (spec 445 decision 8): the message names the agent it is FOR and the chain — signed with the rest.
+    recipient: input.recipientSA,
+    chainId: CHAIN_ID,
   };
   const messageSignature = await input.sign(hashA2aMessage(unsigned));
   if (!messageSignature || messageSignature === '0x') {

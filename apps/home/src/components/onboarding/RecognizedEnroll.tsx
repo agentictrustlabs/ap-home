@@ -149,7 +149,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     void (async () => {
       // Force the custodian chooser ONCE (clear the active session → credential-first entry) instead of
       // silently reusing whatever session this browser already holds. Critical for multi-custodian admin
-      // (each identity has its own SIWE/social/passkey custodian): authorizing demo-validator.impact must
+      // (each identity has its own SIWE/social/passkey custodian): authorizing demo-validator.svc must
       // never default to the lbsb/deployer custodian's leftover session. Triggers:
       //   • OIDC prompt=select_account/login — the relying app explicitly asked to re-choose.
       //   • a NAMELESS connect-type enroll (`agent_name` omitted on site-login / x402-pay) — the request

@@ -14,7 +14,7 @@ const SUB = `eip155:34348:${PERSON}`;
 const h = vi.hoisted(() => ({
   verify: vi.fn(),
   recognition: { value: null as null | Record<string, unknown> },
-  directoryName: { value: 'ruth.impact' as string | Error },
+  directoryName: { value: 'ruth.me' as string | Error },
   auditFails: { value: false },
   client: { value: null as unknown },
 }));
@@ -90,7 +90,7 @@ beforeEach(() => {
   store = new Map([[`app-grants:${PERSON}`, JSON.stringify([rowFor()])]]);
   h.verify.mockReset().mockResolvedValue({ ok: true, digest: '0xdigest' });
   h.recognition.value = { sub: SUB, cred: 'passkey', auth_time: 1 };
-  h.directoryName.value = 'ruth.impact';
+  h.directoryName.value = 'ruth.me';
   h.auditFails.value = false;
   h.client.value = reader();
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
@@ -130,7 +130,7 @@ describe('when every line holds', () => {
   });
   it('renews the binding the app\'s silent re-auth runs on, and records the visit', async () => {
     await ask();
-    expect(JSON.parse(store.get('oidc-deleg:0xdigest')!)).toMatchObject({ client_id: 'reader', agent_name: 'ruth.impact', profile_name: 'Ruth' });
+    expect(JSON.parse(store.get('oidc-deleg:0xdigest')!)).toMatchObject({ client_id: 'reader', agent_name: 'ruth.me', profile_name: 'Ruth' });
     const [row] = JSON.parse(store.get(`app-grants:${PERSON}`)!) as Array<{ lastUsedAt?: number; delegation: unknown }>;
     expect(row!.lastUsedAt).toBeGreaterThan(0);
     expect(row!.delegation).toEqual(wire(SITE)); // the same wire: nothing new
@@ -174,7 +174,7 @@ describe('each line of §5.2 says why it failed', () => {
     ['new_origin', 'a redirect origin never allowed', async () => { put(rowFor({ origins: ['https://other.test'] })); return ask(); }],
     ['terms_widened', 'a registry asking for more', async () => { h.client.value = reader({ idTokenClaims: ['email'] } as Partial<RelyingApp>); return ask({ profile_email: '' }); }],
     ['claims_need_session', 'a name the page could not read', async () => ask({ profile_name: undefined })],
-    ['pinned_name_mismatch', 'a pin for another person', async () => ask({ agent_name: 'naomi.impact' })],
+    ['pinned_name_mismatch', 'a pin for another person', async () => ask({ agent_name: 'naomi.me' })],
     ['directory_unavailable', 'a directory that cannot answer', async () => { h.directoryName.value = new Error('down'); return ask(); }],
     ['wire_revoked', 'a wire revoked on chain', async () => { h.verify.mockResolvedValueOnce({ ok: false, reason: 'delegation is revoked' }); return ask(); }],
     ['wire_revoked', 'a wire revoked and forgotten', async () => { const { askDelegation: _a, ...row } = rowFor(); put(row); return ask(); }],

@@ -31,7 +31,7 @@ const E = {
   allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41',
   value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1',
 } as const;
-const WORKSPACE = '0xee11DFB02e4a02630bE512886305DF5C68Fd682c'.toLowerCase() as Address; // alicefield.impact — Alice's key custodies it
+const WORKSPACE = '0xee11DFB02e4a02630bE512886305DF5C68Fd682c'.toLowerCase() as Address; // alicefield.workspace — Alice's key custodies it
 const SUFFIX = Date.now().toString(36).slice(-4);
 
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 400), _status: r.status }; } };

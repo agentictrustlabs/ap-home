@@ -62,7 +62,7 @@ export interface EnrollReq {
   payAmount?: string; // spec 272 — x402 charge amount (atomic units) the relying app requested (tier price); capped by the client's paymentConfig
   subPeriod?: number; // spec 272 recurring — when set, this is a SUBSCRIPTION: the billing-period length (seconds). The home also mints a standing pull mandate.
   collectToken?: string; // spec 272 recurring — owner id_token passed by the owner app for the `subscription-collect` ceremony (authorizes the a2a due/collected calls).
-  contentSignerTarget?: string; // spec 266 — the single signing identity (e.g. demo-validator.impact) this `content-signer` ceremony authorizes. Per-custodian: you authorize only the SA you connected as.
+  contentSignerTarget?: string; // spec 266 — the single signing identity (e.g. demo-validator.svc) this `content-signer` ceremony authorizes. Per-custodian: you authorize only the SA you connected as.
   prompt?: string; // OIDC `prompt`: 'select_account'/'login' force the custodian chooser instead of silently reusing the active session (multi-custodian admin must never assume an identity).
   requireNamedAgent?: boolean; // relying app requires a unique Impact name before issuing the grant.
   /** org-create + a registry: the org's registration (presence, affirmed clauses, contact) as the app sent it,

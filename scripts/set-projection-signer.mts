@@ -1,8 +1,9 @@
 // DECLARE THE ESTATE'S PROJECTION SIGNER — spec 439 F2.5, the estate's half of closing first-come-wins.
 //
-// `EstateProjectionRegistry.register(estateId, signer)` on neutral ground is first-come-wins: public ground cannot
-// verify who governs an estate on another chain. So the estate agent declares, ON ITS OWN CHAIN, the key that
-// anchors its roots — `atl:projectionSigner` on its profile — and a verifier cross-checks `signerOf` against it.
+// Public ground cannot verify who governs an estate on another chain. So the estate agent declares, ON ITS OWN
+// CHAIN, the key that anchors its roots — `atl:projectionSigner` on its profile — and a verifier reads the registry's
+// `roots(estateId, signer)` row for THAT signer only (generation 4: rows are keyed by (estateId, signer); `register` /
+// `signerOf` are gone, a stranger's row for the same id is never read).
 // Signed by the estate agent itself (its custodian is the estate's interactions key, as in add-estate-agent.mts).
 // Idempotent: a declaration already equal to this one writes nothing. The value is PUBLIC by construction (the
 // registry stores the same address); the key behind it stays the federation operator's.
@@ -12,22 +13,28 @@ import { existsSync, readFileSync } from 'node:fs';
 import { AgentAccountClient, buildExecuteCallData } from '@agenticprimitives/agent-account';
 import { createPublicClient, decodeEventLog, encodeFunctionData, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
+// Addresses default from the pinned deployment record (DEPLOYMENT, default faithchain), never a hard-coded generation:
+// a generation-1 literal here kept chartering against a factory the estate had left (spec 445 estate reset, 2026-11-11).
+const DEP = getDeployments((process.env.DEPLOYMENT ?? 'faithchain') as never) as unknown as Record<string, `0x${string}`>;
 
 const args = process.argv.slice(2);
 const flag = (n: string) => (args.includes(`--${n}`) ? args[args.indexOf(`--${n}`) + 1] : undefined);
 const estate = flag('estate'); const signer = (flag('signer') ?? '').toLowerCase(); const dry = args.includes('--dry-run');
 if (!estate || !/^0x[0-9a-f]{40}$/.test(signer)) { console.error('usage: set-projection-signer.mts --estate <id> --signer 0x… [--dry-run]'); process.exit(1); }
 
-const file = `.estate-${estate}.local`;
+// ESTATE_ENV_FILE / RPC_URL / CHAIN_ID / RELAY_PRIVATE_KEY_FILE as in add-estate-agent.mts.
+const file = process.env.ESTATE_ENV_FILE ?? `.estate-${estate}.local`;
 if (!existsSync(file)) { console.error(`${file} not found — this estate's keys are not on this machine, so its agent cannot sign here`); process.exit(1); }
 const env = Object.fromEntries(readFileSync(file, 'utf8').split('\n').filter((l) => l.includes('=') && !l.trim().startsWith('#')).map((l) => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^'(.*)'$/, '$1')]; })) as Record<string, string>;
-const RPC = env.RPC_URL; const relay = env.A2A_MASTER_PRIVATE_KEY as Hex; const interactions = env.A2A_INTERACTIONS_SESSION_PRIVATE_KEY as Hex;
+const relayFile = (process.env.RELAY_PRIVATE_KEY_FILE ?? '').replace(/^~/, process.env.HOME ?? '');
+const RPC = process.env.RPC_URL ?? env.RPC_URL; const relay = (relayFile ? readFileSync(relayFile, 'utf8').trim() : env.A2A_MASTER_PRIVATE_KEY) as Hex; const interactions = env.A2A_INTERACTIONS_SESSION_PRIVATE_KEY as Hex;
 if (!RPC || !relay || !interactions) { console.error(`${file} does not carry RPC_URL + the relay and interactions keys`); process.exit(1); }
-const CHAIN_ID = Number(env.CHAIN_ID ?? 34348);
-const ENTRY_POINT = '0xf7855250B3363AB7649B10957d8908A9AFcdD4B5' as Address;
-const FACTORY = '0x464eEe7518c3c97DA570592481329E0627E9a3B8' as Address;
-const PROFILE_RESOLVER = (env.PROFILE_RESOLVER ?? '0xB03F7C06ad3274F584AB72794406D639c02A45e1') as Address;
-const PAYMASTER = (env.PAYMASTER ?? '0xbd93fEC6910ffD74F14709188b5a9B6C6965b2a7') as Address;
+const CHAIN_ID = Number(process.env.CHAIN_ID ?? env.CHAIN_ID ?? 34348);
+const ENTRY_POINT = DEP.entryPoint as Address;
+const FACTORY = DEP.agentAccountFactory as Address;
+const PROFILE_RESOLVER = (env.PROFILE_RESOLVER ?? DEP.agentProfileResolver) as Address;
+const PAYMASTER = (env.PAYMASTER ?? DEP.smartAgentPaymaster) as Address;
 const ATL_PROJECTION_SIGNER = keccak256(toBytes('atl:projectionSigner'));
 const RESOLVER_ABI = [
   { type: 'function', name: 'isRegistered', stateMutability: 'view', inputs: [{ name: 'agent', type: 'address' }], outputs: [{ type: 'bool' }] },

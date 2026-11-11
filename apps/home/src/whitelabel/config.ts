@@ -6,6 +6,9 @@
 import { A2A_DOMAIN, AGENT_NAME_PARENT, CONNECT_DOMAIN, HOME_MCP_ORIGIN, VAULT_SERVER_ID } from '../lib/domain';
 import type { WhiteLabelConfig } from './schema';
 
+/** The estate's brand, per deployment (NEXT_PUBLIC_BRAND_NAME): "Faithnet" on faithnet.me, "Hopenet" on the hopenet estate. */
+const BRAND_NAME = process.env.NEXT_PUBLIC_BRAND_NAME || 'Faithnet';
+
 /**
  * The relying origins a deployment adds to a client's registry, newest shape first.
  *
@@ -82,9 +85,9 @@ export function footerLinks(raw: string | undefined, defaults: ReadonlyArray<{ l
 const faithImpact: WhiteLabelConfig = {
   id: 'faith-impact',
   brand: {
-    // Deployment-configurable (NEXT_PUBLIC_BRAND_*) so the SAME code brands per host — "Impact" on
-    // impact-agent.me, "Faithnet" on faithnet.me — without a code change. Defaults preserve Impact.
-    name: process.env.NEXT_PUBLIC_BRAND_NAME || 'Impact',
+    // Deployment-configurable (NEXT_PUBLIC_BRAND_*) so the SAME code brands per estate — "Faithnet" on faithnet.me,
+    // "Hopenet" on the hopenet estate (impact-agent.me) — without a code change. "Impact" is retired as a brand (2026-11-11).
+    name: BRAND_NAME,
     community: process.env.NEXT_PUBLIC_BRAND_COMMUNITY || 'missional community',
     tagline: process.env.NEXT_PUBLIC_BRAND_TAGLINE || 'Your home in the missional community',
   },
@@ -119,6 +122,11 @@ const faithImpact: WhiteLabelConfig = {
   // Spec 445 §16 — verified to send a person back to this Home, 2026-11-05. commons-app runs its sign-out but does not
   // return, and most other apps have no /sso-logout live yet: both listed in the spec. Add an app here when it returns.
   frontChannelLogout: {
+    // ONLY origins that ANSWER /sso-logout (clear their session, bounce to `return`). A listed origin that serves its
+    // ordinary page instead strands the person mid-chain on that page — town.faithnet.io did exactly that on
+    // 2026-11-11. Removed until they implement the route: town (ap-town), skills, coach (engage coach-web),
+    // workbench, seed-reader. An app missing here keeps its own session after a Home sign-out; add it back the day
+    // its /sso-logout exists.
     'https://www.faithnet.me': [
       'https://faithnet.estate/sso-logout',
       'https://heartcoach.faithnet.io/sso-logout',
@@ -126,14 +134,9 @@ const faithImpact: WhiteLabelConfig = {
       'https://bible.faithnet.io/sso-logout',
       'https://field.faithnet.io/sso-logout',
       'https://church.faithnet.io/sso-logout',
-      'https://town.faithnet.io/sso-logout',
-      'https://names.faithnet.io/sso-logout',
-      'https://coach.faithnet.io/sso-logout',
       'https://reader.faithnet.io/sso-logout',
-      'https://skills.faithnet.io/sso-logout',
-      'https://workbench.faithnet.io/sso-logout',
-      'https://seed-reader.faithnet.io/sso-logout',
       'https://publishing.faithnet.io/sso-logout',
+      'https://names.faithnet.io/sso-logout',   // ap-town naming implements it since 2026-11-11 (apps/naming/test/sso-logout.test.ts)
     ],
   },
   relyingApps: [
@@ -298,7 +301,7 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create', 'service-agent-wire'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
-      // `skills-agent.impact` — the service agent orgs grant to and skills-a2a signs AS. It is
+      // `skills-agent.svc` — the service agent orgs grant to and skills-a2a signs AS. It is
       // custodied by a SIWE credential in its owner's Home, NOT by skills-a2a: the worker signs with
       // a KMS key that the `service-agent-wire` ceremony authorizes as a DELEGATE, so a compromise of
       // the worker yields something the custodian revokes rather than the identity itself
@@ -386,7 +389,7 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create', 'service-agent-wire'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
-      // `engage-service.impact` — the service agent orgs grant to and engage-a2a signs AS. Custodied
+      // `engage-service.svc` — the service agent orgs grant to and engage-a2a signs AS. Custodied
       // OUTSIDE engage-a2a (1 custodian, 0 passkeys on chain today); the worker signs with a KMS key
       // the `service-agent-wire` ceremony authorizes as a DELEGATE, so compromising the worker
       // yields something the custodian revokes rather than the identity itself (ADR-0019 +
@@ -406,7 +409,7 @@ const faithImpact: WhiteLabelConfig = {
     // field-app — Field Circles / Field Workspace (agentictrustlabs/engage apps/field-*).
     // A SEPARATE product (ADR-0007), not a mode of Engage. Login-grade connect via the Personal
     // Home; no PII held by the broker. No service-agent-wire yet — field-a2a signs nothing as
-    // itself until F2 (outbound send). operational_delegate is field-service.impact, not the
+    // itself until F2 (outbound send). operational_delegate is field-service.svc, not the
     // shared `delegate` below.
     {
       client_id: 'field-app',
@@ -457,7 +460,7 @@ const faithImpact: WhiteLabelConfig = {
       // the interactions service SA, revocable by the person alone at Home. `inbox.get` needs
       // `vault:inbox.data`; `inbox.body.get` needs `vault:message.body:dm:*` (interactions-do OP_RESOURCE).
       read_grant: { resources: ['vault:inbox.data', 'vault:message.body:dm:*'] },
-      // field-service.impact — a DIFFERENT SA per identity universe (the faithnet deploy sets
+      // field-service.svc — a DIFFERENT SA per identity universe (the faithnet deploy sets
       // NEXT_PUBLIC_FIELD_SERVICE_SA to the SA minted on 34348; default is base-sepolia's).
       operational_delegate:
         process.env.NEXT_PUBLIC_FIELD_SERVICE_SA || '0xD1F7Ef18537eFDBfE0cA265F60f7A59333066f20',
@@ -679,7 +682,9 @@ const faithImpact: WhiteLabelConfig = {
       // took 200 USDC at the moment of approval, for nothing, and the player then paid a second 200
       // for the real seat. `pull` mints the mandate and moves no money.
       paymentConfig: {
-        payee: '0xf6F48aF1f645c70339b2FCF4CD36F5d6c5325671',
+        // Generation 4 (spec 445, 2026-11-11): the Poker Site Treasury re-chartered by pokernight's provision-house.mts
+        // (gen-1 0xf6F48aF1… is orphaned history).
+        payee: '0x989121B74c96dF8Cc82beebf4C46Ec0C6D6C09f3',
         // THE SHEQEL, deployed on faithchain — the card room's own coin and the only currency it
         // settles in (`contracts/src/Sheqel.sol` in the pokernight repo). This line and
         // `new_member.currency.asset` below MUST AGREE: `memberCurrencyPlan` refuses the whole
@@ -697,7 +702,7 @@ const faithImpact: WhiteLabelConfig = {
         // filled in the delegate stays the payee, which is byte-for-byte what `mode: 'pull'` minted
         // before this field existed. It MUST NOT be the shared `delegate` above — spend authority
         // granted to that address is granted to every registry entry that names it.
-        redeemer: '0x0347e808a0bB7a7a7086a29d853E799f351C04DD',
+        redeemer: '0x31acE8b3B26Bff9C29d09C6347824642DA171784', // gen 4 (spec 445); gen-1 0x0347e808… orphaned
       },
       // What a player needs to exist BEFORE the card room can do anything with them — declared here
       // so the Home sets it up during account creation instead of sending them on an errand.
@@ -749,7 +754,7 @@ const faithImpact: WhiteLabelConfig = {
     {
       client_id: 'demo-org',
       remembered_consent: 'on',
-      name: 'Impact',
+      name: BRAND_NAME,
       redirect_uris: ['https://agenticprimitives-demo-org.pages.dev/', 'http://localhost:5473/'],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create'],
@@ -856,8 +861,8 @@ const faithImpact: WhiteLabelConfig = {
       // service treasury, custodied by lbsb.svc). The reader redeems at access time (OPEN delegate).
       paymentConfig: {
         // Faithchain defaults. NEXT_PUBLIC_* overrides only if a deploy names the same treasury.
-        payee: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0xdc3ef3d91ceb006099646e7cbb25cf74d747dcc6') as `0x${string}`,
-        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0xdaE09066A2cc32f6203605619137dcF01A9B49Ae') as `0x${string}`,
+        payee: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0xed3383cad2d7b95f29586d2037326b029ba82b69') as `0x${string}`,
+        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0xAe86bE64FAeC447e58DE215787e400DaDDD0FC89') as `0x${string}`,
         maxAmountPerCharge: '60000', // 0.06 USDC — covers the largest tier (Plus); the UI picks the amount
         maxAggregate: '6000000',     // 6 USDC across the delegation's life
         maxRedemptionsPerWindow: 1000,
@@ -885,8 +890,8 @@ const faithImpact: WhiteLabelConfig = {
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       // Same Bible service treasury as the Explorer charge: lbsb-treasury.treasury.
       collectionConfig: {
-        treasury: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0xdc3ef3d91ceb006099646e7cbb25cf74d747dcc6') as `0x${string}`,
-        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0xdaE09066A2cc32f6203605619137dcF01A9B49Ae') as `0x${string}`,
+        treasury: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0xed3383cad2d7b95f29586d2037326b029ba82b69') as `0x${string}`,
+        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0xAe86bE64FAeC447e58DE215787e400DaDDD0FC89') as `0x${string}`,
         edition: 'lbsb',
         a2aBase: process.env.NEXT_PUBLIC_SCRIPTURE_A2A_BASE || 'https://demo-bible-a2a-production.richardpedersen3.workers.dev',
       },
@@ -1223,10 +1228,10 @@ const faithImpact: WhiteLabelConfig = {
       expiryDays: 1,
     },
     // spec 266 — the corpus OWNER authorizes each content issuer's Cloud-KMS signing key: signs, with their
-    // own credential, a delegation binding each issuer SA (e.g. lbsb.impact) → its KMS content-signing key.
+    // own credential, a delegation binding each issuer SA (e.g. lbsb.org) → its KMS content-signing key.
     'content-signer': {
       canDo: [
-        'Authorize an HSM-backed Cloud KMS key to sign content on behalf of issuers you control (e.g. lbsb.impact)',
+        'Authorize an HSM-backed Cloud KMS key to sign content on behalf of issuers you control (e.g. lbsb.org)',
         'Bind each authorization to a specific issuer + key, revocable later',
       ],
       cannotDo: [
@@ -1237,7 +1242,7 @@ const faithImpact: WhiteLabelConfig = {
       expiryDays: 1,
     },
     // agent-rule `service-agent-signing.md` — you authorize a service's HSM-backed KMS key to act AS
-    // an agent you custody (e.g. skills-agent.impact), for ONE kind of message, revocably. The
+    // an agent you custody (e.g. skills-agent.svc), for ONE kind of message, revocably. The
     // service never holds anything that controls the agent.
     // Spec 397 — the Home MCP's ask wire: what Claude (or any assistant) holds when it connects as a client of you.
     'ask-as-me': {
@@ -1298,7 +1303,7 @@ const faithImpact: WhiteLabelConfig = {
   // {app} = the missional-community app asking for permission.
   copy: {
     // Arrival into your home.
-    arrivalTitle: 'Welcome to your Impact Community Home',
+    arrivalTitle: `Welcome to your ${BRAND_NAME} Community Home`,
     arrivalBody:
       "A place of your own in the missional community — where you oversee what you help lead, manage what you steward, and protect what's entrusted to you.",
     overviewTitle: "Here's how you'll get set up",

@@ -54,8 +54,9 @@ import { handleConsultRespond } from './consult-skill.js';
 import { parseSessionWrappedSignature, verifySessionWrappedSignature, wrapSessionSignature } from '@agenticprimitives/a2a';
 // spec 341 §7 — the in-Worker marker, split off the custody secret.
 import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
+import { MANDATE_USE_CLAIM_PATH, claimMandateUse } from './mandate-use-ledger.js';
 import { SELF_HOST_WIRE_KEY } from './self-host-wire.js';
-import { memberConsultGrant, readConsultArtifact, readDelegatedTask, signAsOrg, submitConsult, submitDelegatedTask } from './consult-rail.js';
+import { memberConsultGrant, orgConsultWire, readConsultArtifact, readDelegatedTask, signAsOrg, submitConsult, submitDelegatedTask } from './consult-rail.js';
 import { recordRetention } from './run-export.js';
 import { authorityCapabilityOf, checkpointForStep, awaitingAuthorityNote, engagesProvider } from './endeavor-authority-steps.js';
 import { runEngagementCampaign, campaignNote } from './engagement-campaign.js';
@@ -642,12 +643,14 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
     // wire's delegate; wire ERC-1271-valid against the delegator; wire UNREVOKED on-chain, so a
     // custodian's revocation kills the authority immediately here). Any other signature shape takes
     // the unchanged ERC-1271 path.
-    const wireEnforcers = { timestamp: this.env.TIMESTAMP_ENFORCER ?? '', allowedMethods: this.env.ALLOWED_METHODS_ENFORCER ?? '' };
+    const wireEnforcers = { timestamp: this.env.TIMESTAMP_ENFORCER ?? '', allowedMethods: this.env.ALLOWED_METHODS_ENFORCER ?? '', allowedTargets: this.env.ALLOWED_TARGETS_ENFORCER ?? '' };
     const verifySigOrWired = async (signer: Address, digest: Hex, signature: Hex, skill?: string): Promise<boolean> => {
       if (parseSessionWrappedSignature(signature)) {
         return verifySessionWrappedSignature({
           signer, digest, signature,
           enforcers: wireEnforcers,
+          // RUN-9 — THIS DO's agent is the host: a wire minted for another agent is not a credential here.
+          target: agentSA as Address,
           verifyDelegationSig: verifyDelegationSigFn,
           isRevoked: isRevokedFn,
           ...(skill ? { skill } : {}),
@@ -748,6 +751,10 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
       // registry covers any NAMED recipient (named sender required); an org SA covers its CURRENT
       // members (both parties). Only the three messaging skills read classes — everything else keeps
       // FR-4.2's exact-address rule. Fail-closed inside the resolver.
+      // RUNB-4 (spec 445): under a class-scoped or multi-target grant the MESSAGE must name this agent (`recipient`) and
+      // this chain (`chainId`) — a class covering many recipients is exactly where a replay to another one would work.
+      // The package refuses a message that does not; every sender here (a2a-deliver, outbound-delivery, consult-rail,
+      // the canonical e2e) puts the receiving agent and chain in the signed envelope.
       scopeCovers: (i) => messagingScopeCovers(messagingScopeDepsFromEnv(this.env as never), { ...i, recipient: agentSA }),
       taskStore: createDurableObjectTaskStore(this.state.storage),
       // spec 309 §7 / spec 316 §11a — the A2A messaging skills (messaging.deliver / interactions.respond /
@@ -769,6 +776,10 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
       // library defines — the METHOD `archetype.<slug>` addresses a role, composed from that role's
       // declared SKILL.md packages. Adding a role is a library write, not a redeploy. Consulted only
       // on a registry miss, so it can never shadow a declared skill.
+      // PRICE: no handler on this agent declares `payment` (the archetype handlers below carry none; pinned by
+      // archetype-skill.test.ts), so no `paymentGate` is wired on purpose. a2a (spec 445 RUNB-6) PARKS a priced skill
+      // that has no gate — it never runs it unpaid — and resumes a parked payment once via `settlePayment` →
+      // `PaymentGate.verifySettlement`. Pricing an archetype therefore needs a gate wired here first.
       resolveHandler: resolveArchetypeMethod(this.env, agentSA),
       checks, handlers: [echo,
         // THE RELAY, registered inline because it needs `this` — the dispatch and collect it
@@ -888,6 +899,14 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
     // rebuild, never a bereavement — the receipts are the evidence, the mandate is re-mintable, and an
     // agent an ask created is on chain the moment it exists). Internal-only: the run's own authority is
     // re-verified on every resume, so this store decides nothing.
+    // ── spec 445 / AUTH-5 — the durable MANDATE-USE ledger (`mandate-use-ledger.ts`): one atomic claim of
+    // (mandateRef, stepNonce) per holder, in this agent's own storage. Internal only; decides nothing but "first?".
+    if (url.pathname === MANDATE_USE_CLAIM_PATH) {
+      if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      const b = (await req.json().catch(() => null)) as { mandateRef?: string; stepNonce?: string; holder?: string } | null;
+      if (!b || typeof b.mandateRef !== 'string' || typeof b.stepNonce !== 'string' || typeof b.holder !== 'string' || !b.holder) return Response.json({ ok: false, error: 'mandateRef, stepNonce and holder required' }, { status: 400 });
+      return Response.json({ ok: true, first: await claimMandateUse(this.state.storage, { mandateRef: b.mandateRef, stepNonce: b.stepNonce, holder: b.holder }) });
+    }
     if (url.pathname.startsWith('/internal/harness-run/')) {
       if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
       const op = url.pathname.slice('/internal/harness-run/'.length);
@@ -1116,8 +1135,11 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
           if (!rate.allowed) {
             await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.rateLimited', outcome: 'denied', actor: { type: 'service', id: p.principal }, subject: { type: 'channel', id: p.channelId } });
           } else {
-            const wireResp = (await call('internal.consult.orgWire', {})) as { wire?: IncomingDelegation | null };
-            if (wireResp.wire) {
+            // RUN-9 — one wire per member: only members the org holds a wire FOR are reachable (the rest are not offered).
+            const wireResp = (await call('internal.consult.orgWire', {})) as { targets?: string[] };
+            const wired = new Set((wireResp.targets ?? []).map((t) => t.toLowerCase()));
+            elig.members = (elig.members ?? []).filter((m) => wired.has(m.memberSA.toLowerCase()));
+            if (elig.members.length > 0) {
               await this.state.storage.put(rateKey, rate.next);
               const questionId = `q_${crypto.randomUUID()}`;
               const facets = await fetchDiscoveryFacets(this.env, elig.members!.map((m) => m.memberSA));
@@ -1167,6 +1189,9 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
           const org = p.principal.toLowerCase() as Address;
           const record = recordOf({
             runRef: `topic-${crypto.randomUUID()}`, now: turnStarted, receivedAt: turnStarted,
+            // RUN-11: the AUTHENTICATED principal the run is the record of — the poster's session, admitted upstream by the
+            // org's own object; none when the trigger names no verified poster (never read back from the intent).
+            asker: p.triggerAuthorSa && /^0x[0-9a-f]{40}$/.test(p.triggerAuthorSa) ? p.triggerAuthorSa : null,
             // `asker` is the poster's own address (the session that posted): the person who asked looks back on the run
             // the way an ask route's asker does (`/harness/records`), and the custodian sees every one.
             intent: { goal: String(p.triggerBody ?? ''), context: { addressee: org, ...(p.triggerAuthorSa && /^0x[0-9a-f]{40}$/.test(p.triggerAuthorSa) ? { asker: p.triggerAuthorSa } : {}), channelId: p.channelId, topicTitle: p.topicTitle, triggerAuthor: p.triggerAuthor } },
@@ -1383,7 +1408,12 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
       card: {
         name: agentSA, description: 'delegation-authorized tasks', version: '1',
         supportedInterfaces: [{ url: 'https://a2a-task-do/', protocolBinding: 'JSONRPC', protocolVersion: '1.0' }],
-        capabilities: { streaming: false, pushNotifications: true },
+        // Push is OFF (spec 445 §3.5): nothing here delivers one. This server is rebuilt per request with a
+        // fresh in-memory push store, and the runtime behind it is built with no `pushSender` — a config
+        // registered against a card that said `true` was accepted and then never used. Saying `false` makes
+        // the server answer PushNotificationNotSupported, which is the truth. Turning it on means a durable
+        // push store, a wired sender, and the package's URL policy at both — then, and only then, this flag.
+        capabilities: { streaming: false, pushNotifications: false },
         defaultInputModes: ['application/json'], defaultOutputModes: ['application/json'], skills: [],
       },
       ...(principal ? { principal: async () => principal } : {}),
@@ -1495,11 +1525,7 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
     const archetypeHosts = await this.interactionsInternal(principal, 'internal.archetype.hosts', {})
       .then((r) => ((r as { hosts?: ArchetypeHostGrant[] }).hosts ?? []))
       .catch(() => [] as ArchetypeHostGrant[]);
-    const orgWire = archetypeHosts.length
-      ? await this.interactionsInternal(principal, 'internal.consult.orgWire', {})
-          .then((r) => ((r as { wire?: IncomingDelegation | null }).wire ?? null))
-          .catch(() => null)
-      : null;
+    // RUN-9 — one wire per receiving agent: each host's wire is read at dispatch (`tryArchetypeStep`), not once here.
 
     // spec 334 §6 gather phase — the agent authors read-only queries against the PUBLIC graph AND
     // reads the org's OWN records (via the read-only coordination grant, if the steward enabled it),
@@ -1598,7 +1624,7 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
         // catch below records so the next window collects rather than re-dispatching.
         const specialist = await this.tryArchetypeStep({
           principal, endeavorId, step,
-          hosts: archetypeHosts, orgWire,
+          hosts: archetypeHosts,
           material: { currentTurtle: priorOutputs.map((x) => x.output).join('\n\n').slice(0, 40_000) },
         });
         if (specialist) {
@@ -1765,10 +1791,8 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
       return { ok: false, error: `the grant from ${host} does not name "${archetype}" (has: ${held.archetypes.join(', ')})` };
     }
 
-    const orgWire = await this.interactionsInternal(principal, 'internal.consult.orgWire', {})
-      .then((r) => ((r as { wire?: IncomingDelegation | null }).wire ?? null))
-      .catch(() => null);
-    if (!orgWire) return { ok: false, error: 'this organization has no signing wire — re-run routing-enable' };
+    const orgWire = await orgConsultWire(this.env, principal, host).catch(() => null);
+    if (!orgWire) return { ok: false, error: `this organization has no signing wire for ${host} — re-run routing-enable for that agent` };
 
     try {
       const sent = await this.dispatchArchetypeWork({
@@ -1797,10 +1821,8 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
       return { ok: false, error: 'host and taskId required' };
     }
     const principal = ((await this.state.storage.get<string>(AGENT_SA_KEY)) ?? '').toLowerCase();
-    const orgWire = await this.interactionsInternal(principal, 'internal.consult.orgWire', {})
-      .then((r) => ((r as { wire?: IncomingDelegation | null }).wire ?? null))
-      .catch(() => null);
-    if (!orgWire) return { ok: false, error: 'this organization has no signing wire' };
+    const orgWire = await orgConsultWire(this.env, principal, host).catch(() => null);
+    if (!orgWire) return { ok: false, error: `this organization has no signing wire for ${host}` };
     try {
       const deliverable = await this.collectArchetypeWork({
         org: principal as Address, orgWire, host: host as Address, taskId: taskId as Hex,
@@ -1830,7 +1852,6 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
     endeavorId: string;
     step: { stepId: string; description: string; capabilityRequirements?: Array<{ capabilityIri: string }> };
     hosts: ArchetypeHostGrant[];
-    orgWire: IncomingDelegation | null;
     material: { specDigest?: string; specPaths?: string[]; currentTurtle?: string };
   }): Promise<string | null> {
     const decision = chooseArchetypeRoute(args.step.capabilityRequirements, args.hosts);
@@ -1840,13 +1861,14 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
       }
       return null;
     }
-    if (!args.orgWire) {
+    const { host, archetype } = decision.route;
+    const orgWire = /^0x[0-9a-f]{40}$/i.test(host) ? await orgConsultWire(this.env, args.principal, host).catch(() => null) : null;
+    if (!orgWire) {
       // The org cannot sign as itself, so it cannot dispatch. Run locally rather than fail the step
       // — but say so: the fix is a ceremony, and nothing else would surface it.
-      console.log('[archetype route] no org wire — running locally:', args.endeavorId, args.step.stepId);
+      console.log('[archetype route] no org wire for this host — running locally:', args.endeavorId, args.step.stepId);
       return null;
     }
-    const { host, archetype } = decision.route;
 
     // DOES THE WIRE ACTUALLY COVER THIS METHOD? Presence is not scope. An org whose wire still names
     // only `discussion.consult` — every org that has not re-run routing-enable since the wire was
@@ -1855,9 +1877,13 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
     // will apply, applied here first, so the answer is "run it locally" rather than a rejection.
     const tsEnf = (this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase();
     const amEnf = (this.env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
-    const scopeErr = [tsEnf, amEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))
-      ? checkSessionWireShape(args.orgWire, { timestamp: tsEnf, allowedMethods: amEnf },
-          Math.floor(Date.now() / 1000), { skill: `archetype.${archetype}` })
+    const atEnf = (this.env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase();
+    // RUN-9 — the wire is presented at the HOST's gate, so it is checked against the host's agent (a route's `host`
+    // that is not an address cannot be a target: the wire is then refused, and the step runs locally, said below).
+    const hostAgent = /^0x[0-9a-f]{40}$/i.test(host) ? host : '';
+    const scopeErr = [tsEnf, amEnf, atEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))
+      ? checkSessionWireShape(orgWire, { timestamp: tsEnf, allowedMethods: amEnf, allowedTargets: atEnf },
+          Math.floor(Date.now() / 1000), { target: hostAgent, skill: `archetype.${archetype}` })
       : 'enforcers not configured — cannot check the wire scope';
     if (scopeErr) {
       // Named loudly: the fix is a ceremony (re-enable routing to widen the wire) and nothing else
@@ -1873,7 +1899,7 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
     let taskId = prior?.taskId;
     if (!taskId) {
       const sent = await this.dispatchArchetypeWork({
-        org: args.principal as Address, orgWire: args.orgWire, host: host as Address, archetype,
+        org: args.principal as Address, orgWire, host: host as Address, archetype,
         input: {
           stepGoal: args.step.description, endeavorId: args.endeavorId, stepId: args.step.stepId,
           capabilityIri: decision.route.capabilityIri,
@@ -1888,7 +1914,7 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
       await this.state.storage.put(key, { host, archetype, taskId, sentAt: new Date().toISOString() });
     }
     return this.collectArchetypeWork({
-      org: args.principal as Address, orgWire: args.orgWire, host: host as Address, taskId,
+      org: args.principal as Address, orgWire, host: host as Address, taskId,
     });
   }
 

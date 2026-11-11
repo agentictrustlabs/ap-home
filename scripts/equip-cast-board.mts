@@ -37,7 +37,7 @@ const MCP_SERVER_ID = (process.env.VAULT_SERVER_ID ?? '').trim() || 'demo-mcp';
 const argv = process.argv.slice(2);
 const arg = (n: string, d?: string) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1]! : d; };
 const NOTE = arg('note', 'demo/greeley-cast.faithnet.json')!;
-const OUT = arg('out', NOTE.replace('.faithnet.json', '-messaging.faithnet.json'))!;
+const OUT = arg('out', NOTE.replace(/(\.faithnet(\.gen4)?)\.json$/, '-messaging$1.json'))!;
 const CLUB_ARG = arg('club');
 const HOST = arg('host', 'alice')!;
 const DAYS = Number(arg('days', '90'));
@@ -86,6 +86,17 @@ const wanted: Address[] = [];
 for (const c of CLUB_ARG.split(',').map((x) => x.trim()).filter(Boolean)) wanted.push(await resolveClub(c));
 const host = await sessionFor(HOST);
 const signAsClub = signerFor(host.bearer); // the workspace's custody is the host's credential
+// A CLUB IS A WORKSPACE, AND A WORKSPACE HAS NO MEMBERS (spec 424): membership belongs to its GOVERNING organization,
+// and `/connect/org-invite/agent` refuses a workspace with `not_an_organization`. The governor is the host's own link
+// for the club — its `parent` when that parent is an organization the host stewards. A club with no governor (one
+// chartered before the rule) is invited as itself, as before.
+const hostLinks = ((await j(await fetch(`${HOME}/connect/related-orgs?surface=any`, { headers: { authorization: `Bearer ${host.bearer}` } }))).orgs ?? []) as Array<{ orgAgent: string; parent?: string; relationship?: string }>;
+const governorOf = (club: Address): Address => {
+  const row = hostLinks.find((o) => o.orgAgent.toLowerCase() === club);
+  const parent = String(row?.parent ?? '').toLowerCase();
+  const gov = hostLinks.find((o) => o.orgAgent.toLowerCase() === parent && o.relationship === 'steward');
+  return (gov ? parent : club) as Address;
+};
 console.log(`${wanted.length} club(s) · host ${HOST} (${host.agent})`);
 
 const people: Address[] = []; for (const h of PEOPLE) people.push((await sessionFor(h)).agent);
@@ -105,10 +116,11 @@ for (const part of cast) {
 
   // 1. each club invites the character — club → character member access, signed by the club's custody, in the club's vault
   for (const club of wanted) {
+    const inviteAt = governorOf(club);
     const validUntil = Math.floor(Date.now() / 1000) + 365 * 86_400;
     let salt = 0n; for (const b of crypto.getRandomValues(new Uint8Array(16))) salt = (salt << 8n) | BigInt(b);
     const mad: Delegation = {
-      delegator: club, delegate: me, authority: ROOT_AUTHORITY, salt, signature: '0x',
+      delegator: inviteAt, delegate: me, authority: ROOT_AUTHORITY, salt, signature: '0x',
       caveats: [
         buildVaultRecordScopeCaveat([{ server: MCP_SERVER_ID, resources: ['vault:org.profile'], ops: ['read'] }]),
         buildCaveat(contracts.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
@@ -120,12 +132,12 @@ for (const part of cast) {
     // run should not stop on a hiccup in one club's vault. A second refusal is reported and the cast goes on.
     let inv: Record<string, unknown> = {};
     for (let attempt = 0; attempt < 2; attempt++) {
-      inv = await j(await fetch(`${HOME}/connect/org-invite/agent`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${host.bearer}` }, body: JSON.stringify({ org: club, agent: me, memberAccessDelegation: { ...mad, salt: mad.salt.toString() }, role: part.role }) }));
+      inv = await j(await fetch(`${HOME}/connect/org-invite/agent`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${host.bearer}` }, body: JSON.stringify({ org: inviteAt, agent: me, memberAccessDelegation: { ...mad, salt: mad.salt.toString() }, role: part.role }) }));
       if (inv.ok === true) break;
       await new Promise((r) => setTimeout(r, 2000));
     }
     if (inv.ok !== true) { console.log(`  ✗ club ${club} did not invite ${part.name}: ${JSON.stringify(inv).slice(0, 200)} — re-run for this club`); continue; }
-    console.log(`  invited into ${club.slice(0, 10)}… as ${part.role}`);
+    console.log(`  invited into ${club.slice(0, 10)}…${inviteAt !== club ? ` (at its governor ${inviteAt.slice(0, 10)}…)` : ''} as ${part.role}`);
   }
 
   // 2. the standing grant, re-minted: both verbs, the recipients and the clubs

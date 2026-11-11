@@ -9,7 +9,7 @@
 const DIRECTORY = '/a2a/discovery';
 
 export interface RegisteredName {
-  /** Full agent name, e.g. `sarah.impact`. */
+  /** Full agent name, e.g. `sarah.me`. */
   name: string;
   smartAgent: string;
   /** Unix seconds the name was registered on-chain; null until the KB reindexes with the metadata. */

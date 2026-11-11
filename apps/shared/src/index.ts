@@ -96,3 +96,7 @@ export const INTERACTIONS_APP_SCOPES: ReadonlyArray<RecordScopeSpec> = [
   { resources: [...APP_OWN_NAMESPACE_SEED_SCOPES, ...APP_ASSESSMENT_SCOPES, ...APP_DOMAIN_RECORD_SCOPES, ...APP_CREDENTIAL_SCOPES, ...APP_IDENTITY_SCOPES, ...APP_FRIENDSHIP_SCOPES, ...APP_AGREEMENT_SCOPES], ops: ['read', 'write'] },
   { resources: [...APP_LEGACY_CONTACT_MIGRATION_SCOPES], ops: ['read', 'write', 'delete'] },
 ];
+
+// Spec 445 (audit RUNC-1) — the oversight wire's targets, shared by the code that mints it and the code that
+// recognises it. Pure; the recogniser is the `@ap-home/shared/oversight-check` subpath (server-side only).
+export * from './oversight-targets';

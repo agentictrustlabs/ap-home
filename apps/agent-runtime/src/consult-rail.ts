@@ -12,7 +12,7 @@
 // stale-opt-in rule), and a member whose grant row is gone is simply not asked.
 import { hashA2aMessage } from '@agenticprimitives/a2a';
 import { delegatedInputPart, taskStateFromV1, withDelegatedTask, AP_DELEGATED_TASK_EXTENSION, type TaskV1 } from '@agenticprimitives/a2a/standard';
-import { CONSULT_SKILL_ID, buildConsultRequest, validateConsultAnswer, type ConsultAnswerV1 } from '@agenticprimitives/fabric/messaging';
+import { CONSULT_SKILL_ID, buildConsultRequest, validateConsultAnswer, type ConsultAnswerV1, type EligibleConsultMemberV1 } from '@agenticprimitives/fabric/messaging';
 import { keccak256, toBytes, type Address, type Hex } from 'viem';
 import { internalHeaders } from './internal-marker.js';
 import { wrapSessionSignature } from '@agenticprimitives/a2a';
@@ -52,17 +52,19 @@ export async function signAsAgent(env: Env, agent: string, digest: Hex, signRaw?
   return signAsOrg(env, leaf, digest, signRaw);
 }
 
-/** The org's own consult wire, or null when the routing ceremony has not minted one. */
-export async function orgConsultWire(env: Env, org: string): Promise<IncomingDelegation | null> {
-  const r = (await interactionsInternal(env, org, 'internal.consult.orgWire', {})) as { wire?: IncomingDelegation | null };
+/** The org's routing wire for ONE receiving agent (a member or an archetype host — RUN-9, one wire per target), or null
+ *  when the routing ceremony has not minted one for that agent. A wire minted for member A is never returned for B. */
+export async function orgConsultWire(env: Env, org: string, target: string): Promise<IncomingDelegation | null> {
+  const r = (await interactionsInternal(env, org, 'internal.consult.orgWire', { target: target.toLowerCase() })) as { wire?: IncomingDelegation | null };
   return r.wire ?? null;
 }
 
 /** The agent's own A2A signing wire that COVERS `skill` — its service signing wire (the library-read ceremony,
  *  `signing.serviceWire`) or its org consult wire (`routing.orgWire`), whichever names the skill's selector; when neither
  *  does, whichever exists (so the caller's shape check says what is missing); null when the agent holds none. */
-export async function signingWireFor(env: Env, agent: string, skill: string): Promise<IncomingDelegation | null> {
-  const r = (await interactionsInternal(env, agent, 'internal.signing.wire', { skill })) as { wire?: IncomingDelegation | null };
+export async function signingWireFor(env: Env, agent: string, skill: string, target?: string): Promise<IncomingDelegation | null> {
+  // `target` is the RECEIVING agent (RUN-9): a service signing wire names one publisher, so the one for THIS publisher is read.
+  const r = (await interactionsInternal(env, agent, 'internal.signing.wire', { skill, ...(target ? { target: target.toLowerCase() } : {}) })) as { wire?: IncomingDelegation | null };
   return r.wire ?? null;
 }
 
@@ -70,6 +72,15 @@ export async function signingWireFor(env: Env, agent: string, skill: string): Pr
 export async function memberConsultGrant(env: Env, org: string, member: string): Promise<IncomingDelegation | null> {
   const r = (await interactionsInternal(env, org, 'internal.consult.grant', { member: member.toLowerCase() })) as { wire?: IncomingDelegation | null };
   return r.wire ?? null;
+}
+
+/** The grant AND this member's eligibility at the organization, in one fresh read (spec 445 §3.4, audit DATB-3).
+ *  `grant` is the member's consent; `eligible` is fabric's intersection for this one member — CURRENT MEMBER (the
+ *  organization's own membership records) ∩ live grant ∩, when `channelId` names a topic, its participants. A
+ *  member who left with the grant still live comes back `{ grant, eligible: [] }`: consent without membership. */
+export async function memberConsultStanding(env: Env, org: string, member: string, channelId?: string): Promise<{ grant: IncomingDelegation | null; eligible: EligibleConsultMemberV1[] }> {
+  const r = (await interactionsInternal(env, org, 'internal.consult.grant', { member: member.toLowerCase(), ...(channelId ? { channelId } : {}) })) as { wire?: IncomingDelegation | null; eligible?: EligibleConsultMemberV1[] };
+  return { grant: r.wire ?? null, eligible: Array.isArray(r.eligible) ? r.eligible : [] };
 }
 
 /** ONE 1.0 request to a target agent's own task object, in-Worker, calling AS the org (the door's
@@ -97,11 +108,13 @@ export async function submitDelegatedTask(env: Env, args: SubmitDelegatedTaskArg
   const messageId = (`0x${Array.from(idBytes, (b) => b.toString(16).padStart(2, '0')).join('')}`) as Hex;
   const createdAt = Math.floor(Date.now() / 1000);
   const bodyHash = hashBody(args.input);
-  const digest = hashA2aMessage({ messageId, sender: org as Address, skill: args.skill, bodyHash, createdAt });
+  // The bound envelope (RUNB-4, mandatory): the message is valid AT this agent, on this chain, and nowhere else.
+  const bound = { recipient: target as Address, chainId: Number(env.CHAIN_ID) };
+  const digest = hashA2aMessage({ messageId, sender: org as Address, skill: args.skill, bodyHash, createdAt, ...bound });
   const signature = await signAsOrg(env, args.orgWire, digest, args.signRaw);
   const message = withDelegatedTask(
     { messageId, role: 'ROLE_USER', parts: [delegatedInputPart(args.input)] },
-    { delegation: args.grant as never, requester: org, skill: args.skill, sender: org, bodyHash, bodyRef: { owner: target, recordType: 'pending' }, signature, createdAt },
+    { delegation: args.grant as never, requester: org, skill: args.skill, sender: org, bodyHash, bodyRef: { owner: target, recordType: 'pending' }, signature, createdAt, ...bound },
   );
   const out = await rpcAs(env, target, org, { jsonrpc: '2.0', id: messageId, method: 'SendMessage', params: { message } });
   const task = (out.result as { task?: TaskV1 } | undefined)?.task;
@@ -141,16 +154,29 @@ export interface SubmitConsultArgs {
   topicId: string; questionId: string; topicTitle?: string; tail?: Array<{ author: string; bodyText: string }>;
   /** Spec 380 W2 — what the organization is asking for, carried to the member's agent as context. */
   purpose?: string;
+  /** Spec 445 (DATB-3) — the organization's eligibility read for this topic (`memberConsultStanding`, or the
+   *  `internal.consult.eligible` set). REQUIRED: the request is built only for a member it names. */
+  eligible: readonly Pick<EligibleConsultMemberV1, 'memberSA'>[];
   signRaw?: RawSigner;
 }
 
-/** Send ONE consult to a member's agent. Returns the task id; throws when the member's gate refuses. */
+/** The member is not eligible to be consulted — not a current member, no live grant, or outside the topic. Nothing
+ *  was built and nothing was sent. Distinct from the member's own gate refusing (which is the member's answer). */
+export class ConsultNotEligibleError extends Error {
+  constructor(readonly memberSA: string) { super(`${memberSA} is not eligible to be consulted by this organization — nothing was sent`); this.name = 'ConsultNotEligibleError'; }
+}
+
+/** Send ONE consult to a member's agent. Returns the task id; throws `ConsultNotEligibleError` when the member is
+ *  not in `eligible` (no request exists to send), and when the member's gate refuses. */
 export async function submitConsult(env: Env, args: SubmitConsultArgs): Promise<{ taskId: Hex; messageId: Hex }> {
   const request = buildConsultRequest({
+    memberSA: args.memberSA, eligible: args.eligible,
     question: args.question, orgSA: args.org, topicId: args.topicId, questionId: args.questionId,
     ...(args.topicTitle ? { topicTitle: args.topicTitle } : {}), ...(args.tail?.length ? { tail: args.tail } : {}),
     ...(args.purpose ? { purpose: args.purpose } : {}),
   });
+  // `null` — fabric built nothing for a member the organization's eligibility read does not name (DATB-3).
+  if (!request) throw new ConsultNotEligibleError(args.memberSA.toLowerCase());
   const sent = await submitDelegatedTask(env, { org: args.org, orgWire: args.orgWire, grant: args.grant, target: args.memberSA, skill: CONSULT_SKILL_ID, input: request, ...(args.signRaw ? { signRaw: args.signRaw } : {}) });
   return { taskId: sent.taskId, messageId: sent.messageId };
 }

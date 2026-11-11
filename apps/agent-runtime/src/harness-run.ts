@@ -99,7 +99,7 @@ registerDefaultSubsetHandlers();
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, CONTINUE_STEP_ID, deriveArgs, type ArgDerivationV1, InputRequired, dataFor, signatureFor,
-  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, foundIsNotAsked, capabilitiesAvailable, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, completePlan, transitionsHold, type FactsV1, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
+  type RunResult, type ToolSpec, type MandateVerifier, type StepAuthorityRequest, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, foundIsNotAsked, capabilitiesAvailable, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, completePlan, transitionsHold, type FactsV1, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, declaredEffectSink, setBillStep, declaredCapabilities, forgetMemo, type AskScopeV1 } from '@agenticprimitives/harness';
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
 export type { AskScopeV1 } from '@agenticprimitives/harness';
@@ -139,7 +139,8 @@ import { MEMBERSHIP_LIST_TOOL, membershipListInvoker, AFFILIATIONS_LIST_TOOL, af
 import { RESOLUTION_REQUEST_TOOL } from './resolution-invitation.js';
 import { actionLink, resolutionRequestInvoker } from './resolution-request.js';
 import { partyRole, suffixesFor, COUNTERPARTY_ARGS, PARTY_ROLES, SUFFIX_FOR_CLASS, CLASS_FOR_SUFFIX, fanOutBindingFor } from '@agenticprimitives/ontology';
-import { decodePaymentTerms } from '@agenticprimitives/delegation';
+import { decodePaymentTerms, type MandateUseLedger } from '@agenticprimitives/delegation';
+import { durableMandateUseLedger } from './mandate-use-ledger.js';
 import { preconditionRefusal } from './capability-preconditions.js';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
 import { deriveStanding, standingNote, type Standing, type StandingDeps } from '@agenticprimitives/context';
@@ -148,6 +149,10 @@ import { verifyAllowingSettle } from './chain-settle.js';
 
 
 export interface HarnessEnv {
+  /** Spec 445 / AUTH-5 — the per-agent task objects that hold the durable mandate-use ledger (`mandate-use-ledger.ts`).
+   *  Absent ⇒ a step that does not redeem on chain cannot record its use, and is refused (`single-use-unrecorded`). */
+  A2A_TASKS?: DurableObjectNamespace;
+  A2A_INTERNAL_MARKER?: string;
   /** Spec 434 W3 — `on` carries every model call to the town's gateway by profile (`gatewayOn`). A comparison
    *  may set it per run (`variant.gateway`); otherwise it is the deployment's. Declared here because the run's
    *  env is what the planner and composer are chosen from. */
@@ -901,6 +906,10 @@ export interface TeamGenesisDeps {
   userOpHash(userOp: GenesisUserOpJson): Promise<Hex>;
   /** Has the child already been deployed? (a resume after success is a no-op) */
   isDeployed(child: Address): Promise<boolean>;
+  /** Does the child's ERC-1271 accept this wire's approved-hash (`0x03`) signature — i.e. did its genesis approve it?
+   *  A second ask for an existing child rebuilds the stewardship wire from THAT ask's mandate window, which is a
+   *  different wire from the one the genesis approved; handing it back unapproved made the steward a non-steward. */
+  isApproved?(child: Address, wire: DelegationWireV1): Promise<boolean>;
   /** Submit the signed genesis, sponsored. Throws on an inner revert. */
   submit(userOp: GenesisUserOpJson): Promise<{ txHash: Hex }>;
 }
@@ -973,7 +982,10 @@ export function childAgentCreateInvoker(genesis: TeamGenesisDeps, env: HarnessEn
       // A resume of a settled create still provisions: the genesis's approveHash calls are on chain, the
       // wires rebuild deterministically, and a team that exists without its planes is the broken state.
       const planes = g.planes && genesis.provisionPlanes ? await genesis.provisionPlanes(g.child, g.planes).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })) : null;
-      return { agent: g.child, name: g.name, kind: recordedKind(noun, parent, person), parent, custodian: credential, person, stewardshipDelegation: g.stewardship, alreadyCreated: true, ...(planes && !planes.ok ? { planesError: planes.error } : {}), ...(g.nameLater ? { nameLater: true, label, tld: g.tld ?? tld } : {}) };
+      // Only a wire the child actually approved is stewardship; a rebuilt one it never approved is returned as absent,
+      // by name, so the Home keeps the steward's existing wire instead of replacing it with one that does not verify.
+      const approved = genesis.isApproved ? await genesis.isApproved(g.child, g.stewardship as DelegationWireV1).catch(() => false) : true;
+      return { agent: g.child, name: g.name, kind: recordedKind(noun, parent, person), parent, custodian: credential, person, ...(approved ? { stewardshipDelegation: g.stewardship } : { stewardshipStale: true }), alreadyCreated: true, ...(planes && !planes.ok ? { planesError: planes.error } : {}), ...(g.nameLater ? { nameLater: true, label, tld: g.tld ?? tld } : {}) };
     }
     // Taken by someone ELSE — the child this ask derives is not there yet, so the name is not ours.
     const holder = await genesis.resolveName(name);
@@ -1247,6 +1259,9 @@ export interface HarnessDeps {
   mergeProfile?: (person: string, fields: Record<string, string>) => Promise<{ ok: boolean; changed?: string[]; refused?: string[]; error?: string }>;
   /** Record ONE person in the asker's own household note. Private tier; grants nothing. */
   recordHouseholdMember?: (person: string, input: { member: string; role?: string; kin?: string; label?: string; household?: string; remove?: true }) => Promise<{ ok: boolean; removed?: true; role?: string; kin?: string; household?: string; count?: number; error?: string }>;
+  /** Spec 445 / AUTH-5 — the single-use record for a step that does not redeem on chain. Absent ⇒ the durable ledger in
+   *  the root delegator's task object (`durableMandateUseLedger`); a test passes `createMemoryMandateUseLedger()`. */
+  mandateUses?: MandateUseLedger;
   now?: () => number;
 }
 
@@ -1301,6 +1316,10 @@ export interface RoutedStepV1 { stepRef: string; toolId: string; agent: string; 
   /** Spec 383 W2 — the standing the receiver's receipt names: for whom, by whom, under which steward wire (digest). */
   standing?: { relation: string; subject: string; principal: string; because: string; wireRef?: string } }
 
+/** Spec 445 (audit RUNC-2) — the relations under which a hop is said to have run FOR someone. The same three
+ *  `belongs()` (context) admits; a receipt's relation is a plain string here, so the set is spelled once. */
+const BELONGING_RELATIONS: ReadonlySet<string> = new Set(['self', 'steward', 'member']);
+
 /** The routed steps of a run, read from each observation's `via` — the sender's record of the hop. */
 export function routedStepsOf(steps: ReadonlyArray<{ stepRef?: string; step: { id?: string; toolId: string }; result?: unknown }>): RoutedStepV1[] {
   const out: RoutedStepV1[] = [];
@@ -1309,7 +1328,7 @@ export function routedStepsOf(steps: ReadonlyArray<{ stepRef?: string; step: { i
     if (!via?.agent) return;
     // Spec 383 W2 — the receiver's receipt names the standing the hop ran under; lifted so the asker's reply
     // (and the Home) can say "for Missio Nexus, under steward wire 0x…" without shipping the receipts whole.
-    const standing = (via.receipts ?? []).map((r) => r?.binding?.standing).find((sd) => sd && sd.relation !== 'none');
+    const standing = (via.receipts ?? []).map((r) => r?.binding?.standing).find((sd) => sd && BELONGING_RELATIONS.has(sd.relation));   // RUNC-2: never `!== 'none'` — a relation this list does not name (`claimed`) is not shown as standing
     // The observation's OWN stepRef, never its index: a run that begins with the spec-413 retrieval step (`retrieve`)
     // shifted every index by one, so the reply named `s1` for the step the record (and its provenance graph) calls `s0`.
     out.push({ stepRef: o.stepRef ?? o.step.id ?? `s${i}`, toolId: o.step.toolId, agent: via.agent, ...(via.name ? { name: via.name } : {}), observedVia: via.observedVia ?? 'unknown', ...(via.runRef ? { runRef: via.runRef } : {}), ...(via.receipts?.length ? { receipts: via.receipts.length } : {}), ...(via.childRef ? { childRef: via.childRef } : {}), ...(standing ? { standing } : {}) });
@@ -1511,9 +1530,17 @@ export function suppliedApprovalsPort(
       // Spec 397 `act-as-me` — SHE DECIDED ONCE. When the step's mandate is a CHILD derived from a STANDING wire (no
       // intent binding) that the run's principal — or the treasury the step spends from — signed, the person's own
       // standing decision IS the second party for this step: the cap, the payee, the asset and the capability were
-      // hers to set, and the chain already verified the child ⊆ that wire. Recorded on the receipt by the wire's
-      // digest, so a reviewer can see which standing decision stood in. A wire whose delegator is someone else's
-      // discharges nothing — it is not her decision.
+      // hers to set, and the verifier held the child to that wire. That is a fact since spec 445 §3.1 and was an
+      // assumption before it (audit H-7): `verifyAuthorityChain` judges THIS step against every link's caveats, the
+      // standing wire's included, refuses a child wider than its parent (`chain-not-attenuated`), and requires the
+      // chain's root to be the party whose authority the step needs (`chain-root-not-principal`). This port is
+      // reached only after that verdict — the loop calls `approvalPort.request` with the evidence of a `verify` that
+      // did not deny, and verifies again after the approval — so a wire that reaches here was accepted as a parent of
+      // the leaf for this step, never merely found alive. What is checked here is what the verifier does not ask:
+      // that the leaf's IMMEDIATE parent is a STANDING wire (no intent binding) and is hers — the run's principal's,
+      // or that of the party the step spends from. Recorded on the receipt by the wire's digest, so a reviewer can
+      // see which standing decision stood in. A wire whose delegator is someone else's discharges nothing — it is
+      // not her decision.
       const parentWire = parentRef ? (presentedAll ?? []).find((p) => p.ref.toLowerCase() === parentRef.toLowerCase())?.wire as { delegator?: string; caveats?: Array<{ enforcer: string; terms: string; args?: string }> } | undefined : undefined;
       const standingOwners = new Set([person, req.step.capability.authority, req.step.capability.resource].filter((x): x is string => typeof x === 'string').map((x) => x.toLowerCase()));
       const standingByHer = !!parentWire && typeof parentWire.delegator === 'string' && standingOwners.has(parentWire.delegator.toLowerCase())
@@ -1847,6 +1874,22 @@ const ZERO_EDGE = `0x${'0'.repeat(64)}` as Hex;
  * (spec 338) has nothing to hang a public preference on; for those the grant you signed IS the
  * preference, and saying so is more use than a retry.
  */
+/**
+ * HOW MANY ON-CHAIN REDEMPTIONS ONE `treasury.primary.declare` MANDATE MAKES (spec 445 / generation 4 / B1, DLG-3).
+ * The invoker below redeems once per call: one to mark (or clear) the treasury, plus one per OTHER treasury of the owner
+ * it must clear when marking. The signed digest-binding terms bound the redemptions, so the requirement must state the
+ * most the step can make — 1 when clearing, 1 + the owner's other chartered treasuries when marking. A shortfall is
+ * refused on chain (`UsesExhausted`), never exceeded. Same read as the invoker (an unreadable list counts none).
+ * Returns 1 (the single-use terms) off a generation-4 estate: an older enforcer bounds nothing by count.
+ */
+export async function primaryDeclareRedemptions(deps: Pick<HarnessDeps, 'charteredAgents'> | undefined, env: Pick<HarnessEnv, 'CONTRACTS_GENERATION'>, owner: string, treasury: unknown, on: unknown): Promise<number> {
+  if (contractsGenerationOf({ contractsGeneration: env.CONTRACTS_GENERATION }) < 4) return 1;
+  if (on !== undefined && !isFlagTrue(on)) return 1;
+  const me = String(treasury ?? '').toLowerCase();
+  const others = (await deps?.charteredAgents?.(owner.toLowerCase(), 'treasury').catch(() => []) ?? []).filter((c) => c.agent.toLowerCase() !== me);
+  return 1 + others.length;
+}
+
 export function primaryPayeeInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation): ToolInvoker {
   return async (_toolId, args, ctx) => {
     const wire = presented.wire as Delegation;
@@ -2388,6 +2431,34 @@ export function rootDelegatorOf(leaf: MandatePresentation, chain: { presentedAll
   return wire.delegator;
 }
 
+/**
+ * WHOSE AUTHORITY A STEP NEEDS — the one rule, read in two places (spec 445 §3.1, audit AUTH-3):
+ *   · the ask's reply names this party as the delegator the person is asked to sign AS (`askReplyFor`), and
+ *   · the mandate verifier requires the presented chain's ROOT delegator to BE this party (`principalFor`).
+ * One function so the two cannot drift: a mandate asked of X is verified against X, and a mandate signed by anyone
+ * else is refused `chain-root-not-principal` whatever its own caveats say.
+ *
+ * The step's declared `authority` (the payer, the sender, the holder) when its argument is set; else, for a capability
+ * that DECLARES whose authority it spends, the agent being asked — never the thing it acts on (that fallthrough is how
+ * "send alice a message" became a request to authorize it AS ALICE); else the resource, which for a capability that
+ * declares no authority IS the party (the parent a team is chartered under); else the agent being asked. A name is
+ * read once from the naming records; a name nothing holds falls to the agent being asked, as it always did.
+ * `null` when nobody was named at all — the verifier then denies: a mandate cannot be matched to nobody.
+ */
+export async function authorityPartyFor(
+  capability: { id: string; authority?: string; resource?: string },
+  asked: string | undefined,
+  resolveName?: (name: string) => Promise<string | null | undefined>,
+): Promise<Address | null> {
+  const declaresAuthority = !!HARNESS_ACTION_TOOLS.find((t) => (t.capability?.id ?? t.id) === capability.id)?.capability?.authorityArg;
+  const fallback = declaresAuthority ? asked : (capability.resource ?? asked);
+  const named = String(capability.authority ?? fallback ?? '').trim();
+  if (/^0x[0-9a-fA-F]{40}$/.test(named)) return named.toLowerCase() as Address;
+  const resolved = named && resolveName ? await resolveName(named.toLowerCase()) : null;
+  const party = String(resolved ?? asked ?? '').trim().toLowerCase();
+  return /^0x[0-9a-f]{40}$/.test(party) ? party as Address : null;
+}
+
 /** The invoker: informational tools go to the existing MCP path; the payment tool redeems on chain; the
  *  team tool builds a genesis the connected user signs. */
 export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInput: MandatePresentation | MandatePresentation[] | null, mcpInvoke: ToolInvoker, person?: Address, session?: string, surface?: AskScopeV1, addressee?: Address, playbook?: { capabilityIds: Set<string>; tools?: Record<string, DefinitionToolV1> } | null): ToolInvoker {
@@ -2621,10 +2692,11 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       return cur.delegator.toLowerCase() as Address;
     };
     const rootPayer = rootDelegatorOf(paymentPresented.wire as Delegation);
-    const payer = args.payer ? await partyAddress(args.payer, deps, 'the payer') : '';
-    if (payer && payer !== rootPayer) {
-      throw new Error(`the payment is made by the mandate's delegator (${rootPayer}); the plan named ${payer}`);
-    }
+    // Spec 445 §3.1 — the plan's payer is not compared with this root a second time. `payer` is this capability's
+    // declared authority, and the verifier that allowed this step required the chain's root delegator to BE it
+    // (`chain-root-not-principal`), for the same mandate selected here. The argument is still READ: a payer that
+    // names no agent is an error, never a payment quietly made from whoever signed.
+    if (args.payer) await partyAddress(args.payer, deps, 'the payer');
     const payee = await partyAddress(args.payee, deps, 'the payee');
     // ── THE VALUE RAIL (spec 373) ──────────────────────────────────────────────────────────────────
     // Money moves between ACCOUNTS. Both ends are checked HERE, at the moment of acting, because this is
@@ -2635,7 +2707,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // The evidence is the on-chain `atl:agentType`, never the name: a suffix is a claim, the record is the
     // authority, and an unnamed treasury has the record but no suffix. Fail-closed — unreadable is
     // refused, and the sentence says which end and what it is.
-    await refuseUnlessTreasury(deps, payer || rootPayer, 'paying from');
+    await refuseUnlessTreasury(deps, rootPayer, 'paying from');
     await refuseUnlessTreasury(deps, payee, 'being paid');
     const amount = fundingAmount(args);
     const wire = paymentPresented.wire as Delegation;
@@ -3554,7 +3626,7 @@ export function fitPlannerPrompt(
 const KIND_SUFFIX: Record<string, string> = { person: 'me', me: 'me', org: 'org', organization: 'org', team: 'team', workspace: 'workspace', treasury: 'treasury', 'person-treasury': 'treasury', 'org-treasury': 'treasury', service: 'svc', svc: 'svc', circle: 'circle', church: 'church' };
 
 export function orgPhraseOf(goal: string): string | undefined {
-  // The phrase may carry a DOT: "members of calvary.org", "members of alice-home-church.impact" are typed
+  // The phrase may carry a DOT: "members of calvary.org", "members of alice-home.church" are typed
   // names, and excluding the dot here meant no typed name ever reached the step — the roster read then
   // fell to the addressee (spec 366 R3's incident). Only sentence punctuation ends the phrase.
   // "members of / in / on X" — and the phrasings the compiled roster read ALSO catches: "who belongs to X", "who is in X",
@@ -4518,12 +4590,14 @@ async function askReplyForInner(env: HarnessEnv, input: {
     // messaging declares `authorityArg: 'sender'`, nothing set a sender, and the resource — the recipient
     // — was next in line. Acting-party resolution now always fills it; this makes the old route
     // unreachable rather than merely unused.
-    const declaresAuthority = !!HARNESS_ACTION_TOOLS.find((t) => (t.capability?.id ?? t.id) === r.required!.capability.id)?.capability?.authorityArg;
-    const fallback = declaresAuthority ? input.addressee : (required.capability.resource ?? input.addressee);
-    const named = ((required.capability.authority ?? fallback) as string).trim();
-    const delegator = (/^0x[0-9a-fA-F]{40}$/.test(named)
-      ? named
-      : ((input.resolveName ? await input.resolveName(named.toLowerCase()) : null) ?? input.addressee)).toLowerCase() as Address;
+    // Spec 445 §3.1 — the rule lives in `authorityPartyFor`, which the mandate verifier reads too: the party named
+    // here to sign is the party the presented chain's root must be.
+    const delegator = (await authorityPartyFor(required.capability, input.addressee, input.resolveName)) ?? (String(input.addressee).toLowerCase() as Address);
+    // DLG-3 / B1 — a step that redeems more than once says how many, in the requirement the person signs.
+    if (r.required.capability.id === PRIMARY_PAYEE_CAPABILITY) {
+      const n = await primaryDeclareRedemptions(input.deps, env, delegator, args.treasury, args.on);
+      if (n > 1) requirement.maxRedemptions = n;
+    }
     // WHO CAN GRANT THIS (spec 353 S5). The chain will decide either way; the point is to decide it BEFORE
     // a person signs rather than after. A member who signs as an org they do not custody gets a `not-live`
     // verdict that is accurate, unhelpful, and arrives once the work is already done.
@@ -4600,7 +4674,9 @@ async function askReplyForInner(env: HarnessEnv, input: {
         { readSubjectRecord: input.deps.readSubjectRecord, ...(input.verifyStewardship ? { verifyStewardship: input.verifyStewardship } : {}), ...(input.deps.standingContext ? { context: input.deps.standingContext } : {}) },
         { principal: input.principal, subject: input.addressee },
       ).catch(() => null);
-      if (st?.relation === 'member') {
+      // `claimed` (RUNC-2): the same positive evidence — their links were read and hold no verified stewardship —
+      // which before spec 445 read as `member` here. Kept refusing, with the sentence that says whose record it is.
+      if (st?.relation === 'member' || st?.relation === 'claimed') {
         return {
           kind: 'refused', runRef: r.runRef, outcome: 'denied', receipts: r.receipts,
           error: standingNote(st, CAPABILITY_WORDS[pendingCapability] ?? pendingCapability),
@@ -5280,9 +5356,31 @@ export async function runUnderMandate(envIn: HarnessEnv, deps: HarnessDeps, inpu
   // digest once the playbook is loaded (below). The verifier reads them at verify time and recomputes the
   // intent digest under them; the intent is stamped with the same values before any mandate is minted.
   let currentVersions: VersionBindingV1 | null = null;
-  const verifier = delegationMandateVerifier({
+  // Spec 445 §3.1 (audit AUTH-3) — WHOSE AUTHORITY EACH STEP NEEDS, by the same rule the reply uses to say who is asked
+  // to sign (`authorityPartyFor`): the step's declared authority, else — for a capability that declares none — the
+  // resource that is itself the party, else the agent being asked (the run's person when no agent was addressed). The
+  // verifier requires the presented chain's ROOT delegator to be this party and refuses `chain-root-not-principal`
+  // otherwise; nobody named ⇒ `null` ⇒ denied. A name is read from the naming records before the verifier is asked
+  // (its port is synchronous), keyed by the step, so the answer it reads is the one computed for THIS step.
+  const principals = new Map<string, Address | null>();
+  const principalKey = (req: StepAuthorityRequest): string => `${req.step.runRef}:${req.step.stepRef}`;
+  const chainVerifier = delegationMandateVerifier({
     actor: (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address,
+    principalFor: (req) => principals.get(principalKey(req)) ?? null,
     enforcers,
+    // Spec 445 / AUTH-5 — the DURABLE record of a use (a per-isolate map is not a ledger). Keyed by the mandate's ROOT
+    // delegator: the principal's own task object is the one writer for every verifier of that mandate.
+    uses: deps.mandateUses ?? durableMandateUseLedger(env, (mandateRef) => {
+      const byRef = new Map(presentedList.map((m) => [m.ref.toLowerCase(), m.wire as Delegation] as const));
+      let w = byRef.get(String(mandateRef).toLowerCase());
+      for (let hop = 0; w && hop < 16; hop++) {
+        if (w.authority === ROOT_AUTHORITY) return w.delegator.toLowerCase() as Address;
+        const parent = byRef.get(String(w.authority).toLowerCase());
+        if (!parent) return null;
+        w = parent;
+      }
+      return null;
+    }),
     currentVersions: () => currentVersions,
     // Spec 383 — every wire this turn presented, so a child is verified with its parents or refused.
     presentedAll: () => (input.presented == null ? [] : Array.isArray(input.presented) ? input.presented : [input.presented]).map((w) => w as unknown as Delegation),
@@ -5307,6 +5405,12 @@ export async function runUnderMandate(envIn: HarnessEnv, deps: HarnessDeps, inpu
     },
     now,
   });
+  const verifier: MandateVerifier = {
+    async verify(req) {
+      principals.set(principalKey(req), await authorityPartyFor(req.step.capability, input.addressee ?? input.person, deps.resolveName).catch(() => null));
+      return chainVerifier.verify(req);
+    },
+  };
   const policy = riskLadderPolicy({ discharge: { 'second-party-approval': { role: 'steward' } } });
   const receiptSink: ReceiptSink = {
     async record(r: StepReceipt) {
@@ -5358,7 +5462,11 @@ export async function runUnderMandate(envIn: HarnessEnv, deps: HarnessDeps, inpu
     : standingPrincipal && standingSubject && deps.readSubjectRecord
     ? remembered(`standing:${standingPrincipal.toLowerCase()}:${standingSubject.toLowerCase()}`, () => deriveStanding({ readSubjectRecord: deps.readSubjectRecord, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), ...(deps.agentTypeOf ? { agentKindOf: deps.agentTypeOf } : {}), wireRefOf },
         { principal: standingPrincipal, subject: standingSubject })
-      .then((st) => ({ relation: st.relation, subject: st.subject, principal: standingPrincipal.toLowerCase(), because: st.because, ...(st.wireRef ? { wireRef: st.wireRef } : {}) }))
+      // RUNC-2 (spec 445): `claimed` — only the asker's own row says they belong — is NOT a standing. The receipt's
+      // relation vocabulary (orchestration `ExecutionBindingV1.standing`) has no word for it, and everything read
+      // from this value (the asker context, the offer by standing, the regression facts) must treat it as no
+      // link; so it is recorded `none`, and `because` keeps the honest sentence ("your own records link you…").
+      .then((st) => ({ relation: st.relation === 'claimed' ? 'none' as const : st.relation, subject: st.subject, principal: standingPrincipal.toLowerCase(), because: st.because, ...(st.wireRef ? { wireRef: st.wireRef } : {}) }))
       .catch(() => undefined))
     : null;
   // A SCREEN'S FIXED READ PREPARES ONLY WHAT IT NAMES (2026-10-04). A rowsOnly supplied plan — the bell asking "what

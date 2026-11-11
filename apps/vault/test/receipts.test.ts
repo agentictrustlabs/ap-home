@@ -77,13 +77,13 @@ beforeEach(() => {
 });
 
 describe('ONE signer, selected by configuration (ADR-0013)', () => {
-  it('is UNSIGNED when neither a KMS key nor a secret is configured', () => {
-    const { receipts } = buildReceiptsConfig(env(), {});
+  it('is UNSIGNED when neither a KMS key nor a secret is configured', async () => {
+    const { receipts } = await buildReceiptsConfig(env(), {});
     expect(receipts.sign).toBeUndefined();
   });
 
   it('uses demo-hmac when only the secret is configured', async () => {
-    const { receipts } = buildReceiptsConfig(env({ VERIFICATION_RECEIPT_SECRET: 's3cret' }), {});
+    const { receipts } = await buildReceiptsConfig(env({ VERIFICATION_RECEIPT_SECRET: 's3cret' }), {});
     const proof = await receipts.sign!('sha256:' + 'a'.repeat(64) as never);
     expect(proof.type).toBe('demo-hmac');
     expect(proof.signature).toMatch(/^hmac-sha256:[0-9a-f]{64}$/);
@@ -93,19 +93,19 @@ describe('ONE signer, selected by configuration (ADR-0013)', () => {
   // never consulted. A receipt that silently downgraded would still verify for the host and stop
   // verifying for every counterparty — the failure that looks fine locally.
   it('prefers the KMS signer when BOTH are configured, and does not fall back', async () => {
-    const { receipts } = buildReceiptsConfig(
+    // The KMS signer is selected, and the config now resolves its address (it IS the receipt's `verifier`, DATA-8):
+    // against a fake service account that needs a real KMS, so the assertion is that building REJECTS rather than
+    // quietly producing a demo-hmac config — a `demo-hmac` proof would mean the downgrade happened.
+    await expect(buildReceiptsConfig(
       env({ VERIFICATION_RECEIPT_SECRET: 's3cret', VERIFICATION_RECEIPT_KMS_KEY: 'projects/p/k/1', GCP_SERVICE_ACCOUNT_JSON: '{"client_email":"a@b","private_key":"x"}' }),
       {},
-    );
-    // The KMS signer is selected; invoking it here would need a real KMS, so the assertion is that the
-    // HMAC path was NOT chosen — a `demo-hmac` proof would mean the downgrade happened.
-    await expect(receipts.sign!('sha256:' + 'a'.repeat(64) as never)).rejects.toBeDefined();
+    )).rejects.toBeDefined();
   });
 
   // A KMS key with no service account is INCOMPLETE config, and falls to the next configured mechanism
   // rather than half-using the first. Recorded because it is the one place selection is compound.
   it('needs BOTH the KMS key and the service account before selecting KMS', async () => {
-    const { receipts } = buildReceiptsConfig(
+    const { receipts } = await buildReceiptsConfig(
       env({ VERIFICATION_RECEIPT_KMS_KEY: 'projects/p/k/1', VERIFICATION_RECEIPT_SECRET: 's3cret' }),
       {},
     );
@@ -113,14 +113,14 @@ describe('ONE signer, selected by configuration (ADR-0013)', () => {
     expect(proof.type).toBe('demo-hmac');
   });
 
-  it('treats a whitespace-only secret as unset', () => {
-    expect(buildReceiptsConfig(env({ VERIFICATION_RECEIPT_SECRET: '   ' }), {}).receipts.sign).toBeUndefined();
+  it('treats a whitespace-only secret as unset', async () => {
+    expect((await buildReceiptsConfig(env({ VERIFICATION_RECEIPT_SECRET: '   ' }), {})).receipts.sign).toBeUndefined();
   });
 
   // The signature is over the receipt HASH, so the same hash always signs the same and a different one
   // does not. That is what makes the proof bind to the receipt rather than to the request.
   it('signs the receipt hash deterministically, and differently per hash', async () => {
-    const { receipts } = buildReceiptsConfig(env({ VERIFICATION_RECEIPT_SECRET: 's3cret' }), {});
+    const { receipts } = await buildReceiptsConfig(env({ VERIFICATION_RECEIPT_SECRET: 's3cret' }), {});
     const a = await receipts.sign!('sha256:' + 'a'.repeat(64) as never);
     const b = await receipts.sign!('sha256:' + 'a'.repeat(64) as never);
     const c = await receipts.sign!('sha256:' + 'c'.repeat(64) as never);
@@ -130,8 +130,8 @@ describe('ONE signer, selected by configuration (ADR-0013)', () => {
 });
 
 describe('the config names the verifier and pins a policy version', () => {
-  it('carries the audience as verifier and a versioned policy', () => {
-    const { receipts } = buildReceiptsConfig(env(), {});
+  it('carries the audience as verifier (unsigned: nothing to match it against) and a versioned policy', async () => {
+    const { receipts } = await buildReceiptsConfig(env(), {});
     expect(receipts.verifier).toBe(AUDIENCE);
     expect(receipts.policyVersion).toBe('demo-mcp/mcp-v2/1');
   });
@@ -139,7 +139,7 @@ describe('the config names the verifier and pins a policy version', () => {
 
 describe('status evidence is real, and memoized rather than amplified', () => {
   it('reads the latest block and normalizes the number out of hex', async () => {
-    const { receipts } = buildReceiptsConfig(env(), {});
+    const { receipts } = await buildReceiptsConfig(env(), {});
     const ev = await receipts.statusEvidence!();
     expect(ev.blockNumber).toBe('16'); // 0x10
     expect(ev.blockHash).toMatch(/^0x[0-9a-f]{64}$/);
@@ -151,7 +151,7 @@ describe('status evidence is real, and memoized rather than amplified', () => {
     let calls = 0;
     globalThis.fetch = (async () => { calls++; return new Response(
       JSON.stringify({ result: { number: '0x20', hash: `0x${'cc'.repeat(32)}` } }), { status: 200 }); }) as typeof fetch;
-    const { receipts } = buildReceiptsConfig(env(), {});
+    const { receipts } = await buildReceiptsConfig(env(), {});
     await receipts.statusEvidence!();
     const before = calls;
     await receipts.statusEvidence!();
@@ -161,7 +161,7 @@ describe('status evidence is real, and memoized rather than amplified', () => {
 
 describe('detail residency (spec 278 / spec 303)', () => {
   const store = async (e: never, outcome: 'allow' | 'deny' = 'allow') => {
-    const { receipts, holder } = buildReceiptsConfig(e, { correlationId: 'corr_1' });
+    const { receipts, holder } = await buildReceiptsConfig(e, { correlationId: 'corr_1' });
     await receipts.onReceipt!(minted(), { outcome, correlationId: 'corr_1', toolName: 'read_pii' } as never);
     return holder;
   };
@@ -199,14 +199,14 @@ describe('the store is fail-soft — a receipt is evidence, not the decision', (
   // The load-bearing asymmetry. A D1 outage must not fail the request; the audit trail's fail-closed
   // classes are a DIFFERENT path (spec 291 §5) and must not be conflated with this one.
   it('does not throw when the D1 write fails', async () => {
-    const { receipts } = buildReceiptsConfig(env({ DB: fakeDb({ failWrite: true }) }), { correlationId: 'c' });
+    const { receipts } = await buildReceiptsConfig(env({ DB: fakeDb({ failWrite: true }) }), { correlationId: 'c' });
     await expect(
       receipts.onReceipt!(minted(), { outcome: 'allow', correlationId: 'c', toolName: 'read_pii' } as never),
     ).resolves.toBeUndefined();
   });
 
   it('still surfaces the PUBLIC receipt to the endpoint when storage failed', async () => {
-    const { receipts, holder } = buildReceiptsConfig(env({ DB: fakeDb({ failWrite: true }) }), { correlationId: 'c' });
+    const { receipts, holder } = await buildReceiptsConfig(env({ DB: fakeDb({ failWrite: true }) }), { correlationId: 'c' });
     await receipts.onReceipt!(minted(), { outcome: 'allow', correlationId: 'c', toolName: 'read_pii' } as never);
     expect(holder.receipt).toMatchObject({ receiptId: 'rcpt_1' });
   });
@@ -219,7 +219,7 @@ describe('the store is fail-soft — a receipt is evidence, not the decision', (
     const throwing = { vault: { async write() { throw new Error('vault down'); } } };
     const mod = await import('../src/vault-key');
     const spy = vi.spyOn(mod, 'resolvePersonVault').mockResolvedValue(throwing as never);
-    const { receipts } = buildReceiptsConfig(env({ DB: db }) as never, { correlationId: 'c' });
+    const { receipts } = await buildReceiptsConfig(env({ DB: db }) as never, { correlationId: 'c' });
     await receipts.onReceipt!(minted(), { outcome: 'allow', correlationId: 'c', toolName: 'read_pii' } as never);
     expect(String((db as unknown as { inserts: Insert[] }).inserts[0]!.bound[6])).toContain('secret-opening-key');
     spy.mockRestore();
@@ -227,7 +227,7 @@ describe('the store is fail-soft — a receipt is evidence, not the decision', (
 
   it('records the outcome, tool and correlation id on the row', async () => {
     const db = fakeDb();
-    const { receipts } = buildReceiptsConfig(env({ DB: db }) as never, { correlationId: 'corr_9' });
+    const { receipts } = await buildReceiptsConfig(env({ DB: db }) as never, { correlationId: 'corr_9' });
     await receipts.onReceipt!(minted(), { outcome: 'deny', correlationId: 'corr_9', toolName: 'read_pii' } as never);
     const row = (db as unknown as { inserts: Insert[] }).inserts[0]!;
     expect(row.bound[1]).toBe('corr_9');

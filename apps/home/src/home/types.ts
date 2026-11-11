@@ -6,14 +6,14 @@ import type { Address } from '@agenticprimitives/types';
 /** A member's home: the account they own + the name the community knows them by. */
 export interface Home {
   address: Address;
-  /** Full registered name (e.g. rich-vt-1.impact). Use `label` for display. */
+  /** Full registered name (e.g. rich-vt-1.me). Use `label` for display. */
   name: string;
 }
 
-/** The display label of a name (drops the registry suffix): `joe.impact` → `joe`. The label is the
- *  FIRST dot-segment — parent-agnostic, so it works for `.impact`, the legacy `.demo.agent`, or a bare
- *  label. Using a fixed-suffix strip (the old `\.demo\.agent$`) silently passed `<label>.impact`
- *  through unchanged; the server then stripped the dot and registered `<label>impact.impact`. */
+/** The display label of a name (drops the registry suffix): `joe.me` → `joe`. The label is the
+ *  FIRST dot-segment — parent-agnostic, so it works for any typed root, the legacy `.demo.agent`, or a bare
+ *  label. Using a fixed-suffix strip (the old `\.demo\.agent$`) silently passed a name under any other root
+ *  through unchanged; the server then stripped the dot and registered a doubled label. */
 export function homeLabel(name: string): string {
   return name.split('.')[0] || name;
 }

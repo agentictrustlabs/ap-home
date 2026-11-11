@@ -100,18 +100,25 @@ export function OrgAgentSection({ orgSa, only }: { orgSa: string; only?: 'ask' |
       const channels = list.channels ?? [];
       if (channels.length === 0) throw new Error('create a discussion topic first, then turn on member routing');
 
-      const st = await (await fetch('/connect/channels', { method: 'POST', headers: authed, body: JSON.stringify({ action: 'routingStatus', communityId }) })).json().catch(() => ({})) as { ok?: boolean; wirePresent?: boolean; sessionKey?: string | null };
-      let delegation: DelegationWire | undefined;
-      if (!st.wirePresent) {
+      const st = await (await fetch('/connect/channels', { method: 'POST', headers: authed, body: JSON.stringify({ action: 'routingStatus', communityId }) })).json().catch(() => ({})) as { ok?: boolean; wirePresent?: boolean; sessionKey?: string | null; wireTargets?: string[]; wantedTargets?: string[] };
+      // ONE WIRE PER RECEIVING AGENT (RUN-9): a wire is a credential only at the agent it names, so the steward signs one for
+      // each consulted member and each archetype host that has none yet.
+      const have = new Set((st.wireTargets ?? []).map((t) => t.toLowerCase()));
+      const missing = (st.wantedTargets ?? []).filter((t) => !have.has(t.toLowerCase()));
+      const delegations: DelegationWire[] = [];
+      if (missing.length > 0) {
         if (!st.sessionKey) throw new Error('routing is unavailable — the interactions-session key is not provisioned on this deployment');
         const via = resolveVia(homeProfile?.credential, session.via);
         const sign = await signHashFor(via, communityId as Address, { token: session.token });
-        // The wire covers consult AND the archetype methods this org may dispatch to. Minting it
-        // consult-only is what made a perfectly good dispatch grant unusable: the host's gate
-        // verifies the signature against the wire and finds the method absent.
-        delegation = toWire(await issueOrgConsultRoutingDelegation(
-          communityId as Address, st.sessionKey as Address, sign, undefined, DEFAULT_DISPATCH_ARCHETYPES,
-        ));
+        // Each wire covers consult AND the archetype methods this org may dispatch to. Minting it consult-only is what made a
+        // perfectly good dispatch grant unusable: the host's gate verifies the signature against the wire and finds the method absent.
+        for (const t of missing) {
+          delegations.push(toWire(await issueOrgConsultRoutingDelegation(
+            communityId as Address, st.sessionKey as Address, sign, undefined, DEFAULT_DISPATCH_ARCHETYPES, t as Address,
+          )));
+        }
+      } else if (!st.wirePresent) {
+        throw new Error('no member has opted in to be consulted and no archetype host has granted dispatch yet — there is no agent to sign a routing wire for');
       }
 
       let carriedWire = false;
@@ -120,16 +127,20 @@ export function OrgAgentSection({ orgSa, only }: { orgSa: string; only?: 'ask' |
         if (!c.assistant) {
           await fetch('/connect/channels', { method: 'POST', headers: authed, body: JSON.stringify({ action: 'assistantEnable', communityId, channelId: c.descriptor.id, trigger: 'mention' }) }).catch(() => null);
         }
-        const r = await fetch('/connect/channels', {
-          method: 'POST', headers: authed,
-          body: JSON.stringify({ action: 'routingEnable', communityId, channelId: c.descriptor.id, maxFanout: 3, ...(!carriedWire && delegation ? { delegation } : {}) }),
-        });
-        const b = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-        if (r.ok && b.ok) carriedWire = true;
-        else if (!firstError) firstError = b.error ?? `routing enable failed (${r.status})`;
+        // The first topic carries every new wire (one routingEnable each); the rest just flag the topic.
+        const carry: Array<DelegationWire | undefined> = !carriedWire && delegations.length ? delegations : [undefined];
+        for (const delegation of carry) {
+          const r = await fetch('/connect/channels', {
+            method: 'POST', headers: authed,
+            body: JSON.stringify({ action: 'routingEnable', communityId, channelId: c.descriptor.id, maxFanout: 3, ...(delegation ? { delegation } : {}) }),
+          });
+          const b = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+          if (r.ok && b.ok) carriedWire = true;
+          else if (!firstError) firstError = b.error ?? `routing enable failed (${r.status})`;
+        }
       }
       // If the wire never landed (every topic errored before custody), surface why.
-      if (delegation && !carriedWire) throw new Error(firstError ?? 'routing could not be enabled on any topic');
+      if (delegations.length && !carriedWire) throw new Error(firstError ?? 'routing could not be enabled on any topic');
       await loadStatus();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

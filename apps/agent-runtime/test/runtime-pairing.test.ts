@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { mintCode, parsePairingOptions, claim, complete, take, isExpired, PAIRING_CODE_RE, PAIRING_TAKE_TTL_MS, type PairingStateV1 } from '../src/runtime-pairing.js';
+import { generatePrivateKey, privateKeyToAccount, sign } from 'viem/accounts';
+import { pairingProofDigest } from '@agenticprimitives/runtime-member';
+import { mintCode, parsePairingOptions, claim, complete, take, isExpired, checkProof, noteMiss, confirmationOf, pairingConfirmation, PAIRING_CODE_RE, PAIRING_TAKE_TTL_MS, type PairingStateV1 } from '../src/runtime-pairing.js';
 
 const opts = parsePairingOptions({ member: 'goose-3.svc', workspace: 'missio-nexus.org', openMandate: ['messaging.direct.send'], messagingTo: ['0x' + 'a'.repeat(40)], wake: 'container' })!;
 const minted = (): PairingStateV1 => ({ v: 1, code: 'alice-ABCDEF', state: 'minted', options: opts, mintedAt: new Date(0).toISOString(), expiresAt: new Date(15 * 60_000).toISOString() });
@@ -46,5 +48,35 @@ describe('runtime pairing (spec 400 W1b)', () => {
     const c = claim(p, { address: KEY }, 1000); const done = complete(c.ok ? c.next : p, { address: KEY }, 2000);
     expect(isExpired(done.ok ? done.next : p, 2000 + PAIRING_TAKE_TTL_MS + 1)).toBe(true);
     expect(isExpired(done.ok ? done.next : p, 2000 + PAIRING_TAKE_TTL_MS - 1)).toBe(false);
+  });
+
+  // RUNB-12 (spec 445) — what binds a short code.
+  it('RUNB-12: a claim signed by the key it names passes; another key, another Home, another move or a stale proof does not', async () => {
+    const key = generatePrivateKey(); const address = privateKeyToAccount(key).address;
+    const code = 'goose-ABCDEF'; const home = 'https://home.example';
+    const now = Date.now(); const issuedAt = Math.floor(now / 1000);
+    const proofFor = async (move: 'claim' | 'take', h = home, k = key, at = issuedAt) => ({ issuedAt: at, signature: await sign({ hash: pairingProofDigest({ move, code, address, home: h, issuedAt: at }), privateKey: k, to: 'hex' as const }) });
+    expect(await checkProof('claim', { code, address, home, proof: await proofFor('claim') }, now)).toBeNull();
+    expect(await checkProof('claim', { code, address, home })).toMatch(/no proof/);
+    expect(await checkProof('claim', { code, address, home, proof: await proofFor('claim', home, generatePrivateKey()) }, now)).toMatch(/not signed by the key/);
+    expect(await checkProof('claim', { code, address, home, proof: await proofFor('claim', 'https://other.example') }, now)).toMatch(/not signed by the key/);
+    expect(await checkProof('take', { code, address, home, proof: await proofFor('claim') }, now)).toMatch(/not signed by the key/);
+    expect(await checkProof('claim', { code, address, home, proof: await proofFor('claim', home, key, issuedAt - 600) }, now)).toMatch(/not fresh/);
+    expect(await checkProof('claim', { code, address, proof: await proofFor('claim') }, now)).toMatch(/Home/);
+  });
+  it('RUNB-12: the confirmation is the one the runtime derives, and a stranger\'s key shows another', () => {
+    const p = minted();
+    const mine = '0x1111111111111111111111111111111111111111'; const theirs = '0x2222222222222222222222222222222222222222';
+    expect(confirmationOf(p)).toBeUndefined();
+    const claimed = claim(p, { address: mine }, 1000);
+    expect(claimed.ok && confirmationOf(claimed.next)).toBe(pairingConfirmation(p.code, mine));
+    const stranger = claim(p, { address: theirs }, 1000);
+    expect(stranger.ok && confirmationOf(stranger.next)).not.toBe(pairingConfirmation(p.code, mine));
+  });
+  it('RUNB-12: the fifth miss voids; an old miss is forgotten', () => {
+    let l: unknown = null; let voided = false;
+    for (let i = 0; i < 5; i++) { const r = noteMiss(l, 1000 + i); l = r.ledger; voided = r.void; }
+    expect(voided).toBe(true);
+    expect(noteMiss(l, 1000 + 20 * 60_000).void).toBe(false);
   });
 });

@@ -690,8 +690,8 @@ export const TRI_HELP: Record<TriState, string> = {
  * BEFORE the first publish, so nothing can look this up server-side yet — the value stays editable in the
  * sign panel and this is only the prefill.
  *
- * The roots are a LIST, not one value: an estate mid-migration serves several (`me,impact`), and the runtime
- * has always matched against all of them. A deeper legacy name (`finance.team.impact`) has no package host;
+ * The roots are a LIST, not one value: an estate may serve several (`me,agent`), and the runtime
+ * has always matched against all of them. A deeper legacy name (`finance.team.agent`) has no package host;
  * the prefill keeps joining its labels so the editable field is not empty.
  */
 export function cardUriForName(
@@ -703,6 +703,9 @@ export function cardUriForName(
   const parents = opts.nameParents?.length ? opts.nameParents : [opts.nameParent];
   const host = labels.length === 2 ? hostForName(labels.join('.'), opts.a2aDomain, parents) : null;
   if (host) return `https://${host}/.well-known/agent-card.json`;
+  // spec 445 / NAME-8 — the package gave a bare-root name NO host (a reserved label, or one ending in `-<type>`:
+  // `foo-org.me` is NOT `foo-org.<zone>`, that is `foo.org`'s). Joining its labels would print the colliding host.
+  if (labels.length === 2 && parents.includes(labels[1]!)) return null;
   if (parents.includes(labels[labels.length - 1]!)) labels.pop();
   if (labels.length === 0) return null;
   return `https://${labels.join('-')}.${opts.a2aDomain}/.well-known/agent-card.json`;
@@ -819,12 +822,12 @@ export function publicationVerdict(receipt: { verificationResult: string; uri?: 
 
 /** Service error code → a sentence a steward can act on. The service's codes are precise and terse
  *  (`agent_has_no_host`); showing them raw makes a dead end out of a fixable situation. */
-/** spec 346 — the on-chain `atl:agentType` is the authority; a legacy `.impact`/`.agent` name carries
+/** spec 346 — the on-chain `atl:agentType` is the authority; a legacy `.agent` name carries
  *  none, which is why an agent that plainly HAS a name can still have no type. */
 const UNTYPED_AGENT =
   'This agent has not declared what KIND of agent it is, so a directory has nothing to file it under. '
   + 'Give it a typed name under Naming — one ending in .me, .org, .team, .church, .circle, .svc, .workspace, '
-  + '.treasury or .registry — and listing becomes available. A legacy .impact or .agent name carries no type, '
+  + '.treasury or .registry — and listing becomes available. A legacy .agent name carries no type, '
   + 'which is why an agent that clearly has a name can still be missing one.';
 
 export function studioErrorSentence(codeOrMessage: string): string {

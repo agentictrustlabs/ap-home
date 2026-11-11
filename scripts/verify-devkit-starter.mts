@@ -30,8 +30,8 @@ try {
   sh('pnpm install --silent');
   console.log('  installed from the registry');
   // The projection is re-made by the PINNED devkit (a generator newer than the pin projects a newer corpus; the doctor then says so).
-  sh('npx ap doctor --rules --write');
-  const doctor = sh('npx ap doctor');
+  sh('pnpm exec ap doctor --rules --write');
+  const doctor = sh('pnpm exec ap doctor');
   if (!/12 rule\(s\) clean/.test(doctor)) fail(`ap doctor is not clean:\n${doctor.slice(-1200)}`);
   console.log('  ap doctor: 12 rules clean');
   sh('pnpm typecheck'); console.log('  typecheck clean');

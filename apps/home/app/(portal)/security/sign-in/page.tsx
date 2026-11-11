@@ -20,6 +20,7 @@ import { addCredentialCeremony, labelCredentialCeremony, recordLinkedChannel, un
 import { loadPasskey } from '../../../../src/lib/passkey';
 import { sessionGrade } from '../../../../src/lib/security-grade';
 import { reviewedList, rotateThisDevicePasskey, type ReviewedWire, type RotationOutcome } from '../../../../src/home/rotation';
+import type { KeptModules } from '../../../../src/connect-client';
 import { parseMoveTicket, ticketRefToCredentialRef, type MoveTicketV1, type PasskeyCredentialRef } from '../../../../src/home/move';
 import { resolveVia, signHashFor } from '../../../../src/home/onboarding';
 import { emitControlEvent } from '../../../../src/home/control-plane';
@@ -98,13 +99,13 @@ export default function SignInPage() {
   };
 
   // ── Replace this device's passkey / Move to another Home — spec 410 §1.2, unchanged ceremony ───────────
-  const [rotate, setRotate] = useState<{ open?: boolean; loading?: boolean; wires?: ReviewedWire[]; warnings?: string[]; keep?: Set<string>; label?: string; step?: string; error?: string; done?: RotationOutcome; move?: boolean; ticketText?: string; ticket?: MoveTicketV1 }>({});
+  const [rotate, setRotate] = useState<{ open?: boolean; loading?: boolean; wires?: ReviewedWire[]; keptModules?: KeptModules; warnings?: string[]; keep?: Set<string>; label?: string; step?: string; error?: string; done?: RotationOutcome; move?: boolean; ticketText?: string; ticket?: MoveTicketV1 }>({});
   const openRotation = async (move = false) => {
     if (!personAgent || !session) return;
     setRotate({ open: true, loading: true, move, label: `${profile?.name ?? 'My'} passkey (${new Date().toISOString().slice(0, 10)})` });
     const r = await reviewedList({ person: personAgent, session: { token: session.token } });
     if (!r.ok) { setRotate((x) => ({ ...x, loading: false, error: r.error })); return; }
-    setRotate((x) => ({ ...x, loading: false, wires: r.wires, warnings: r.warnings, keep: new Set(r.wires.map((w) => w.digest.toLowerCase())) }));
+    setRotate((x) => ({ ...x, loading: false, wires: r.wires, keptModules: r.keptModules, warnings: r.warnings, keep: new Set(r.wires.map((w) => w.digest.toLowerCase())) }));
   };
   const toggleKeep = (digest: string) => setRotate((x) => { const keep = new Set(x.keep ?? []); const k = digest.toLowerCase(); if (keep.has(k)) keep.delete(k); else keep.add(k); return { ...x, keep }; });
   const runRotation = async () => {
@@ -119,7 +120,7 @@ export default function SignInPage() {
         if (!parsed.ok) { setRotate((x) => ({ ...x, step: undefined, error: parsed.error })); return; }
         addRef = { ref: ticketRefToCredentialRef(parsed.ticket.ref), home: new URL(parsed.ticket.home).origin };
       }
-      const r = await rotateThisDevicePasskey({ person: personAgent, session: { token: session.token }, signHash, wires: rotate.wires, keep: rotate.keep ?? new Set(), label: rotate.label || 'My passkey', onStep: (step) => setRotate((x) => ({ ...x, step })), ...(addRef ? { add: addRef } : {}) });
+      const r = await rotateThisDevicePasskey({ person: personAgent, session: { token: session.token }, signHash, wires: rotate.wires, keep: rotate.keep ?? new Set(), ...(rotate.keptModules ? { kept: rotate.keptModules } : {}), label: rotate.label || 'My passkey', onStep: (step) => setRotate((x) => ({ ...x, step })), ...(addRef ? { add: addRef } : {}) });
       if (!r.ok) { setRotate((x) => ({ ...x, step: undefined, error: r.error })); return; }
       // The labels follow the chain: the old passkey is superseded, the new one labelled.
       if (old) await retireCredentialLabel(personAgent, { kind: 'passkey', credentialIdDigest: old.credentialIdDigest }, 'superseded').catch(() => {});
@@ -352,6 +353,16 @@ export default function SignInPage() {
                 ))}
               </ul>
             </div>
+            {rotate.keptModules && (rotate.keptModules.modules.length > 0 || rotate.keptModules.delegationManager) && (
+              <div>
+                <p style={{ fontSize: '.85rem', margin: '0 0 .35rem' }}><b>Modules that will be kept</b></p>
+                <p className="muted" style={{ fontSize: '.8rem', margin: '0 0 .35rem' }}>Retiring a credential would switch these off. Replacing it re-affirms them under your new key, in the same signature.</p>
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                  {rotate.keptModules.modules.map((m) => <li key={m} className="muted" style={{ fontSize: '.85rem' }}>Module {shortAddr(m)}</li>)}
+                  {rotate.keptModules.delegationManager && <li className="muted" style={{ fontSize: '.85rem' }}>Your delegation manager {shortAddr(rotate.keptModules.delegationManager)}</li>}
+                </ul>
+              </div>
+            )}
             {(rotate.warnings ?? []).map((w, i) => <p key={i} className="muted" style={{ fontSize: '.8rem', margin: 0 }}>{w}</p>)}
             <p className="ui-note" style={{ margin: 0 }}>Signed by: the passkey being retired, as its last act. What does not change: your address, your name, your records.</p>
             <FlexRow gap={0.5} justify="flex-end">

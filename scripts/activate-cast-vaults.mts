@@ -21,12 +21,15 @@
  * IDEMPOTENT. An owner already bound over the `vault:*` namespace is skipped, the same test the ceremony makes.
  */
 import { buildVaultKeyUseCaveat, hashDelegation, ROOT_AUTHORITY, type Delegation } from '@agenticprimitives/delegation';
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
 import { readFileSync } from 'node:fs';
 import { keccak256, toBytes, type Address, type Hex } from 'viem';
 
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-const CHAIN = 34348;
-const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
+const HOME = (process.env.HOME_URL ?? 'https://www.faithnet.me').replace(/\/$/, '');
+// Addresses from the pinned deployment record (DEPLOYMENT, default faithchain) — never a hard-coded generation (spec 445 gen-4 rebuild).
+const D = getDeployments((process.env.DEPLOYMENT ?? 'faithchain') as never) as unknown as Record<string, string> & { chainId: number };
+const CHAIN = Number(D.chainId);
+const DM = D.delegationManager as Address;
 const NOTE_PATH = process.env.NOTE ?? 'demo/cast.faithnet.json';
 
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };

@@ -13,10 +13,10 @@
 // They mirror the package's own rules (evaluation/src/experiment.ts `failureCauseOf`, compare-runner.ts
 // `isolationRefusalOf`); when the pinned version carries them, the enrichment here finds the fields already set and
 // leaves them alone.
-import type { ExperimentRunV1 } from '@agenticprimitives/evaluation';
+import type { ExperimentRunV1 } from '@agenticprimitives/evaluation/evidence';
 
-export type { FailureCauseV1, OutcomeVerdictV1 } from '@agenticprimitives/evaluation';
-import { failureCauseOf, type FailureCauseV1, type OutcomeVerdictV1 } from '@agenticprimitives/evaluation';
+export type { FailureCauseV1, OutcomeVerdictV1 } from '@agenticprimitives/evaluation/evidence';
+import { failureCauseOf, type FailureCauseV1, type OutcomeVerdictV1 } from '@agenticprimitives/evaluation/evidence';
 export { failureCauseOf };
 
 /** The run as this runtime records it: the pinned package's record plus the fields above (a superset, never a change). */

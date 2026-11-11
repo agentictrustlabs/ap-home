@@ -23,8 +23,8 @@ import {
 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { interactionsGrantScopes } from '@agenticprimitives/fabric/interactions';
-import { CHAIN_ID, CONTRACTS } from './chain';
-import { INTERACTIONS_APP_SCOPES } from '@ap-home/shared';
+import { CHAIN_ID, CONTRACTS, OVERSIGHT_CONTRACTS } from './chain';
+import { INTERACTIONS_APP_SCOPES, oversightMintTargets } from '@ap-home/shared';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from './inbox-delivery';
 
 type SignHash = (hash: Hex) => Promise<Hex>;
@@ -48,11 +48,9 @@ export function siteCaveats(validUntil: number): Caveat[] {
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
     buildCaveat(
       CONTRACTS.allowedTargetsEnforcer,
-      encodeAllowedTargetsTerms([
-        CONTRACTS.agentRelationship,
-        CONTRACTS.agentNameRegistry,
-        CONTRACTS.permissionlessSubregistry,
-      ]),
+      // Spec 445 — the SAME list the stewardship recogniser reads (`@ap-home/shared` oversight-targets): mint
+      // and check cannot drift.
+      encodeAllowedTargetsTerms(oversightMintTargets(OVERSIGHT_CONTRACTS) as Address[]),
     ),
   ];
 }
@@ -824,7 +822,7 @@ export async function issueArchetypeDispatchDelegation(
  * The SERVICE-AGENT WIRE `identity → the relying service's KMS key` (ADR-0019; the agent-rule
  * `service-agent-signing.md`). What lets a service sign AS a named agent it does NOT custody.
  *
- * The identity (e.g. `skills-agent.impact`) is custodied by its owner, here, in this ceremony. The
+ * The identity (e.g. `skills-agent.svc`) is custodied by its owner, here, in this ceremony. The
  * delegate is the service's KMS SIGNING KEY — the address a raw ECDSA signature recovers to, NOT the
  * service's agent account. Getting that wrong produces a wire that verifies nowhere, so the service
  * reports the address rather than the operator typing one.
@@ -1105,7 +1103,7 @@ export async function issueSelfVaultGrant(
  * session-wrapped WITH this wire — the member's gate verifies the wire (ERC-1271 against the org
  * + unrevoked on-chain + consult-selector-only + timestamp) per message. NARROW by construction:
  *   allowedMethods = [discussion.consult selector]  (NEVER any-skill — unusable for anything else),
- *   allowedTargets = [the org SA]                   (usable solely to act AS this org),
+ *   allowedTargets = [ONE receiving agent]          (the member/host it is presented at — one wire per target, RUN-9),
  *   timestamp-bounded (180 days, the consultability symmetry; re-enable refreshes),
  *   on-chain revocable (steward revoke kills routing at every member's gate immediately).
  * Custodied in the org's InteractionsDO (spec 322 §2 — a stored wire lives with its delegate
@@ -1133,17 +1131,22 @@ export async function issueOrgConsultRoutingDelegation(
    * Still never the any-skill sentinel: every method is named.
    */
   dispatchArchetypes: readonly string[] = [],
+  /** The ONE receiving agent this wire is presented AT — a consulted member's agent or an archetype host (RUN-9, owner
+   *  decision: one wire per target). A wire naming only the org reaches no gate, so the target is required and is never the org. */
+  target?: Address,
 ): Promise<Delegation> {
+  if (!target) throw new Error('an org routing wire names the receiving agent (a member or host) — one wire per target');
+  if (target.toLowerCase() === orgSA.toLowerCase()) throw new Error('an org routing wire must name the RECEIVING agent, not the organization itself');
   return issueAgentSigningWire(orgSA, interactionsSessionKey, [
     consultSkillSelector(),
     ...archetypeMethodSelectors([...new Set(dispatchArchetypes.map((a) => a.trim().toLowerCase()).filter(Boolean))]
       .filter((a) => /^[a-z0-9][a-z0-9-]{1,60}$/.test(a))),
-  ], signHash, validitySeconds); // the org's custody (the steward's credential) authorizes routing
+  ], signHash, validitySeconds, [target]); // the org's custody (the steward's credential) authorizes routing
 }
 
 /**
  * AN AGENT'S OWN A2A SIGNING WIRE `agent → interactions-session key` — the one construction both ceremonies sign:
- *   timestamp window [0, now + validity], allowedTargets = [the agent] (usable solely to act AS it),
+ *   timestamp window [0, now + validity], allowedTargets = `targets` (the agents it is presented AT; default [the agent]),
  *   allowedMethods = the selectors given (the caller names every one — never the any-skill sentinel),
  *   signed by `signHash` over the EIP-712 delegation digest: the AGENT's custody credential, so the signature verifies
  *   ERC-1271 against the agent SA (its `isValidSignature` accepts its custodian's signature). Never session-wrapped.
@@ -1154,15 +1157,19 @@ export async function issueAgentSigningWire(
   selectors: readonly Hex[],
   signHash: SignHash,
   validitySeconds: number,
+  /** The agent(s) this wire is presented AT (RUN-9): a session wire is a credential only at an agent it names. Default: the
+   *  agent itself (the org routing wire — see the note on `issueOrgConsultRoutingDelegation`). */
+  targets: readonly Address[] = [agent],
 ): Promise<Delegation> {
   if (selectors.length === 0) throw new Error('a signing wire names at least one method');
+  if (targets.length === 0) throw new Error('a signing wire names at least one receiving agent');
   const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   let salt = 0n;
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
-    buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([agent])),
+    buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([...targets])),
     buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms([...selectors])),
   ];
   const d: Delegation = { delegator: agent, delegate: interactionsSessionKey, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
@@ -1182,13 +1189,17 @@ export const SERVICE_READ_WIRE_VALIDITY_SECONDS = CONSULT_GRANT_VALIDITY_SECONDS
  * runtime can sign that A2A message AS the service and nothing else: no consult, no archetype, never any-skill. Stored in
  * the service's InteractionsDO under its own key (`signing.serviceWire`), never over an org's consult wire.
  */
-export function issueServiceLibraryReadWire(
+export async function issueServiceLibraryReadWire(
   serviceSA: Address,
   interactionsSessionKey: Address,
+  /** The PUBLISHER's agent this wire is presented at — its allowedTargets (spec 445 RUN-9, owner decision: ONE wire per
+   *  receiving agent). A wire that names only the service reaches no publisher's gate. */
+  publisher: Address,
   signHash: SignHash,
   validitySeconds = SERVICE_READ_WIRE_VALIDITY_SECONDS,
 ): Promise<Delegation> {
-  return issueAgentSigningWire(serviceSA, interactionsSessionKey, [a2aSkillSelector(LIBRARY_GRANTED_READ_SKILL)], signHash, validitySeconds);
+  if (publisher.toLowerCase() === serviceSA.toLowerCase()) throw new Error('the publisher a service reads from is another agent, not the service itself');
+  return issueAgentSigningWire(serviceSA, interactionsSessionKey, [a2aSkillSelector(LIBRARY_GRANTED_READ_SKILL)], signHash, validitySeconds, [publisher]);
 }
 
 // ─── spec 272/243 — x402 payment delegation (treasury → treasury) ─────────────────────────────

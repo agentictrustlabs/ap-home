@@ -1,8 +1,12 @@
 // Spec 354 §4.3 — the playbook loads, verifies its digest, and narrows the offer (never the authority).
 import { describe, it, expect } from 'vitest';
-import { loadPlaybook } from '@agenticprimitives/harness';
+import { loadPlaybook as loadPlaybookPkg } from '@agenticprimitives/harness';
 import { scopedActionTools, subjectRecordReader } from '../src/harness-run.js';
 import { definitionDigest, type AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-claims';
+
+// Spec 445 RUN-14: a playbook runs only when its digest is approved. These fixtures approve every digest; the refusal is asserted below.
+const approveAll = { isApproved: () => true };
+const loadPlaybook = (read: Parameters<typeof loadPlaybookPkg>[0], agent: string, log?: (l: string) => void) => loadPlaybookPkg(read, agent, log, approveAll);
 
 const TREASURY_DEF: AgentHarnessDefinitionV1 = {
   type: 'ap.agent-harness-definition.v1', archetypeId: 'skill:archetypes/treasury', archetypeVersion: '1.0.0',
@@ -15,6 +19,9 @@ const record = (def: AgentHarnessDefinitionV1) => ({ type: 'ap.archetype-assignm
 const reader = (rec: unknown) => async (_s: string, rt: string) => (rt === 'archetype.assignment' ? rec : null);
 
 describe('loadPlaybook', () => {
+  it('REFUSES a playbook whose digest the deployment did not pin (RUN-14) — the bare harness stands', async () => {
+    expect(await loadPlaybookPkg(reader(record(TREASURY_DEF)), '0xAGENT', () => {}, { isApproved: () => false })).toBeNull();
+  });
   it('loads a verified assignment and exposes its capabilities', async () => {
     const pb = await loadPlaybook(reader(record(TREASURY_DEF)), '0xAGENT');
     expect(pb?.capabilityIds.has('treasury.payment.execute')).toBe(true);

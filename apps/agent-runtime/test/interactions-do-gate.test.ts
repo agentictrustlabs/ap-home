@@ -205,7 +205,7 @@ describe('the Home-session gate runs real verification', () => {
   // 400, not 401: the token is authentic, its SUBJECT is unusable. Distinguishing "I do not believe
   // you" from "I believe you and cannot act on this" is worth keeping — they need different fixes.
   it('REFUSES a subject carrying no SA, as a 400 rather than an auth failure', async () => {
-    expect((await call('channels.list', await mint(signer, 'not-a-caip-address'))).status).toBe(400);
+    expect((await call('channels.list', await mint(signer, 'not-a-caip-address'))).status).toBe(401); // ING-4: the claim shape is refused at the verifier now — before the SA is read
   });
 
   // Fail-CLOSED on an unreachable broker, not fail-open. An unavailable JWKS is 503 — a statement that

@@ -1,16 +1,16 @@
 {
-  "_": "spec 441 \u2014 THE ESTATE'S DECLARATION. Five inputs, the agents the build charters, and this estate's own extras. Everything else about the deployment is DERIVED from these (scripts/estate-shape.mts) or is the town's baseline, and `pnpm check:estate-shape` fails when the deployment disagrees. Edit this file, never a derived var in wrangler.toml.",
+  "_": "spec 441 — THE ESTATE'S DECLARATION. Five inputs, the agents the build charters, and this estate's own extras. Everything else about the deployment is DERIVED from these (scripts/estate-shape.mts) or is the town's baseline, and `pnpm check:estate-shape` fails when the deployment disagrees. Edit this file, never a derived var in wrangler.toml.",
   "id": "faithnet",
   "homeHost": "www.faithnet.me",
   "zone": "faithnet.io",
   "town": "faithchain",
   "kmsTenant": "faithnet",
-  "_callerSubjects": "The two KMS caller subjects this estate holds. Re-bound 2026-10-14 through `bind-caller --profile estate-vault|estate-runtime`, so these are the shape every estate gets rather than a hand-derived set \u2014 8 operations and 6, down from 11 each. The superseded `demo-mcp-faithnet-vault-5` / `demo-a2a-faithnet-runtime-6` are disabled on the CVM.",
+  "_callerSubjects": "The two KMS caller subjects this estate holds. Re-bound 2026-10-14 through `bind-caller --profile estate-vault|estate-runtime`, so these are the shape every estate gets rather than a hand-derived set — 8 operations and 6, down from 11 each. The superseded `demo-mcp-faithnet-vault-5` / `demo-a2a-faithnet-runtime-6` are disabled on the CVM.",
   "callerSubjects": {
     "vault": "faithnet-vault",
     "runtime": "faithnet-runtime"
   },
-  "_residents": "The DEMO personas whose custodian keys this Home holds, so the builder can re-issue their DEL-001 session leaves server-side after the interactions key changes (441 \u00a77.2 step 3). A real resident re-issues by clicking through their own Home; this list is never a roster of who lives here.",
+  "_residents": "The DEMO personas whose custodian keys this Home holds, so the builder can re-issue their DEL-001 session leaves server-side after the interactions key changes (441 §7.2 step 3). A real resident re-issues by clicking through their own Home; this list is never a roster of who lives here.",
   "residents": [
     "alice",
     "bob",
@@ -35,12 +35,12 @@
     "https://skills-web-7ar.pages.dev",
     "http://localhost:5190"
   ],
-  "_agents": "OUTPUTS of the build, not inputs: this estate chartered its own. An estate that reuses another estate's interactions SA is not a second estate (439 \u00a77.13).",
+  "_agents": "OUTPUTS of the build, not inputs: this estate chartered its own. An estate that reuses another estate's interactions SA is not a second estate (439 §7.13).",
   "agents": {
-    "harness": "0xD34c3Fbc89706dd57d426546DCEBD3bA926eDE35",
-    "interactions": "0x39508624387fed3b9d6dd15ba86d3ace8a3f0a6a"
+    "harness": "0x4d4E08989f779226A7cBdE5afc5E6Fc0b43E2069",
+    "interactions": "0xAE7ABD2B536d4B7bC9A530CBB81470810492957C"
   },
-  "_extras": "PRODUCT and TOWN settings. Real, kept, and deliberately NOT part of being an estate \u2014 the 101st estate needs none of them to be an estate (spec 441 D1). Declared here so they stop reading as estate shape.",
+  "_extras": "PRODUCT and TOWN settings. Real, kept, and deliberately NOT part of being an estate — the 101st estate needs none of them to be an estate (spec 441 D1). Declared here so they stop reading as estate shape.",
   "extras": {
     "EMAIL_FROM": "invites@faithnet.ai",
     "EMAIL_FROM_NAME": "faithnet",
@@ -50,15 +50,14 @@
     "EXECUTORS": "{\"field-circles\":{\"url\":\"https://field-a2a.faithnet.io\",\"client\":\"field-app\"}}",
     "GATHER_DIGEST_MAX": "120000",
     "GATHER_RECORD_CLIP": "60000",
-    "ORCHESTRATION_GEMINI_BILLING_URL": "https://ai.studio/spend",
     "ORCHESTRATION_GEMINI_STRONG_MODEL": "gemini-3.1-pro-preview",
     "ORCHESTRATION_GROQ_TPM": "8000",
     "ORCHESTRATION_MODEL": "claude-haiku-5-5",
-    "WARM_AGENTS": "0x1dba4a27c53d7babda99513080223fb3bfc4bad1,0x8e32c713f44c7747d97a589522806a8e1dd810fb",
+    "WARM_AGENTS": "0x3cec0ed189bfc688072dacf689f689f350a03ed1,0xdd38a35cad4fb6b48be4759263a325836886486b",
     "ORCHESTRATION_LLM": "gemini,anthropic",
     "ISSUANCE_EVIDENCE_ISSUER": "https://presentation-release.faithnet.internal",
     "ISSUANCE_EVIDENCE_AUDIENCE": "akcs-pilot-evidence",
-    "READER_PASS": "{\"issuer\":\"0x00ff8ccc7c7145289c8a42fe8870ec5d8cd68774\",\"treasury\":\"0xdc3ef3d91ceb006099646e7cbb25cf74d747dcc6\",\"priceUnits\":\"1000000\",\"days\":30,\"demoFund\":true,\"audience\":\"https://scripture.faithnet.io\"}",
+    "READER_PASS": "{\"issuer\":\"0xcab776281f18151d7fcaec035d9b871769e2d6db\",\"treasury\":\"0xed3383cad2d7b95f29586d2037326b029ba82b69\",\"priceUnits\":\"1000000\",\"days\":30,\"demoFund\":true,\"audience\":\"https://scripture.faithnet.io\"}",
     "ORCHESTRATION_ANTHROPIC_STRONG_MODEL": "claude-sonnet-5-5",
     "READER_HUDDLE_PRINCIPAL": "0x5dd5f3db5085604b0f6a907bbb35ae645afd307f"
   }
