@@ -13,17 +13,29 @@ import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import type { Address, Hex } from 'viem';
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
 
 const HOME = 'https://www.faithnet.me';
-const CHAIN = 34348;
-const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
-const ENFORCERS = { delegationManager: DM, timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41', value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', payment: '0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1' } as const;
-const ORG_LABEL = process.argv[2] ?? 'globalchurch';
-const SVC_LABEL = process.argv[3] ?? 'ligonier';
+// Addresses from the pinned deployment record, never a generation's literals (spec 445 estate reset).
+const DEP = getDeployments((process.env.DEPLOYMENT ?? 'faithchain') as never) as unknown as Record<string, string> & { chainId: number };
+const CHAIN = Number(DEP.chainId);
+const DM = DEP.delegationManager as Address;
+const ENFORCERS = { delegationManager: DM, timestamp: DEP.timestampEnforcer, allowedTargets: DEP.allowedTargetsEnforcer, allowedMethods: DEP.allowedMethodsEnforcer, value: DEP.valueEnforcer, payment: DEP.paymentEnforcer, digestBinding: DEP.digestBindingEnforcer } as Record<string, Address>;
+/**
+ * `--org <0x…>` names the EXISTING organization by address. Resolving `<label>.org` and chartering one when nothing
+ * resolves made a SECOND organization on a priced root, where nothing is named at charter (spec 445, 2026-11-11).
+ * A priced root also names no service at charter, so the service is the act's own result, never a name lookup.
+ * (`charter-service.mts --org` is the general form: vault key, Home link and steward wire included.)
+ */
+const flag = (k: string): string | undefined => { const i = process.argv.indexOf(`--${k}`); return i >= 0 ? process.argv[i + 1] : undefined; };
+const ORG_ADDR = (flag('org') ?? '').toLowerCase() as Address | '';
+const positional = process.argv.slice(2).filter((a, i, all) => !a.startsWith('--') && !(i > 0 && all[i - 1]!.startsWith('--')));
+const ORG_LABEL = positional[0] ?? 'globalchurch';
+const SVC_LABEL = positional[1] ?? 'ligonier';
 const NOTE = process.env.NOTE ?? 'demo/ligonier.faithnet.json';
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
 const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1); };
-const naming = new AgentNamingClient({ rpcUrl: 'https://a2a.faithnet.io/rpc', chainId: CHAIN, registry: '0x60E949D52660A9D4143ecB0fdA56c0457f20aED9', universalResolver: '0xF343054e046A4145ccae499ECB28197394eE0798' });
+const naming = new AgentNamingClient({ rpcUrl: 'https://a2a.faithnet.io/rpc', chainId: CHAIN, registry: DEP.agentNameRegistry as Address, universalResolver: DEP.agentNameUniversalResolver as Address });
 // The credential that will custody what alice charters — the demo persona's own EOA, the one the Home holds
 // for her (what the flyout fills into a `credential` field via `connectedCredential`).
 const personaKeys = (() => { try { const env = readFileSync(resolvePath('apps/home/.env.local'), 'utf8'); const m = /^DEMO_PERSONA_KEYS=(.*)$/m.exec(env); return m ? JSON.parse(m[1]!.trim().replace(/^['"]|['"]$/g, '')) as Record<string, { eoaAddress?: string }> : {}; } catch { return {}; } })();
@@ -49,7 +61,7 @@ async function act(message: string, toolId: string, args: Record<string, unknown
   for (let round = 0; round < 6; round++) {
     if (rep?.kind === 'authority_required' && rep.requirement && rep.delegator && rep.delegate) {
       const req = rep.requirement;
-      const caveats: Caveat[] = [...capabilityHandler.toCaveats(req, ENFORCERS as never), buildDigestBindingCaveat(ENFORCERS.digestBinding, 'intent', req.intentDigest as Hex)];
+      const caveats: Caveat[] = [...capabilityHandler.toCaveats(req, ENFORCERS as never), buildDigestBindingCaveat(ENFORCERS.digestBinding!, 'intent', req.intentDigest as Hex)];
       let salt = 0n; for (const b of crypto.getRandomValues(new Uint8Array(16))) salt = (salt << 8n) | BigInt(b);
       const mandate: Delegation = { delegator: rep.delegator, delegate: rep.delegate, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
       const a = await post('/harness/authorize', { session: alice.homeSession, delegator: rep.delegator, digests: [hashDelegation(mandate, CHAIN, DM), ...(rep.alsoApprove ?? []).map((x) => x.digest)] });
@@ -89,8 +101,10 @@ async function act(message: string, toolId: string, args: Record<string, unknown
 
 const note: Record<string, unknown> = existsSync(NOTE) ? JSON.parse(readFileSync(NOTE, 'utf8')) : { purpose: 'spec 386 fixture — the Ligonier service agent in the faithnet estate (an operator note, not a persona)', chainId: CHAIN };
 const orgName = `${ORG_LABEL}.org`; const svcName = `${SVC_LABEL}.svc`;
-let org = (await naming.resolveName(orgName).catch(() => null))?.toLowerCase() as Address | null;
-if (org) console.log(`${orgName} already resolves → ${org}`);
+let org = (ORG_ADDR && /^0x[0-9a-f]{40}$/.test(ORG_ADDR) ? ORG_ADDR : (await naming.resolveName(orgName).catch(() => null))?.toLowerCase()) as Address | null;
+if (ORG_ADDR && org !== ORG_ADDR) fail(`--org must be an address: ${ORG_ADDR}`);
+if (ORG_ADDR) console.log(`the existing organization ${org} (--org) — nothing chartered for it`);
+else if (org) console.log(`${orgName} already resolves → ${org}`);
 else {
   console.log(`── ${orgName}: alice charters the organization ──`);
   await act(`create an organization called ${ORG_LABEL}`, 'organization.create', { parent: ME, label: ORG_LABEL });
@@ -102,7 +116,8 @@ let svc = (await naming.resolveName(svcName).catch(() => null))?.toLowerCase() a
 if (svc) console.log(`${svcName} already resolves → ${svc}`);
 else {
   console.log(`── ${svcName}: alice charters the service under ${orgName} ──`);
-  await act(`create a service agent called ${SVC_LABEL} under ${orgName}`, 'service.create', { parent: org, label: SVC_LABEL });
+  const done = await act(`create a service agent called ${SVC_LABEL} under ${orgName}`, 'service.create', { parent: org, label: SVC_LABEL });
+  svc = ((done.result as { agent?: string } | undefined)?.agent?.toLowerCase() ?? null) as Address | null;
   for (let i = 0; i < 10 && !svc; i++) { await new Promise((r) => setTimeout(r, 4000)); svc = (await naming.resolveName(svcName).catch(() => null))?.toLowerCase() as Address | null; }
   if (!svc) fail(`${svcName} does not resolve after the charter`);
   console.log(`  ${svcName} → ${svc}`);
