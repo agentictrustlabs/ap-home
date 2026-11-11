@@ -124,7 +124,7 @@ const faithImpact: WhiteLabelConfig = {
   frontChannelLogout: {
     // ONLY origins that ANSWER /sso-logout (clear their session, bounce to `return`). A listed origin that serves its
     // ordinary page instead strands the person mid-chain on that page — town.faithnet.io did exactly that on
-    // 2026-11-11. Removed until they implement the route: town, names (ap-town), skills, coach (engage coach-web),
+    // 2026-11-11. Removed until they implement the route: town (ap-town), skills, coach (engage coach-web),
     // workbench, seed-reader. An app missing here keeps its own session after a Home sign-out; add it back the day
     // its /sso-logout exists.
     'https://www.faithnet.me': [
@@ -136,6 +136,7 @@ const faithImpact: WhiteLabelConfig = {
       'https://church.faithnet.io/sso-logout',
       'https://reader.faithnet.io/sso-logout',
       'https://publishing.faithnet.io/sso-logout',
+      'https://names.faithnet.io/sso-logout',   // ap-town naming implements it since 2026-11-11 (apps/naming/test/sso-logout.test.ts)
     ],
   },
   relyingApps: [
