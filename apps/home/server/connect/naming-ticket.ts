@@ -115,8 +115,17 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   let price: number;
   try { price = priceOf(label, tld)!; } catch (err) { return json({ error: 'bad_label', detail: String((err as Error).message) }, 400); }
 
+  // THE ESTATE'S OWN DEMO PERSONAS keep their handles (spec 445, the generation-4 re-charter). `alice`, `bob`, … are
+  // registered .com/.org domains, so the rule below refuses them — but each is the handle of a persona whose key THIS
+  // Home holds, the label every relying demo and document names, and was held on chain before the rule existed. The
+  // exemption is exactly that and nothing wider: the signed-in session IS that roster persona, the label IS its handle,
+  // and the owner is the persona's own agent. Any other person, label or owner meets the rule unchanged.
+  const ownHandle = (() => {
+    const p = demoPersonaFor(env, person);
+    return !!p && p.handle.toLowerCase() === label && owner === person;
+  })();
   // The domain rule.
-  const { domain, unknown } = await protectingDomain(label);
+  const { domain, unknown } = ownHandle ? { domain: null, unknown: false } : await protectingDomain(label);
   if (unknown && !domain) return json({ error: 'dns_unavailable', detail: 'The domain check could not run just now; try again in a moment.' }, 503);
   if (domain) {
     const email = (body.email ?? '').trim();
