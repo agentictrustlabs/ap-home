@@ -1,5 +1,5 @@
 {
   "mcpServers": {
-    "ap-dev": { "command": "npx", "args": ["ap", "mcp", "--root", "."] }
+    "ap-dev": { "command": "node", "args": ["node_modules/@agenticprimitives/devkit/bin/ap.mjs", "mcp", "--root", "."] }
   }
 }

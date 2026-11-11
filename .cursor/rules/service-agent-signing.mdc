@@ -29,7 +29,7 @@ wrongly, and usually with passing tests.
 
 ## The pattern
 
-1. **The identity is custodied outside the service.** A named account (`<name>.impact`) whose
+1. **The identity is custodied outside the service.** A named account (`<name>.svc`) whose
    custodian is a person or org, reachable through a Home ceremony. Not the relying app.
 2. **A ceremony mints the wire.** The custodian signs `identity SA → the service's KMS session key`:
    `allowedMethods` = **exactly one** skill selector (never `A2A_ANY_SKILL`), `allowedTargets` pinned,

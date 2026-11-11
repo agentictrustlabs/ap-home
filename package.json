@@ -41,29 +41,29 @@
     "check:live-gates:runner": "tsx scripts/live-gates-runner.mts"
   },
   "devDependencies": {
-    "@agenticprimitives/a2a": "0.0.0-alpha.48",
-    "@agenticprimitives/devkit": "0.0.0-alpha.34",
-    "@agenticprimitives/evaluation": "0.0.0-alpha.11",
-    "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4",
+    "@agenticprimitives/a2a": "0.0.0-alpha.49",
+    "@agenticprimitives/devkit": "0.0.0-alpha.35",
+    "@agenticprimitives/evaluation": "0.0.0-alpha.12",
+    "@agenticprimitives/mcp-protocol": "0.0.0-alpha.5",
     "typescript": "^5.7.3",
     "vitest": "^4.1.8",
     "tsx": "^4.22.4",
-    "@agenticprimitives/ontology": "1.0.0-alpha.46",
+    "@agenticprimitives/ontology": "1.0.0-alpha.47",
     "viem": "2.52.2",
     "@playwright/test": "1.63.0",
-    "@agenticprimitives/agent-account": "1.0.0-alpha.46",
-    "@agenticprimitives/agent-naming": "1.0.0-alpha.46",
-    "@agenticprimitives/agent-profile": "1.0.0-alpha.46",
-    "@agenticprimitives/agent-relationships": "1.0.0-alpha.46",
-    "@agenticprimitives/capability-claims": "0.0.0-alpha.46",
-    "@agenticprimitives/contracts": "1.0.0-alpha.46",
-    "@agenticprimitives/delegation": "1.0.0-alpha.46",
-    "@agenticprimitives/fabric": "0.0.0-alpha.39",
-    "@agenticprimitives/key-custody": "1.0.0-alpha.46",
-    "@agenticprimitives/orchestration": "0.0.0-alpha.27",
-    "@agenticprimitives/registry-kit": "0.0.0-alpha.28",
-    "@agenticprimitives/runtime-member": "0.0.0-alpha.27",
-    "@agenticprimitives/types": "1.0.0-alpha.46"
+    "@agenticprimitives/agent-account": "1.0.0-alpha.47",
+    "@agenticprimitives/agent-naming": "1.0.0-alpha.47",
+    "@agenticprimitives/agent-profile": "1.0.0-alpha.47",
+    "@agenticprimitives/agent-relationships": "1.0.0-alpha.47",
+    "@agenticprimitives/capability-claims": "0.0.0-alpha.47",
+    "@agenticprimitives/contracts": "1.0.0-alpha.47",
+    "@agenticprimitives/delegation": "1.0.0-alpha.47",
+    "@agenticprimitives/fabric": "0.0.0-alpha.40",
+    "@agenticprimitives/key-custody": "1.0.0-alpha.47",
+    "@agenticprimitives/orchestration": "0.0.0-alpha.28",
+    "@agenticprimitives/registry-kit": "0.0.0-alpha.29",
+    "@agenticprimitives/runtime-member": "0.0.0-alpha.28",
+    "@agenticprimitives/types": "1.0.0-alpha.47"
   },
   "pnpm": {
     "overrides": {
@@ -84,9 +84,6 @@
       "sharp": ">=0.35.4",
       "read-yaml-file>js-yaml": "^3.15.2",
       "nanoid@3": "^3.3.18"
-    },
-    "patchedDependencies": {
-      "openac-sdk@5.0.0": "patches/openac-sdk@5.0.0.patch"
     }
   },
   "packageManager": "pnpm@9.15.0"
