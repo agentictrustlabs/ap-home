@@ -137,3 +137,108 @@ service = "imb-vault"
 [[env.impact-agent.services]]
 binding = "A2A"
 service = "imb-runtime"
+
+# ── test-one (spec 441) — stamped by scripts/estate-oneclick from [env.faithnet]. Worker names, storage ids and
+# hosts are this estate's own; the town baseline is the sibling's. Do not hand-edit the derived vars.
+[env.test-one]
+name = "test-one-edge"
+workers_dev = true
+
+[env.test-one.vars]
+EDGE_ALLOWED_ORIGINS = "https://test-one-home.vercel.app,https://*.test-one-home.vercel.app,http://localhost:5175,http://127.0.0.1:5175,http://localhost:8795"
+CHAIN_ID = "34348"
+ENTRY_POINT = "0xf7855250B3363AB7649B10957d8908A9AFcdD4B5"
+DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
+UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"
+SA_BUDGET_LIMIT_UNITS = "10"
+
+[[env.test-one.durable_objects.bindings]]
+name = "SA_BUDGET"
+class_name = "SmartAgentBudgetDO"
+
+[[env.test-one.migrations]]
+tag = "v1"
+new_sqlite_classes = ["SmartAgentBudgetDO"]
+
+[[env.test-one.ratelimits]]
+name = "EDGE_LIMITER"
+namespace_id = "26174"
+simple = { limit = 120, period = 60 }
+
+[[env.test-one.services]]
+binding = "MCP"
+service = "test-one-vault"
+
+[[env.test-one.services]]
+binding = "A2A"
+service = "test-one-runtime"
+
+# ── test-two (spec 441) — stamped by scripts/estate-oneclick from [env.faithnet]. Worker names, storage ids and
+# hosts are this estate's own; the town baseline is the sibling's. Do not hand-edit the derived vars.
+[env.test-two]
+name = "test-two-edge"
+workers_dev = true
+
+[env.test-two.vars]
+EDGE_ALLOWED_ORIGINS = "https://test-two-home.vercel.app,https://*.test-two-home.vercel.app,http://localhost:5175,http://127.0.0.1:5175,http://localhost:8795"
+CHAIN_ID = "34348"
+ENTRY_POINT = "0xf7855250B3363AB7649B10957d8908A9AFcdD4B5"
+DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
+UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"
+SA_BUDGET_LIMIT_UNITS = "10"
+
+[[env.test-two.durable_objects.bindings]]
+name = "SA_BUDGET"
+class_name = "SmartAgentBudgetDO"
+
+[[env.test-two.migrations]]
+tag = "v1"
+new_sqlite_classes = ["SmartAgentBudgetDO"]
+
+[[env.test-two.ratelimits]]
+name = "EDGE_LIMITER"
+namespace_id = "53815"
+simple = { limit = 120, period = 60 }
+
+[[env.test-two.services]]
+binding = "MCP"
+service = "test-two-vault"
+
+[[env.test-two.services]]
+binding = "A2A"
+service = "test-two-runtime"
+
+# ── test-three (spec 441) — stamped by scripts/estate-oneclick from [env.faithnet]. Worker names, storage ids and
+# hosts are this estate's own; the town baseline is the sibling's. Do not hand-edit the derived vars.
+[env.test-three]
+name = "test-three-edge"
+workers_dev = true
+
+[env.test-three.vars]
+EDGE_ALLOWED_ORIGINS = "https://test-three-home.vercel.app,https://*.test-three-home.vercel.app,http://localhost:5175,http://127.0.0.1:5175,http://localhost:8795"
+CHAIN_ID = "34348"
+ENTRY_POINT = "0xf7855250B3363AB7649B10957d8908A9AFcdD4B5"
+DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
+UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"
+SA_BUDGET_LIMIT_UNITS = "10"
+
+[[env.test-three.durable_objects.bindings]]
+name = "SA_BUDGET"
+class_name = "SmartAgentBudgetDO"
+
+[[env.test-three.migrations]]
+tag = "v1"
+new_sqlite_classes = ["SmartAgentBudgetDO"]
+
+[[env.test-three.ratelimits]]
+name = "EDGE_LIMITER"
+namespace_id = "41577"
+simple = { limit = 120, period = 60 }
+
+[[env.test-three.services]]
+binding = "MCP"
+service = "test-three-vault"
+
+[[env.test-three.services]]
+binding = "A2A"
+service = "test-three-runtime"

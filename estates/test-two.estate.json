@@ -1,0 +1,33 @@
+{
+  "_": "spec 441 — THE ESTATE'S DECLARATION, written by the one-click builder (scripts/estate-oneclick). Its five inputs were derived from one: the name. Everything else is DERIVED (scripts/estate-shape.mts) or the town's.",
+  "id": "test-two",
+  "name": "test-two",
+  "homeHost": "test-two-home.vercel.app",
+  "_homeHost": "The rpId of every resident's passkey. It cannot change later without every resident enrolling again.",
+  "zone": "test-two-runtime.richardpedersen3.workers.dev",
+  "_zone": "No zone of its own: the runtime's workers.dev host is where its agents answer, so it is the zone (impact-agent's altZones precedent).",
+  "town": "faithchain",
+  "kmsTenant": "test-two",
+  "estateName": "test-two.estate",
+  "_estateName": "The agent that IS this estate on faithchain, as faithnet.estate is faithnet's. Chosen by the person who asked for it.",
+  "hosts": {
+    "runtime": "https://test-two-runtime.richardpedersen3.workers.dev",
+    "vault": "https://test-two-vault.richardpedersen3.workers.dev",
+    "edge": "https://test-two-edge.richardpedersen3.workers.dev",
+    "homeMcp": "https://test-two-home-mcp.richardpedersen3.workers.dev"
+  },
+  "_hosts": "Where each Worker answers when there is no zone to put mcp./edge. under. deriveVars reads these (estate-shape.patch).",
+  "altZones": [],
+  "extraOrigins": [],
+  "agents": {
+    "harness": "0x9ecE152FC241A4f9c7401eA478E630331f0C8012",
+    "interactions": "0x976f06Ad22d27930Fb28f75cE20E7132647E4c0C",
+    "estate": "0xb60cedb3d95b97dcef5775c5e1391116525faf02"
+  },
+  "_extras": "This estate's own product choices. ORCHESTRATION_LLM is impact-agent's: the model the harness plans with, paid through the GEMINI_API_KEY the build installs.",
+  "extras": {
+    "ORCHESTRATION_LLM": "gemini"
+  },
+  "requestedBy": "0x4551cbfd9331d17c97bed255eac5b366b33a7365",
+  "createdBy": "createestate.faithnet.town"
+}

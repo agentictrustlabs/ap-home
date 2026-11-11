@@ -65,7 +65,7 @@ describe('the architecture posts', () => {
       expect(html.match(/<script[^>]*>/g)).toEqual(['<script src="/nav.js">']);
       expect(html).toContain('<i id="closed"></i>');
       expect(post.steps.length).toBeGreaterThan(0);
-      expect(post.steps.length).toBeLessThanOrEqual(12); // style.css marks the open step for up to twelve
+      expect(post.steps.length).toBeLessThanOrEqual(16); // style.css marks the open step for up to sixteen
       expect(new Set(post.steps.map((s) => s.id)).size).toBe(post.steps.length);
       for (const step of post.steps) {
         // in the list, on its tile in the picture, and as a panel that says why the step exists and where it runs

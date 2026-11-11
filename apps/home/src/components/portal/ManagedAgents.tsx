@@ -268,7 +268,7 @@ export async function enableAgentPlanes(agent: string, via: string, token: strin
  * person's new agent must not fail to exist because a courtesy failed.
  */
 export async function createAgentWithBirthrights(
-  input: { kind: AgentKind; label?: string; parent: string; person: string; via: string; displayName?: string; /** For a protected label (431 §3): the person's verified email at that domain. */ email?: string; /** A line about it, written with the name (430 N6a). */ about?: string },
+  input: { kind: AgentKind; label?: string; parent: string; person: string; via: string; displayName?: string; /** NAME LATER (2026-10-28): an organization chartered with no public name — neither claimed nor bought; its display name kept in its own `org.profile`, a public name claimed later from its Naming page. */ nameLater?: boolean; /** For a protected label (431 §3): the person's verified email at that domain. */ email?: string; /** A line about it, written with the name (430 N6a). */ about?: string },
   token: string,
   onStep: (s: string) => void,
 ): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
@@ -279,10 +279,11 @@ export async function createAgentWithBirthrights(
   // `register(label, owner)` the claim path builds no longer exists on those roots; sending it reverted the
   // whole deploy, so "Add an organization" with a name failed on faithnet from the root switch until this.
   const wantName = !!input.label && input.label.trim().length >= 3;
-  const bought = wantName && kindNameIsBought(kind);
-  const label = bought ? undefined : input.label;
+  const later = kind === 'org' && input.nameLater === true;
+  const bought = wantName && !later && kindNameIsBought(kind);
+  const label = bought || later ? undefined : input.label;
   const res = await createManagedAgent(
-    { kind, label, parent: parent as `0x${string}`, person: person as `0x${string}`, via, ...(bought ? { nameLater: true } : {}) },
+    { kind, label, parent: parent as `0x${string}`, person: person as `0x${string}`, via, ...(bought || later ? { nameLater: true } : {}) },
     token, onStep,
   );
   if (!res.ok) return res;
@@ -325,6 +326,15 @@ export async function createAgentWithBirthrights(
           headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
           body: JSON.stringify({ person, orgAgent: res.result.agent.toLowerCase(), orgProfile: { displayName: commonName } }),
         }).catch((e) => console.warn('[org-create] common name not projected:', e));
+      }
+      // NAME LATER: with no public name, the common name is also its PRIVATE name (`org-localname:<org>`), so the
+      // steward's lists show "<name> *" rather than "Unnamed organization". Never a public registration.
+      if (later && !res.result.name && commonName) {
+        await fetch('/connect/related-orgs', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+          body: JSON.stringify({ person, orgAgent: res.result.agent.toLowerCase(), orgLocalName: { name: commonName } }),
+        }).catch((e) => console.warn('[org-create] private name not projected:', e));
       }
       await fetch('/connect/channels', {
         method: 'POST',
@@ -390,15 +400,19 @@ export function CreateAgentForm({
   // Plumbing (a treasury) may defer. The table says which; a single-kind form keeps the old rule.
   const nameRequired = choice ? choice.nameRequired : kind === 'org';
 
-  async function create(named: boolean) {
+  // An organization may be chartered with NO public name (2026-10-28, Rich): what is typed is then only the name it
+  // goes by, kept in its own profile, and the public name is claimed later from its page.
+  const canNameLater = kind === 'org';
+  async function create(named: boolean, later = false) {
     const clean = label.trim().toLowerCase();
+    if (later && label.trim().length < 3) { setErr('Type the name it goes by — at least 3 characters. It stays private until you claim it.'); return; }
     if (named && clean.length < 3) {
       setErr(nameRequired ? 'Organizations require a name — at least 3 characters.' : 'Pick a name with at least 3 characters, or create it unnamed.');
       return;
     }
     setBusy(true); setErr(''); setStep('');
     const res = await createAgentWithBirthrights(
-      { kind, label: named ? clean : undefined, parent, person, via, ...(kind === 'org' ? { displayName: commonName } : {}) }, token, setStep,
+      { kind, label: named ? clean : undefined, parent, person, via, ...(kind === 'org' ? { displayName: commonName.trim() || (later ? label.trim() : '') } : {}), ...(later ? { nameLater: true } : {}) }, token, setStep,
     );
     setBusy(false);
     if (!res.ok) { setErr(res.error); return; }
@@ -455,6 +469,11 @@ export function CreateAgentForm({
         <BusyButton busy={busy} busyLabel={step || 'Working…'} className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} onClick={() => void create(true)}>
           Create + name
         </BusyButton>
+        {canNameLater && (
+          <button type="button" className="btn-ghost" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => void create(false, true)} data-testid="create-name-later">
+            Create, name it later
+          </button>
+        )}
         {!nameRequired && (
           <button type="button" className="btn-ghost" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => void create(false)}>
             Create without a name
@@ -466,7 +485,7 @@ export function CreateAgentForm({
       </div>
       <p className="onboarding-note" style={{ margin: 0 }}>
         Deploys its own Smart Agent, stewarded by you (your key signs for it) — one {via === 'wallet' ? 'wallet' : 'device'} prompt, gas sponsored.
-        {' '}{choice?.blurb ? `${choice.blurb} ` : ''}{nameRequired ? 'It is counterparty-facing, so a name is required.' : 'A name is optional; you can name it later.'}
+        {' '}{choice?.blurb ? `${choice.blurb} ` : ''}{canNameLater ? 'Create + name claims it publicly now. Name it later keeps the name you type private, in its own profile, until you claim a public name from its page.' : nameRequired ? 'It is counterparty-facing, so a name is required.' : 'A name is optional; you can name it later.'}
       </p>
       {err && <p className="onboarding-hint taken" style={{ margin: 0 }}>{err}</p>}
     </div>
@@ -747,7 +766,8 @@ export function OrganizationsManager({
               <div className="manage-card" key={org.agent} style={inactive ? { opacity: 0.72 } : undefined}>
                 <div className="manage-card-head">
                   <span className="manage-card-icon"><BuildingIcon size={17} /></span>
-                  <span className="manage-card-label">{org.name || 'Unnamed organization'}</span>
+                  {/* A private name (no public one yet) is marked `*`, as everywhere else a local name shows. */}
+                  <span className="manage-card-label" title={org.nameIsLocal ? 'A private name — it has no public name yet' : undefined}>{org.name ? `${org.name}${org.nameIsLocal ? ' *' : ''}` : 'Unnamed organization'}</span>
                   <span className={`manage-card-badge${inactive ? '' : ' live'}`}>
                     {/* The subclass word (team / circle / church), not the class — a church is an organization, and says which. */}
                     {inactive ? STATUS_LABEL.inactive : orgKindWordOf(org.kind).replace(/^./, (c) => c.toUpperCase())}
@@ -758,7 +778,7 @@ export function OrganizationsManager({
                   You steward it — your key signs for it. <ExplorerLink address={org.agent} label="explorer ↗" />
                   {onSelect && <> · <button type="button" onClick={() => onSelect(org.agent)} style={{ background: 'none', border: 'none', color: 'var(--color-amber-700)', cursor: 'pointer', padding: 0, minHeight: 0, fontSize: 'inherit' }}>view data →</button></>}
                 </p>
-                {!org.name && <NameAgentForm agent={org.agent} kind="org" parent={person} person={person} token={token} via={via} onDone={reload} />}
+                {(!org.name || org.nameIsLocal) && <NameAgentForm agent={org.agent} kind="org" parent={person} person={person} token={token} via={via} onDone={reload} />}
                 {inactive && <ActivateOrgRow org={org} person={person} token={token} onDone={reload} />}
                 <div style={{ marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid var(--c-g100, #eee)' }}>
                   {t ? (
@@ -803,8 +823,7 @@ export function OrganizationsManager({
               {/* M06 (398 §4.4) — the fleet boundary on the services roster too: runs at · may spend · holds — and the
                   steward's Enable when a plane is missing (a service chartered before 2026-10-10 was born without them). */}
               <ServicePlanes agent={svc.agent} token={token} via={via} />
-              {!svc.name && <NameAgentForm agent={svc.agent} kind={svc.kind} parent={svc.parent} person={person} token={token} via={via} onDone={reload} />}
-            </div>
+              {!svc.name && <NameAgentForm agent={svc.agent} kind={svc.kind} parent={svc.parent} person={person} token={token} via={via} onDone={reload} />}            </div>
           ))}
 
           {/* Charter something new — the kind picker offers every typed root THIS chain has provisioned. */}

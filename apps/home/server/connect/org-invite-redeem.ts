@@ -16,7 +16,7 @@ import { oidcFacetId } from '@agenticprimitives/connect-auth/google';
 import type { CredentialPrincipal } from '@agenticprimitives/types';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { resolveKmsAgent } from '../_lib/kms-resolve';
-import { recordEmailFacetByHash, readRotation } from '../../src/lib/kv-indexer';
+import { readEmailFacetByHash, recordEmailFacetByHash, readRotation } from '../../src/lib/kv-indexer';
 import { orgVault } from '../lib/org-vault';
 
 const EMAIL_ISS = 'email'; // matches email-verify.ts — the issuer namespace for email-subject KMS custody
@@ -58,6 +58,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const kms = await resolveKmsAgent(env, EMAIL_ISS, emailHash, rotation);
   if (!kms.ok) return json({ status: 'needs-otp', org, detail: kms.reason });
 
+  // An email already LINKED to another home (a passkey home, via Security) is that home's — the invite
+  // link must never re-point it, and must never confer custody over it. The invitee proves the inbox with
+  // a code instead, and email-verify applies the link rules (security audit H-02, 2026-11-04).
+  const facet = await readEmailFacetByHash(env.AUTH_CODES, emailHash);
+  if (facet && facet.toLowerCase() !== kms.agentId.toLowerCase()) return json({ status: 'needs-otp', org });
+
   await recordEmailFacetByHash(env.AUTH_CODES, emailHash, kms.agentId);
 
   const { signer } = await getServer(env);
@@ -86,7 +92,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // re-click, or the second visit loses the journey it was part of.
   try {
     const vault = await orgVault(env, org);
-    if (vault) await vault.set(`org.invite:${token}`, { ...(inviteRec ?? {}), emailHash, status: 'redeemed', agent: kms.agentId, redeemedAt: Date.now() });
+    // Only the status fields: the runtime refuses anything else from a token holder (H-02).
+    void inviteRec;
+    if (vault) await vault.set(`org.invite:${token}`, { status: 'redeemed', agent: kms.agentId, redeemedAt: Date.now() });
   } catch { /* tracking is best-effort */ }
 
   // spec 321 W2: hand the invitee the steward's pre-signed member-access grant. Counterfactual by
