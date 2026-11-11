@@ -13,6 +13,7 @@ import { toCanonicalAgentId } from '@agenticprimitives/identity-directory-adapte
 import { CHAIN_ID, CONTRACTS } from '../../src/lib/chain';
 import { covers, isRememberedTemplate, mintsPaymentAtSignIn, termsFor, wireValidUntil, type ConsentTermsV1 } from '../../src/lib/consent-terms';
 import { askAsMeCaveats, selfVaultCaveats, siteCaveats } from '../../src/lib/delegation';
+import type { Address } from 'viem';
 import { nameLabel } from '../../src/lib/domain';
 import { nameClaimForIdToken, sharesProfileName } from '../../src/lib/new-member';
 import { sharesEmailClaim } from '../../src/whitelabel/provisioning';
@@ -87,10 +88,10 @@ export function checkRules(i: RuleInput): ConsentReason | null {
 export interface WireCheck { wire: IncomingDelegation | undefined; delegate?: string; caveats: ReadonlyArray<{ enforcer: string; terms: string }> }
 
 /** The wires this sign-in's token response would carry, by what the CURRENT registry asks for. */
-export function wiresToCheck(row: AppGrantRow, now: ConsentTermsV1): WireCheck[] {
+export function wiresToCheck(row: AppGrantRow, now: ConsentTermsV1, person: Address): WireCheck[] {
   return [
-    { wire: row.delegation, delegate: now.delegates.site, caveats: now.template === 'ask-as-me' ? askAsMeCaveats(1) : siteCaveats(1) },
-    ...(now.ask && now.template !== 'ask-as-me' ? [{ wire: row.askDelegation, delegate: now.delegates.ask, caveats: askAsMeCaveats(1) }] : []),
+    { wire: row.delegation, delegate: now.delegates.site, caveats: now.template === 'ask-as-me' ? askAsMeCaveats(1, person) : siteCaveats(1) },
+    ...(now.ask && now.template !== 'ask-as-me' ? [{ wire: row.askDelegation, delegate: now.delegates.ask, caveats: askAsMeCaveats(1, person) }] : []),
     ...(now.selfVault ? [{ wire: row.selfVaultGrant, caveats: selfVaultCaveats(now.selfVault) }] : []),
   ];
 }
@@ -203,7 +204,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const now = termsFor(client, req.delegation_template);
   const stored = row as AppGrantRow;
   const ttl = idTokenTtl(env, req.client_id);
-  const failedWire = await checkWires(wiresToCheck(stored, now), person, ttl, Date.now(), (d) => verifyDelegation(env, d));
+  const failedWire = await checkWires(wiresToCheck(stored, now, person as Address), person, ttl, Date.now(), (d) => verifyDelegation(env, d));
   if (failedWire) return answer(failedWire);
 
   // Everything held. In shadow the decision is recorded and the sheet is shown anyway.

@@ -59,13 +59,19 @@ export function siteCaveats(validUntil: number): Caveat[] {
  * Spec 397 — THE `ask-as-me` TEMPLATE: a person's delegation to a Home MCP's own key, pinned to `harness.ask`
  * and nothing else, time-boxed. It is the SAME shape as an agent's session wire (spec 372 S3c), with the person as
  * delegator: presented as `A2A-Session` at the person's agent it says "put this question to my agent as me" —
- * and nothing more. No value, no targets, no digest binding: an ask is not an intent, and every act the ask
- * reaches still parks for the person's own signature. Revocable on chain like every delegation of theirs.
+ * and nothing more. No value, no digest binding: an ask is not an intent, and every act the ask reaches still parks
+ * for the person's own signature. Revocable on chain like every delegation of theirs.
+ *
+ * ONE TARGET — the person's own agent (spec 445 RUN-9). The runtime's session-wire gate refuses a wire whose
+ * allowedTargets does not name the agent it is presented at ("a wire minted for another host, or for none, is
+ * refused"), so a wire without it reached no agent at all: every ask-as-me app (the publishing gateway, the Home MCP)
+ * was refused `the app delegation did not verify` on generation 4.
  */
-export function askAsMeCaveats(validUntil: number): Caveat[] {
+export function askAsMeCaveats(validUntil: number, personAgent: Address): Caveat[] {
   return [
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms([a2aSkillSelector('harness.ask')])),
+    buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([personAgent])),
   ];
 }
 
@@ -80,7 +86,7 @@ export async function issueAskAsMeDelegation(
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   let salt = 0n;
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
-  const d: Delegation = { delegator: personAgent, delegate: delegateKey, authority: ROOT_AUTHORITY, caveats: askAsMeCaveats(validUntil), salt, signature: '0x' };
+  const d: Delegation = { delegator: personAgent, delegate: delegateKey, authority: ROOT_AUTHORITY, caveats: askAsMeCaveats(validUntil, personAgent), salt, signature: '0x' };
   d.signature = await signHash(hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager));
   return d;
 }
