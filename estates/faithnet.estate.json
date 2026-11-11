@@ -50,7 +50,6 @@
     "EXECUTORS": "{\"field-circles\":{\"url\":\"https://field-a2a.faithnet.io\",\"client\":\"field-app\"}}",
     "GATHER_DIGEST_MAX": "120000",
     "GATHER_RECORD_CLIP": "60000",
-    "ORCHESTRATION_GEMINI_BILLING_URL": "https://ai.studio/spend",
     "ORCHESTRATION_GEMINI_STRONG_MODEL": "gemini-3.1-pro-preview",
     "ORCHESTRATION_GROQ_TPM": "8000",
     "ORCHESTRATION_MODEL": "claude-haiku-5-5",
