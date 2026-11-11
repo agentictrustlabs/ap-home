@@ -162,7 +162,7 @@ EXECUTORS = '{"field-circles":{"url":"https://field-a2a.faithnet.io","client":"f
 # Perf (2026-10-02) — the agents the `scheduled` cron keeps warm (comma-separated SAs): the demo persons and
 # orgs a visitor lands on first. Read-only, credential-free. Extend as the demo roster people actually hit
 # grows; keep it small (each agent is two reads per tick). nathan.me + "Northern Colorado Field — Game Night".
-WARM_AGENTS = "0x1dba4a27c53d7babda99513080223fb3bfc4bad1,0x8e32c713f44c7747d97a589522806a8e1dd810fb"
+WARM_AGENTS = "0x3cec0ed189bfc688072dacf689f689f350a03ed1,0xdd38a35cad4fb6b48be4759263a325836886486b"   # gen 4: nathan.me, Game Night
 # Spec 408 — the contract generation this estate runs: "1" = the contracts deployed today (raw approved hashes,
 # Spec 445 — GENERATION 4 since 2026-11-11 (fresh Deploy.s.sol on faithchain; faithnet re-chartered in place).
 CONTRACTS_GENERATION = "4"
