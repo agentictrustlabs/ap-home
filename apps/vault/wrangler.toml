@@ -363,7 +363,7 @@ AKCS_BASE_URL = "https://kms.faithnet.io"
 [[env.isl-1.d1_databases]]
 binding = "DB"
 database_name = "isl-1-db"
-database_id = "__D1_DB__"
+database_id = "bbe2d1a2-d11e-40c4-90a3-28aa555777f6"
 migrations_dir = "migrations"
 
 [[env.isl-1.durable_objects.bindings]]

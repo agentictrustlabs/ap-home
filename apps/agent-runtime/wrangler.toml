@@ -1467,7 +1467,7 @@ bindings = [
 [[env.isl-1.d1_databases]]
 binding = "OPS"
 database_name = "isl-1-ops"
-database_id = "__D1_OPS__"
+database_id = "0c2c4fe6-6070-4958-aa54-599ce875ebd4"
 
 [[env.isl-1.queues.producers]]
 binding = "RUNTIME_WAKE"
@@ -1486,17 +1486,17 @@ max_concurrency = 2
 
 [[env.isl-1.kv_namespaces]]
 binding = "BRIDGE_NONCES"
-id = "__KV_BRIDGE_NONCES__"
+id = "49de891043d44f3599e6d10f60612789"
 [[env.isl-1.kv_namespaces]]
 binding = "SUBJECT_SA_MAP"
-id = "__KV_SUBJECT_SA_MAP__"
+id = "58a677186bb44fd19ba1141289bd925b"
 [[env.isl-1.kv_namespaces]]
 binding = "FED_TOKENS"
-id = "__KV_FED_TOKENS__"
+id = "95d03afbe76c4ba0a0e5711f1735d089"
 
 [[env.isl-1.kv_namespaces]]
 binding = "RELEASED_CARDS"
-id = "__KV_RELEASED_CARDS__"
+id = "7a76354511f34e4e9c76aa9e414b507a"
 
 [[env.isl-1.services]]
 binding = "MCP"
