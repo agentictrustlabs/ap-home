@@ -278,7 +278,7 @@ export const MOUNTED_PEER_SKILLS: A2aSkill[] = [
   {
     id: 'library.granted.read',
     name: 'Read a document under a grant',
-    description: 'Read ONE document of this agent’s Library (private or public) under a grant its owner signed to you: a delegated task whose delegation is FROM this agent TO you, with a time window, allowedTargets naming this agent, allowedMethods naming library.granted.read, and a VAULT_RECORD_SCOPE caveat naming the document (`vault:content.artifact.<id>`) or a folder (`vault:content.folder:<path>/*`). Input { "id": string, "offset"?: number }; the artifact carries the text in pages of 12,000 characters and the grant read under. Requires a delegation; a document outside it is answered exactly as one that does not exist.',
+    description: 'Read ONE document of this agent’s Library (private or public) under a grant its owner signed to you: a delegated task whose delegation is FROM this agent TO you, with a time window, allowedTargets naming this agent, allowedMethods naming library.granted.read, and a VAULT_RECORD_SCOPE caveat naming the document (its content-artifact record id) or a folder (a content-folder path with a trailing wildcard). Input { "id": string, "offset"?: number }; the artifact carries the text in pages of 12,000 characters and the grant read under. Requires a delegation; a document outside it is answered exactly as one that does not exist.',
     tags: ['library', 'delegated', 'a2a'],
   },
   // Spec 436 §5.5 — THE DAY'S PULSE a context agent keeps. Mounted for every agent, as the shelf is: an agent
