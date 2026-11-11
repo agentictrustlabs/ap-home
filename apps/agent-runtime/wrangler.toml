@@ -157,9 +157,8 @@ ADOPTED_ONTOLOGY_MANIFEST_DIGEST = "0xf64becd4c395e8b7f0d935ca97640a6d4b37fc087e
 # discovered and engaged like `people-groups.svc`. Its `gc/gap-steward` playbook carries no `invoke`, so no run
 # reaches `a2a.global.church` any more; the executor is retired on the Global.Church side.
 EXECUTORS = '{"field-circles":{"url":"https://field-a2a.faithnet.io","client":"field-app"}}'
-# Spec 377 / provider-outage — the exact page for THIS estate's Gemini failure mode (a monthly spend cap,
-# not a rate limit): the error links here, and whoever runs the Home raises it here. Overrides the generic default.
-ORCHESTRATION_GEMINI_BILLING_URL = "https://ai.studio/spend"
+# Spec 377 — the Gemini spend-cap page is now the code default (provider-outage.ts); the per-estate var was removed to stay
+# under the Workers 128-text-binding limit (generation 4 added PAYLOAD_CLASSES_ENFORCER + TREASURY_SPEND_POLICY).
 # Perf (2026-10-02) — the agents the `scheduled` cron keeps warm (comma-separated SAs): the demo persons and
 # orgs a visitor lands on first. Read-only, credential-free. Extend as the demo roster people actually hit
 # grows; keep it small (each agent is two reads per tick). nathan.me + "Northern Colorado Field — Game Night".
