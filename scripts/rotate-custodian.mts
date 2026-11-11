@@ -11,6 +11,7 @@
 //   npx tsx scripts/rotate-custodian.mts --agent 0x<sa> --add 0x<incoming eoa> --remove 0x<outgoing eoa> \
 //     [--re-approve 0x<digest> …] [--home https://… --by maya | --persona demo-admin | CUSTODIAN_KEY_ENV_FILE=…] [--dry-run]
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { AgentAccountClient, buildExecuteBatchCallData, type ContractCall } from '@agenticprimitives/agent-account';
 import { createPublicClient, decodeEventLog, encodeFunctionData, http, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -31,11 +32,19 @@ const RPC = process.env.RPC_URL ?? (() => { console.error('RPC_URL is required')
 const relayFile = (process.env.RELAY_PRIVATE_KEY_FILE ?? '').replace(/^~/, process.env.HOME ?? '');
 const relayKey = (process.env.RELAY_PRIVATE_KEY ?? (relayFile ? readFileSync(relayFile, 'utf8').trim() : '')) as Hex;
 if (!/^0x[0-9a-fA-F]{64}$/.test(relayKey)) { console.error('RELAY_PRIVATE_KEY(_FILE) is required'); process.exit(1); }
-const CHAIN_ID = Number(process.env.CHAIN_ID ?? 34348);
-const ENTRY_POINT = '0xf7855250B3363AB7649B10957d8908A9AFcdD4B5' as Address;
-const FACTORY = '0x464eEe7518c3c97DA570592481329E0627E9a3B8' as Address;
-const PAYMASTER = (process.env.PAYMASTER ?? '0xbd93fEC6910ffD74F14709188b5a9B6C6965b2a7') as Address;
-const CUSTODY_POLICY = (process.env.CUSTODY_POLICY ?? '0xfb3662Ddc308FAc977A1F663948A447055722d3B') as Address;
+// The chain's addresses come from its published deployment file, as in bootstrap-estate.mts. Written-in constants went
+// stale at faithchain's generation-4 reset (2026-11-11): the old entry point rejected every ceremony userOp.
+// DEPLOYMENT_FILE points at a chain whose addresses have not shipped in a release yet.
+const deployment = JSON.parse(readFileSync(process.env.DEPLOYMENT_FILE
+  ? process.env.DEPLOYMENT_FILE.replace(/^~/, process.env.HOME ?? '')
+  : createRequire(import.meta.url).resolve(`@agenticprimitives/contracts/deployments-json/${process.env.DEPLOYMENT ?? 'faithchain'}`), 'utf8')) as {
+  chainId: number; entryPoint: Address; agentAccountFactory: Address; smartAgentPaymaster: Address; custodyPolicy: Address;
+};
+const CHAIN_ID = Number(process.env.CHAIN_ID ?? deployment.chainId);
+const ENTRY_POINT = deployment.entryPoint;
+const FACTORY = deployment.agentAccountFactory;
+const PAYMASTER = (process.env.PAYMASTER ?? deployment.smartAgentPaymaster) as Address;
+const CUSTODY_POLICY = (process.env.CUSTODY_POLICY ?? deployment.custodyPolicy) as Address;
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t) as Record<string, unknown>; } catch { return { _raw: t.slice(0, 200) }; } };
 const envFile = process.env.CUSTODIAN_KEY_ENV_FILE ?? ''; const varName = process.env.CUSTODIAN_KEY_VAR ?? 'CUSTODIAN_PRIVATE_KEY';
 const fromRoster = persona ? ((JSON.parse(readFileSync('demo/personas.local.json', 'utf8')) as Record<string, { eoaPrivateKey?: string }>)[persona]?.eoaPrivateKey ?? '') : '';
