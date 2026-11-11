@@ -122,6 +122,11 @@ const faithImpact: WhiteLabelConfig = {
   // Spec 445 §16 — verified to send a person back to this Home, 2026-11-05. commons-app runs its sign-out but does not
   // return, and most other apps have no /sso-logout live yet: both listed in the spec. Add an app here when it returns.
   frontChannelLogout: {
+    // ONLY origins that ANSWER /sso-logout (clear their session, bounce to `return`). A listed origin that serves its
+    // ordinary page instead strands the person mid-chain on that page — town.faithnet.io did exactly that on
+    // 2026-11-11. Removed until they implement the route: town, names (ap-town), skills, coach (engage coach-web),
+    // workbench, seed-reader. An app missing here keeps its own session after a Home sign-out; add it back the day
+    // its /sso-logout exists.
     'https://www.faithnet.me': [
       'https://faithnet.estate/sso-logout',
       'https://heartcoach.faithnet.io/sso-logout',
@@ -129,13 +134,7 @@ const faithImpact: WhiteLabelConfig = {
       'https://bible.faithnet.io/sso-logout',
       'https://field.faithnet.io/sso-logout',
       'https://church.faithnet.io/sso-logout',
-      'https://town.faithnet.io/sso-logout',
-      'https://names.faithnet.io/sso-logout',
-      'https://coach.faithnet.io/sso-logout',
       'https://reader.faithnet.io/sso-logout',
-      'https://skills.faithnet.io/sso-logout',
-      'https://workbench.faithnet.io/sso-logout',
-      'https://seed-reader.faithnet.io/sso-logout',
       'https://publishing.faithnet.io/sso-logout',
     ],
   },
