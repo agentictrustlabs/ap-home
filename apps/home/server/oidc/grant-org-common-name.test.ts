@@ -71,4 +71,10 @@ describe('/oidc/grant — the organization common name', () => {
     const org = await redeem({ orgAgent: ORG, orgName: 'global-church.org', person: PERSON });
     expect(org).toMatchObject({ displayName: 'Global.Church', website: 'https://global.church' });
   });
+
+  it('a recorded kind and purpose are never overwritten by a grant payload (a club grant carries the workspace kind)', async () => {
+    store.set(`related:${PERSON}:${ORG}`, JSON.stringify({ orgAgent: ORG, orgName: 'club.org', kind: 'org', purpose: 'club-governor' }));
+    await redeem({ orgAgent: ORG, orgName: 'club.org', person: PERSON, kind: 'workspace', purpose: 'field-workspace' });
+    expect(JSON.parse(store.get(`related:${PERSON}:${ORG}`)!)).toMatchObject({ kind: 'org', purpose: 'club-governor' });
+  });
 });

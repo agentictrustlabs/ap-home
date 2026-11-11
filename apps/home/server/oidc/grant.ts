@@ -246,7 +246,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       ...existing,
       orgAgent: orgPayload.orgAgent,
       orgName: orgPayload.orgName || existing.orgName || '',
-      purpose: orgPayload.purpose ?? existing.purpose ?? 'related-org',
+      // An agent's kind and purpose are recorded once and never change. The ceremony's payload fills them only when the
+      // link has none: a club's grant carries the WORKSPACE's kind, and letting it win re-filed the club's governing
+      // organization as a workspace, which every member invite then refused (`not_an_organization`, 2026-11-11).
+      purpose: (existing.purpose as string | undefined) ?? orgPayload.purpose ?? 'related-org',
       requestedBy: grant.client_id,
       siteDelegation: body.delegation ?? existing.siteDelegation ?? null,
       brokerDelegation: orgPayload.brokerDelegation ?? existing.brokerDelegation ?? null,
@@ -265,8 +268,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       proofHash: orgPayload.proofHash ?? existing.proofHash ?? null,
       credential: orgPayload.credential ?? existing.credential ?? null,
       kind:
-        orgPayload.kind ??
         existing.kind ??
+        orgPayload.kind ??
         (orgPayload.purpose === 'field-workspace' ? 'workspace' : orgPayload.purpose === 'field-team' ? 'team' : orgPayload.purpose === 'field-circle' ? 'circle' : orgPayload.purpose === 'field-church' ? 'church' : 'org'),
       parent: orgPayload.parent ?? existing.parent ?? person,
       // The governor rides the link so the invite ceremony can find it without a vault read (`lib/workspace-governor.ts`).
