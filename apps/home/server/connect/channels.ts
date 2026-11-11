@@ -10,6 +10,7 @@
 // Wire shapes preserved for the UI:
 //   GET  ?communityId=…[&channelId=…] → { channels, bodies?, you, orgVaultEnabled, membership, steward }
 //   POST { action:'create'|'post', … } → { ok, channelId?|messageId? } | { error }
+import { verifyIdTokenForRelyingClient } from '../_lib/person-bearer';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { importJwks } from '@agenticprimitives/connect';
 import { verifySession } from '../_lib/home-session';
@@ -58,7 +59,10 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<{ pe
   if (!v.ok) {
     const aud = unverifiedAud(token);
     if (aud && (await resolveClient(env, aud))) {
+      // A relying app's bearer: a session minted for it, or (the usual case) an ID TOKEN, which verifySession refuses
+      // since spec 445 ING-4 — so an id_token is verified as one.
       v = await verifySession(token, { keys, expectedAud: aud, expectedIss: iss });
+      { const sa = v.ok ? null : await verifyIdTokenForRelyingClient(env, token, keys, iss); if (sa) v = { ok: true, session: { sub: sa } } as unknown as typeof v; }
     }
   }
   if (!v.ok) return null;

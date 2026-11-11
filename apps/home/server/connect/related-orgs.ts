@@ -10,6 +10,7 @@ import { importJwks } from '@agenticprimitives/connect';
 import { verifySession } from '../_lib/home-session';
 import { buildCustodyDescriptor, relatedAgentWriteContentHash, hashRelatedAgentWriteChallenge, hashRelatedAgentWriteChallengeV3, checkRelatedAgentWriteChallengeVersion, type CustodyDescriptor } from '@agenticprimitives/related-agents';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
+import { verifyIdTokenForRelyingClient } from '../_lib/person-bearer';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 // Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
@@ -66,7 +67,14 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // own links. Mirrors the /connect/channels relying-token fallback.
   if (!v.ok && !clientId) {
     const aud = unverifiedAud(token);
-    if (aud && (await resolveClient(env, aud))) v = await verifySession(token, { keys, expectedAud: aud, expectedIss: ownIssuer(request, env) });
+    if (aud && (await resolveClient(env, aud))) {
+      // A relying app's bearer is an ID TOKEN (typ JWT), never an agent session — verifySession requires
+      // `agent-session+jwt` since spec 445 ING-4 and refused every one of them (Field, Game Night: 401). Verify it as
+      // what it is: our signature, our issuer, a registered client as audience.
+      v = await verifySession(token, { keys, expectedAud: aud, expectedIss: ownIssuer(request, env) });
+      const sa = v.ok ? null : await verifyIdTokenForRelyingClient(env, token, keys, ownIssuer(request, env));
+      if (sa) v = { ok: true, session: { ...(v as { session?: object }).session, sub: sa } } as unknown as typeof v;
+    }
   }
   if (!v.ok) return jsonCors({ error: `invalid session token: ${v.reason}` }, request, 401);
 

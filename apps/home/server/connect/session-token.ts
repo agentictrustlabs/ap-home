@@ -18,6 +18,7 @@
 // re-runs its own authority server-side (ADR-0041 — the bearer is an ingress envelope).
 import { importJwks, mintIdToken } from '@agenticprimitives/connect';
 import { verifySession } from '../_lib/home-session';
+import { verifyIdTokenForRelyingClient } from '../_lib/person-bearer';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { resolveClient } from '../_lib/oidc-registry';
 
@@ -60,7 +61,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   let v = await verifySession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: iss });
   if (!v.ok) {
     const aud = unverifiedAud(token);
-    if (aud && (await resolveClient(env, aud))) v = await verifySession(token, { keys, expectedAud: aud, expectedIss: iss });
+    if (aud && (await resolveClient(env, aud))) {
+      // A relying app's bearer is an ID TOKEN (typ JWT), never an agent session — verifySession requires
+      // `agent-session+jwt` since spec 445 ING-4 and refused every one of them (Field, Game Night: 401). Verify it as
+      // what it is: our signature, our issuer, a registered client as audience.
+      v = await verifySession(token, { keys, expectedAud: aud, expectedIss: iss });
+      const sa = v.ok ? null : await verifyIdTokenForRelyingClient(env, token, keys, iss);
+      if (sa) v = { ok: true, session: { ...(v as { session?: object }).session, sub: sa } } as unknown as typeof v;
+    }
   }
   if (!v.ok) return json({ error: 'session not verified' }, 401);
 

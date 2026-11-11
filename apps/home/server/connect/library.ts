@@ -16,6 +16,7 @@ type ArtifactAction = 'read' | 'write' | 'share' | 'export' | 'delete';
 type AgentKind = 'person' | 'org' | 'service';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { signCredential, canonicalHash } from '@agenticprimitives/verifiable-credentials';
+import { verifyIdTokenForRelyingClient } from '../_lib/person-bearer';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 // Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
@@ -68,7 +69,10 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   if (!v.ok) {
     const aud = unverifiedAud(token);
     if (aud && (await resolveClient(env, aud))) {
+      // A relying app's bearer: a session minted for it, or (the usual case) an ID TOKEN, which verifySession refuses
+      // since spec 445 ING-4 — so an id_token is verified as one.
       v = await verifySession(token, { keys, expectedAud: aud, expectedIss: iss });
+      { const sa = v.ok ? null : await verifyIdTokenForRelyingClient(env, token, keys, iss); if (sa) v = { ok: true, session: { sub: sa } } as unknown as typeof v; }
     }
   }
   if (!v.ok) return null;
