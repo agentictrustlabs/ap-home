@@ -226,6 +226,9 @@ const faithImpact: WhiteLabelConfig = {
       // EXACT MATCH (CN-1). The town's own host first; the workers.dev host is what a preview deploy serves.
       redirect_uris: [
         'https://town.faithnet.io/connected',
+        // The town's own domain (faithnet.town) serves the same town agent; signing in from there was "Request blocked"
+        // because its return address was not registered (2026-11-11).
+        'https://faithnet.town/connected',
         'https://faithchain-town-agent.richardpedersen3.workers.dev/connected',
         'http://localhost:8792/connected',
       ],
