@@ -95,6 +95,18 @@ if (!rep || rep.kind !== 'done') fail(`organization.create did not finish: ${JSO
 const finished = rep as Reply;
 const res = (finished.result ?? {}) as { agent?: string; name?: string; nameLater?: boolean; txHash?: string; kind?: string };
 if (!/^0x[0-9a-fA-F]{40}$/.test(String(res.agent ?? ''))) fail(`done, but the result names no agent: ${JSON.stringify(finished.result).slice(0, 400)}`);
+// Record the organization in the steward's private tree, exactly as the Home's Ask does on `done`
+// (apps/home/src/home/ask-record.ts recordCreatedAgent): without it the organization is real on chain but her Home
+// lists no organization, and every step that finds it by stewardship (enable-interactions-at, invite, issue) refuses.
+{
+  const created = finished.result as { agent: string; parent?: string; person?: string; kind?: string; name?: string; stewardshipDelegation?: unknown };
+  const rec = await fetch(`${HOME}/connect/related-orgs`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}` },
+    body: JSON.stringify({ person: created.person ?? ME, orgAgent: created.agent, orgName: created.name ?? '', purpose: created.kind ?? 'org', kind: created.kind ?? 'org', parent: created.parent ?? ME, ...(created.stewardshipDelegation ? { stewardshipDelegation: created.stewardshipDelegation } : {}) }),
+  });
+  if (!rec.ok) fail(`the organization ${created.agent} exists, but recording it in ${BY}'s tree failed: HTTP ${rec.status} ${(await rec.text()).slice(0, 200)}`);
+  console.log(`  recorded in ${BY}'s tree${created.stewardshipDelegation ? ' with the stewardship grant' : ' (no stewardship grant in the result)'}`);
+}
 Object.assign(note, { purpose: 'spec 444 W3 — the organization that issues its members\' credentials (an operator note, not a persona)', home: HOME, chainId: CHAIN, org: { label: LABEL, sa: res.agent, name: res.name ?? null, nameLater: res.nameLater === true, steward: BY, custodian: CUSTODIAN, txHash: res.txHash ?? null, kind: res.kind ?? 'org' }, createdAt: new Date().toISOString() });
 writeFileSync(NOTE, JSON.stringify(note, null, 2) + '\n');
 console.log(`\n✓ organization ${res.agent}${res.name ? ` (${res.name})` : ''}${res.nameLater ? ' — name deferred (rooted elsewhere)' : ''} — written to ${NOTE}`);
