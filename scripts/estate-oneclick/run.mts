@@ -551,8 +551,17 @@ const steps: Record<string, Step> = {
     run: async () => {
       // Dependencies were installed by the workflow BEFORE any secret was in the environment, never here.
       deployWorker('vault');
-      const vaultDb = /database_name\s*=\s*"([^"]+)"/.exec(readFileSync(TOML_PATHS.vault, 'utf8').split(`[env.${request.id}`)[1] ?? '')?.[1];
-      if (vaultDb) wrangler(['d1', 'migrations', 'apply', vaultDb, '--remote', '--env', request.id, '-c', TOML_PATHS.vault]);
+      // This estate's sections run from its `[env.<id>]` header to the next estate's (split() would stop at the first
+      // `[env.<id>.vars]`, before the database, and the migrations were silently skipped — seen on test-one..three).
+      const vaultToml = readFileSync(TOML_PATHS.vault, 'utf8');
+      const envOf = (line: string) => /^\[+env\.([a-z0-9-]+)[.\]]/.exec(line)?.[1];
+      const lines = vaultToml.split('\n');
+      const from = lines.findIndex((l) => envOf(l) === request.id);
+      const to = lines.findIndex((l, i) => i > from && envOf(l) !== undefined && envOf(l) !== request.id);
+      const own = from < 0 ? '' : lines.slice(from, to < 0 ? undefined : to).join('\n');
+      const vaultDb = /database_name\s*=\s*"([^"]+)"/.exec(own)?.[1];
+      if (!vaultDb) throw new Error(`no D1 database_name in [env.${request.id}] of ${TOML_PATHS.vault} — the vault's migrations cannot be applied`);
+      wrangler(['d1', 'migrations', 'apply', vaultDb, '--remote', '--env', request.id, '-c', TOML_PATHS.vault]);
       // The runtime's preflight asks the vault's /health — on a first deploy, before its address answers, it would refuse.
       await waitForHealth(`${decl().hosts.vault}/health`);
       for (const app of ['runtime', 'edge', 'homeMcp'] as App[]) deployWorker(app);
