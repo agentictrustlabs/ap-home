@@ -1,0 +1,29 @@
+{
+  "_": "spec 441 — THE ESTATE'S DECLARATION, written by the one-click builder (scripts/estate-oneclick). Its five inputs were derived from one: the name. Everything else is DERIVED (scripts/estate-shape.mts) or the town's.",
+  "id": "isl",
+  "name": "ISL-Estate",
+  "homeHost": "isl-home-lovat.vercel.app",
+  "_homeHost": "The rpId of every resident's passkey. It cannot change later without every resident enrolling again.",
+  "zone": "isl-runtime.richardpedersen3.workers.dev",
+  "_zone": "No zone of its own: the runtime's workers.dev host is where its agents answer, so it is the zone (impact-agent's altZones precedent).",
+  "town": "faithchain",
+  "kmsTenant": "isl",
+  "estateName": "isl.estate",
+  "_estateName": "The agent that IS this estate on faithchain, as faithnet.estate is faithnet's. Chosen by the person who asked for it.",
+  "hosts": {
+    "runtime": "https://isl-runtime.richardpedersen3.workers.dev",
+    "vault": "https://isl-vault.richardpedersen3.workers.dev",
+    "edge": "https://isl-edge.richardpedersen3.workers.dev",
+    "homeMcp": "https://isl-home-mcp.richardpedersen3.workers.dev"
+  },
+  "_hosts": "Where each Worker answers when there is no zone to put mcp./edge. under. deriveVars reads these (estate-shape.patch).",
+  "altZones": [],
+  "extraOrigins": [],
+  "agents": {},
+  "_extras": "This estate's own product choices. ORCHESTRATION_LLM is impact-agent's: the model the harness plans with, paid through the GEMINI_API_KEY the build installs.",
+  "extras": {
+    "ORCHESTRATION_LLM": "gemini"
+  },
+  "requestedBy": "0x3a7bc77ef3d65f2c520cd56cd76c2e1423f20753",
+  "createdBy": "createestate.faithnet.town"
+}
