@@ -40,7 +40,16 @@ export type InviteCaller = { person: string; clientId: string | null };
 
 /** Resolve the caller person SA from a Home session OR a registered relying-app id_token
  *  (same ingress as /connect/inbox — e.g. hotspot-tracker / uupg-tracker). */
-export async function callerFromInviteAuth(env: FnContext['env'], request: Request): Promise<InviteCaller | null> {
+/** Options for `callerFromInviteAuth`. `acceptLoginToken`: also accept a relying app's LOGIN id_token, the one its
+ *  sign-in returned, which carries that flow's nonce. D5 (spec 445) refuses a nonce-bearing id_token as an API bearer,
+ *  because it was minted for a flow that had one. That stays the rule for every org-membership path. The app-invite
+ *  MAILER opts in: a registered app whose people signed in with their own Home (social or passkey) holds no other
+ *  token, and the mailer only sends a link on an origin registered for that very client. A login token is accepted
+ *  only while fresh (`iat` within `maxLoginTokenAgeSec`, default one hour) and still unexpired, signature, iss and
+ *  aud verified as for any other. */
+export interface InviteAuthOptions { acceptLoginToken?: boolean; maxLoginTokenAgeSec?: number }
+
+export async function callerFromInviteAuth(env: FnContext['env'], request: Request, opts: InviteAuthOptions = {}): Promise<InviteCaller | null> {
   const auth = request.headers.get('authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) return null;
@@ -54,14 +63,25 @@ export async function callerFromInviteAuth(env: FnContext['env'], request: Reque
   }
   // Relying-app id_token (aud = registered client_id, e.g. uupg-tracker). Signature still pinned
   // to this Home's JWKS; stewardship is re-checked on-chain below — aud alone never grants control.
-  let iss: string | undefined, aud: string | undefined;
+  let iss: string | undefined, aud: string | undefined, nonce: string | undefined, iat: number | undefined;
   try {
-    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob((token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)))) as { iss?: string; aud?: string };
+    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob((token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)))) as { iss?: string; aud?: string; nonce?: unknown; iat?: unknown };
     iss = typeof payload.iss === 'string' ? payload.iss : undefined;
     aud = typeof payload.aud === 'string' ? payload.aud : undefined;
+    nonce = typeof payload.nonce === 'string' ? payload.nonce : undefined;
+    iat = typeof payload.iat === 'number' ? payload.iat : undefined;
   } catch { return null; }
   if (!iss || !issOk(iss) || !aud || !(await resolveClient(env, aud))) return null;
-  const idv = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud, expectedNonce: null /* an id_token as an API bearer has no nonce flow (spec 445 D5) */ });
+  // D5 by default: an id_token as an API bearer must carry no nonce. A caller that opted in (the app-invite mailer)
+  // also takes a fresh LOGIN token, verified against the nonce it carries. Never a stale one.
+  let expectedNonce: string | null = null;
+  if (nonce !== undefined) {
+    if (!opts.acceptLoginToken) return null;
+    const now = Math.floor(Date.now() / 1000);
+    if (iat === undefined || iat > now + 60 || now - iat > (opts.maxLoginTokenAgeSec ?? 3600)) return null;
+    expectedNonce = nonce;
+  }
+  const idv = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud, expectedNonce /* spec 445 D5: null unless this caller accepts a fresh login token */ });
   if (!idv.ok) return null;
   const sub = (idv.claims.canonical_agent_id ?? idv.claims.sub ?? '') as string;
   const person = (sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();

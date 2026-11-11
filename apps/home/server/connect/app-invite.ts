@@ -28,7 +28,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const rawReturn = (body?.returnUrl ?? '').trim();
   if (!EMAIL_RE.test(email) || !rawReturn) return json({ error: 'email + returnUrl required' }, 400);
 
-  const caller = await callerFromInviteAuth(env, request);
+  // A registered app's people may hold only their LOGIN id_token (social or passkey sign-in): accepted here while fresh,
+  // because this endpoint only mails a link on an origin registered for that same client (see InviteAuthOptions).
+  const caller = await callerFromInviteAuth(env, request, { acceptLoginToken: true });
   if (!caller) return json({ error: 'sign in at Home to send an invite' }, 401);
 
   const clientId = caller.clientId ?? (typeof body?.app === 'string' ? body.app : null);
