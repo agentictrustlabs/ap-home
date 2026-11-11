@@ -497,6 +497,9 @@ const steps: Record<string, Step> = {
       writeDecl(d);
       setVar('runtime', 'HARNESS_AGENT_SA', v.HARNESS_AGENT_SA);
       setVar('runtime', 'INTERACTIONS_SERVICE_SA', v.INTERACTIONS_SERVICE_SA);
+      // spec 445 — the delegate a person's VaultKeyAuthorization names is THIS estate's interactions agent (the vault answers
+      // `vault_server_key_unconfigured` 503 without it).
+      setVar('vault', 'VAULT_KEY_SERVER_DELEGATE', v.INTERACTIONS_SERVICE_SA);
     },
   },
   secrets: {
@@ -530,6 +533,17 @@ const steps: Record<string, Step> = {
         writeFileSync(LOCAL, `${readFileSync(LOCAL, 'utf8').replace(/\n?$/, '\n')}# the town's Pulse reads this estate's heartbeat with it\nTOWN_HEARTBEAT_TOKEN=${heartbeat}\n`, { mode: 0o600 });
       }
       putSecret('runtime', 'TOWN_HEARTBEAT_TOKEN', heartbeat);
+      // Spec 445 — three secrets the generation-4 code reads: the runtime's wake secret (shared with its container) and
+      // export digest salt, and the vault's Stage-2 rate-limit secret. Kept in the estate's local file like the heartbeat,
+      // so a resumed build installs the SAME values. (The first three test estates were built without them.)
+      for (const [app, key] of [['runtime', 'AP_RUNTIME_WAKE_SECRET'], ['runtime', 'EXPORT_DIGEST_SALT'], ['vault', 'STAGE2_RATE_LIMIT_SECRET']] as const) {
+        let value = localVars()[key];
+        if (!value) {
+          value = randomBytes(32).toString('hex');
+          writeFileSync(LOCAL, `${readFileSync(LOCAL, 'utf8').replace(/\n?$/, '\n')}${key}=${value}\n`, { mode: 0o600 });
+        }
+        putSecret(app, key, value);
+      }
     },
   },
   deploy: {

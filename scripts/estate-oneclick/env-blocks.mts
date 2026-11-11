@@ -136,7 +136,10 @@ function overridesFor(input: StampInput): Record<string, string> {
 }
 
 /** Never copied from the sibling: they are this estate's own and are written by a later step. */
-const LATER = new Set(['AKCS_RELAY_KEY_ID', 'AKCS_INTERACTIONS_KEY_ID', 'HARNESS_AGENT_SA', 'INTERACTIONS_SERVICE_SA']);
+// Set by the run once this estate's own agents exist — never copied from the sibling. VAULT_KEY_SERVER_DELEGATE (spec 445)
+// is the estate's OWN interactions service agent: a copy of faithnet's would make every person's vault-key authorization
+// name another estate's agent as its delegate.
+const LATER = new Set(['AKCS_RELAY_KEY_ID', 'AKCS_INTERACTIONS_KEY_ID', 'HARNESS_AGENT_SA', 'INTERACTIONS_SERVICE_SA', 'VAULT_KEY_SERVER_DELEGATE']);
 
 function stampVars(body: string[], input: StampInput, dropped: string[]): string[] {
   const overrides = overridesFor(input);
@@ -199,7 +202,9 @@ export function stampEnvBlock(toml: string, input: StampInput): StampResult {
     if (suffix === '.routes') { routes += 1; continue; }
     if (suffix === '.send_email') { dropped.push(`[${s.name}] — mail rail (no zone of its own)`); continue; }
     if (suffix === '.containers') { dropped.push(`[${s.name}] — container (faithnet's choice; costs money, needs an image)`); continue; }
-    if (suffix === '.triggers') { dropped.push(`[${s.name}] — cron (faithnet's cache warmer)`); continue; }
+    // The RUNTIME's cron is faithnet's cache warmer (a choice); the VAULT's is housekeeping every estate needs — the
+    // daily JTI-ledger prune (spec 445, 2026-11-11: faithnet's D1 filled its 10 GB cap without it). Keep the vault's.
+    if (suffix === '.triggers' && input.app !== 'vault') { dropped.push(`[${s.name}] — cron (faithnet's cache warmer)`); continue; }
 
     if (suffix === '.vars') { out.push(header, ...stampVars(body, input, dropped)); continue; }
 
