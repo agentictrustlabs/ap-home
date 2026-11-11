@@ -682,7 +682,9 @@ const faithImpact: WhiteLabelConfig = {
       // took 200 USDC at the moment of approval, for nothing, and the player then paid a second 200
       // for the real seat. `pull` mints the mandate and moves no money.
       paymentConfig: {
-        payee: '0xf6F48aF1f645c70339b2FCF4CD36F5d6c5325671',
+        // Generation 4 (spec 445, 2026-11-11): the Poker Site Treasury re-chartered by pokernight's provision-house.mts
+        // (gen-1 0xf6F48aF1… is orphaned history).
+        payee: '0x989121B74c96dF8Cc82beebf4C46Ec0C6D6C09f3',
         // THE SHEQEL, deployed on faithchain — the card room's own coin and the only currency it
         // settles in (`contracts/src/Sheqel.sol` in the pokernight repo). This line and
         // `new_member.currency.asset` below MUST AGREE: `memberCurrencyPlan` refuses the whole
@@ -700,7 +702,7 @@ const faithImpact: WhiteLabelConfig = {
         // filled in the delegate stays the payee, which is byte-for-byte what `mode: 'pull'` minted
         // before this field existed. It MUST NOT be the shared `delegate` above — spend authority
         // granted to that address is granted to every registry entry that names it.
-        redeemer: '0x0347e808a0bB7a7a7086a29d853E799f351C04DD',
+        redeemer: '0x31acE8b3B26Bff9C29d09C6347824642DA171784', // gen 4 (spec 445); gen-1 0x0347e808… orphaned
       },
       // What a player needs to exist BEFORE the card room can do anything with them — declared here
       // so the Home sets it up during account creation instead of sending them on an errand.
