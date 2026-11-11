@@ -45,6 +45,8 @@ async function usdcBalance(deps: HarnessDeps, token: Address, who: Address): Pro
  * cannot do this" is usually "…but this account can".
  */
 async function paymentPrecondition(input: PreconditionInput): Promise<string | null> {
+  const counterparty = await payeePrecondition(input);
+  if (counterparty) return counterparty;
   const token = String(input.args.asset ?? input.env.MOCK_USDC ?? '').toLowerCase() as Address;
   const payer = String(input.args.payer ?? input.addressee ?? '').toLowerCase() as Address;
   // The SAME parser the capability uses, or the check is answering a different question than the act:
@@ -87,6 +89,48 @@ async function paymentPrecondition(input: PreconditionInput): Promise<string | n
 }
 
 const deps_hasResolver = (d: HarnessDeps): boolean => typeof d.resolveName === 'function';
+
+/** Is there an account at this address ON THIS CHAIN? `true` (code answered, even with a revert), `false` (no code —
+ *  the call returned no data), `null` (could not tell: the endpoint failed). A Smart Agent answers `entryPoint()`. */
+const ENTRY_POINT_ABI = [{ type: 'function', name: 'entryPoint', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }] as const;
+async function accountHere(deps: HarnessDeps, who: Address): Promise<boolean | null> {
+  try { await deps.readContract({ address: who, abi: ENTRY_POINT_ABI as never, functionName: 'entryPoint', args: [] }); return true; } catch (e) {
+    for (let c: unknown = e, i = 0; c && i < 6; c = (c as { cause?: unknown }).cause, i++) {
+      const name = String((c as { name?: string }).name ?? '');
+      if (name === 'ContractFunctionZeroDataError' || /returned no data \("0x"\)/.test(String((c as { message?: string }).message ?? ''))) return false;
+      if (name === 'ContractFunctionRevertedError') return true;
+    }
+    return null;
+  }
+}
+
+/**
+ * THE COUNTERPARTY, before a signature (spec 373's value rail, read early). Money moves between treasuries ON ONE CHAIN:
+ * the invoker refuses any other payee at execute time (`refuseUnlessTreasury`), but only after the person was walked
+ * through a mandate signature for a payment that could never land. The case that made this visible (ap-federation
+ * gate:pay-outward, 2026-11-11): maya on hopechain asked to pay a faithnet treasury that lives on faithchain — an
+ * address that is NOBODY's on hopechain — and the run parked for authority. The question is asked of THIS chain only,
+ * so an address that happens to be an account on another chain (CREATE addresses coincide across chains) is judged by
+ * what it is HERE. Unreadable ⇒ say nothing; the invoker and the chain still decide.
+ */
+async function payeePrecondition(input: PreconditionInput): Promise<string | null> {
+  const { deps, env } = input;
+  if (!deps.agentTypeOf) return null;
+  const raw = String(input.args.payee ?? '').trim();
+  const payee = (/^0[xX][0-9a-fA-F]{40}$/.test(raw) ? raw
+    : raw.includes('.') && deps.resolveName ? ((await deps.resolveName(raw.toLowerCase()).catch(() => null)) ?? '') : '').toLowerCase() as Address;
+  if (!/^0x[0-9a-f]{40}$/.test(payee)) return null; // nothing to judge yet — the invoker names what is missing
+  const type = (await deps.agentTypeOf(payee).catch(() => null))?.toLowerCase() ?? null;
+  if (type === 'treasury') return null;
+  const chain = `eip155:${env.CHAIN_ID}`;
+  const label = (await deps.nameOf?.(payee).catch(() => null)) ?? payee;
+  if (type === 'person') return `${label} is a person on ${chain}, and money moves between treasuries — a person is who a payment is FOR, an account is where it GOES. Name their treasury. Nothing was authorized.`;
+  if (type) return `${label} is ${type === 'org' ? 'an organization' : `a ${type}`} on ${chain}, and money moves between treasuries — name the treasury it charters. Nothing was authorized.`;
+  const here = await accountHere(deps, payee);
+  if (here === false) return `${payee} is not an account on ${chain}, where this payment would be made — value does not cross chains, so nothing can be paid to it from here (a treasury on another chain is paid from a treasury on that chain). Nothing was authorized.`;
+  if (here === true) return `${label} has no agent type recorded on ${chain}, so it cannot be shown to be a treasury — money only moves between treasuries. Nothing was authorized.`;
+  return null;
+}
 
 /**
  * Slice S4 — a Library read grant that cannot be issued (no such document or folder, a delegate that is not an agent or is

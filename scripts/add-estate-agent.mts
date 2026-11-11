@@ -24,6 +24,10 @@ import { AgentAccountClient, buildExecuteCallData } from '@agenticprimitives/age
 import { buildRegisterProfileCall } from '@agenticprimitives/agent-profile';
 import { createPublicClient, decodeEventLog, encodeFunctionData, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
+// Addresses default from the pinned deployment record (DEPLOYMENT, default faithchain), never a hard-coded generation:
+// a generation-1 literal here kept chartering against a factory the estate had left (spec 445 estate reset, 2026-11-11).
+const DEP = getDeployments((process.env.DEPLOYMENT ?? 'faithchain') as never) as unknown as Record<string, `0x${string}`>;
 
 const arg = (k: string): string | undefined => {
   const i = process.argv.indexOf(`--${k}`);
@@ -35,23 +39,26 @@ const dry = process.argv.includes('--dry-run');
 if (!estate || !home) { console.error('usage: add-estate-agent.mts --estate <id> --home <https://…> [--dry-run]'); process.exit(1); }
 if (!/^https:\/\/[^\s/]+/.test(home)) { console.error('--home must be an https origin'); process.exit(1); }
 
-const file = `.estate-${estate}.local`;
+// ESTATE_ENV_FILE: the estate's keys live in the operator checkout, not in a worktree. RPC_URL / CHAIN_ID /
+// RELAY_PRIVATE_KEY_FILE in the process env win over the file (the relay must hold gas on the chain it charters on).
+const file = process.env.ESTATE_ENV_FILE ?? `.estate-${estate}.local`;
 if (!existsSync(file)) { console.error(`${file} not found — this estate's keys are not on this machine, so its agent cannot sign here`); process.exit(1); }
 const env = Object.fromEntries(
   readFileSync(file, 'utf8').split('\n').filter((l) => l.includes('=') && !l.trim().startsWith('#'))
     .map((l) => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^'(.*)'$/, '$1')]; }),
 ) as Record<string, string>;
 
-const RPC = env.RPC_URL;
-const relay = env.A2A_MASTER_PRIVATE_KEY as Hex;
+const RPC = process.env.RPC_URL ?? env.RPC_URL;
+const relayFile = (process.env.RELAY_PRIVATE_KEY_FILE ?? '').replace(/^~/, process.env.HOME ?? '');
+const relay = (relayFile ? readFileSync(relayFile, 'utf8').trim() : env.A2A_MASTER_PRIVATE_KEY) as Hex;
 const interactions = env.A2A_INTERACTIONS_SESSION_PRIVATE_KEY as Hex;
 if (!RPC || !relay || !interactions) { console.error(`${file} does not carry RPC_URL + the relay and interactions keys`); process.exit(1); }
 
-const CHAIN_ID = Number(env.CHAIN_ID ?? 34348);
-const ENTRY_POINT = '0xf7855250B3363AB7649B10957d8908A9AFcdD4B5' as Address;
-const FACTORY = '0x464eEe7518c3c97DA570592481329E0627E9a3B8' as Address;
-const PROFILE_RESOLVER = (env.PROFILE_RESOLVER ?? '0xB03F7C06ad3274F584AB72794406D639c02A45e1') as Address;
-const PAYMASTER = (env.PAYMASTER ?? '0xbd93fEC6910ffD74F14709188b5a9B6C6965b2a7') as Address;
+const CHAIN_ID = Number(process.env.CHAIN_ID ?? env.CHAIN_ID ?? 34348);
+const ENTRY_POINT = DEP.entryPoint as Address;
+const FACTORY = DEP.agentAccountFactory as Address;
+const PROFILE_RESOLVER = (env.PROFILE_RESOLVER ?? DEP.agentProfileResolver) as Address;
+const PAYMASTER = (env.PAYMASTER ?? DEP.smartAgentPaymaster) as Address;
 const ATL_HOMEPAGE = keccak256(toBytes('atl:homepage'));
 
 const RESOLVER_ABI = [

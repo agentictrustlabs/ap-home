@@ -23,12 +23,14 @@ const flag = (n: string) => (args.includes(`--${n}`) ? args[args.indexOf(`--${n}
 const estate = flag('estate'); const signer = (flag('signer') ?? '').toLowerCase(); const dry = args.includes('--dry-run');
 if (!estate || !/^0x[0-9a-f]{40}$/.test(signer)) { console.error('usage: set-projection-signer.mts --estate <id> --signer 0x… [--dry-run]'); process.exit(1); }
 
-const file = `.estate-${estate}.local`;
+// ESTATE_ENV_FILE / RPC_URL / CHAIN_ID / RELAY_PRIVATE_KEY_FILE as in add-estate-agent.mts.
+const file = process.env.ESTATE_ENV_FILE ?? `.estate-${estate}.local`;
 if (!existsSync(file)) { console.error(`${file} not found — this estate's keys are not on this machine, so its agent cannot sign here`); process.exit(1); }
 const env = Object.fromEntries(readFileSync(file, 'utf8').split('\n').filter((l) => l.includes('=') && !l.trim().startsWith('#')).map((l) => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^'(.*)'$/, '$1')]; })) as Record<string, string>;
-const RPC = env.RPC_URL; const relay = env.A2A_MASTER_PRIVATE_KEY as Hex; const interactions = env.A2A_INTERACTIONS_SESSION_PRIVATE_KEY as Hex;
+const relayFile = (process.env.RELAY_PRIVATE_KEY_FILE ?? '').replace(/^~/, process.env.HOME ?? '');
+const RPC = process.env.RPC_URL ?? env.RPC_URL; const relay = (relayFile ? readFileSync(relayFile, 'utf8').trim() : env.A2A_MASTER_PRIVATE_KEY) as Hex; const interactions = env.A2A_INTERACTIONS_SESSION_PRIVATE_KEY as Hex;
 if (!RPC || !relay || !interactions) { console.error(`${file} does not carry RPC_URL + the relay and interactions keys`); process.exit(1); }
-const CHAIN_ID = Number(env.CHAIN_ID ?? 34348);
+const CHAIN_ID = Number(process.env.CHAIN_ID ?? env.CHAIN_ID ?? 34348);
 const ENTRY_POINT = DEP.entryPoint as Address;
 const FACTORY = DEP.agentAccountFactory as Address;
 const PROFILE_RESOLVER = (env.PROFILE_RESOLVER ?? DEP.agentProfileResolver) as Address;
