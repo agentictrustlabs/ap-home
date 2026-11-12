@@ -6,7 +6,7 @@ import type { Hex } from '@agenticprimitives/types';
 import type { SignHash } from '../connect-client';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
 
-export interface SentInvitation { token: string; email: string; expiresAt: number; acceptedBy?: string | null }
+export interface SentInvitation { token: string; email: string; createdAt?: number; expiresAt: number; acceptedBy?: string | null; acceptedAt?: number }
 
 /** One of the person's own sent invitations, by its token — the Home's list is the only place its email is kept. */
 export async function sentInvitation(session: { token: string }, token: string): Promise<SentInvitation | null> {
