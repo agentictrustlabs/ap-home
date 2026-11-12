@@ -636,6 +636,17 @@ const steps: Record<string, Step> = {
       // create databases itself). Connecting it to the Home is what writes the Home's KV_REST_API_* settings.
       await homeStore();
       if (!v.BROKER_PRIVATE_JWK || !v.BROKER_KID) throw new Error('the custody file has no Home signing key — re-run from agents');
+      // Demo people to sign in as (scripts/estate-oneclick/demo-people.mts): until Google or email is set up for this Home,
+      // they are the only way in. Their keys go straight into the Home's DEMO_PERSONA_KEYS secret. Paid by the town's funder.
+      const funder = process.env.ESTATE_FUNDER_PRIVATE_KEY;
+      if (funder || DRY) {
+        ctx.sh('npx', ['tsx', 'scripts/estate-oneclick/demo-people.mts', '--estate', request.id, '--project', state.vercelProjectId ?? names.home], {
+          env: { RPC_URL: v.RPC_URL, FUNDER_PRIVATE_KEY: funder ?? 'dry' }, // VERCEL_TOKEN / VERCEL_TEAM_ID come from the build's own environment
+          secret: true,
+        });
+      } else {
+        state.notes.push('No demo people: this build has no funder key to create them. Sign-in needs Google or email set up on the Home.');
+      }
       const sensitive: Record<string, string> = {
         RPC_URL: v.RPC_URL, A2A_CUSTODY_URL: d.hosts.runtime, A2A_CUSTODY_BRIDGE_SECRET: v.A2A_CUSTODY_BRIDGE_SECRET ?? '',
         BROKER_PRIVATE_JWK: v.BROKER_PRIVATE_JWK, ...(v.DEMO_SIGNER_SECRET ? { DEMO_SIGNER_SECRET: v.DEMO_SIGNER_SECRET } : {}),
@@ -653,7 +664,10 @@ const steps: Record<string, Step> = {
         NEXT_PUBLIC_INTERACTIONS_SERVICE_SA: d.agents.interactions, NEXT_PUBLIC_DISCOVERY_A2A_URL: TOWN.discoveryA2a,
         NEXT_PUBLIC_TOWN_NAMING_ORIGIN: TOWN.naming, NEXT_PUBLIC_AGENT_NAME_PARENTS: TOWN.nameRoots.join(','),
         // runbook §5 ⚠ — every other default is the first estate's; this one strands a person on sign-out if left.
-        NEXT_PUBLIC_LOGOUT_RP_APPS: 'none', NEXT_PUBLIC_ENABLE_DEMO_PEOPLE: 'false',
+        NEXT_PUBLIC_LOGOUT_RP_APPS: 'none',
+        // Google refuses a Home it has not been told about, so a new Home offers email only until Google is set up
+        // (then delete this setting on the Vercel project). NEXT_PUBLIC_ENABLE_DEMO_PEOPLE is set by demo-people.mts.
+        NEXT_PUBLIC_CREDENTIAL_METHODS: 'email',
       };
       const vars = [
         ...Object.entries(sensitive).filter(([, val]) => val).map(([key, value]) => ({ key, value, type: 'sensitive', target: ['production', 'preview'] })),

@@ -1,0 +1,68 @@
+# DEMO PEOPLE FOR AN ESTATE THAT IS ALREADY BUILT. New estates get them in the one-click build's Home step; this is
+# for one built before that (scripts/estate-oneclick/demo-people.mts says what it makes and where the keys go).
+#
+# The chain write uses a short-lived gateway token made here and always deleted, and the town's funder pays.
+# A Home that already has demo people keeps them; only the settings are refreshed and the Home rebuilt.
+name: estate-demo-people
+
+on:
+  workflow_dispatch:
+    inputs:
+      estate_id: { description: 'The estate''s short name (as on the createestate page)', required: true }
+
+concurrency:
+  group: estate-oneclick-${{ inputs.estate_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  demo-people:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: estate-oneclick
+    steps:
+      - name: Check the input is an id and nothing else
+        env: { ESTATE_ID: '${{ inputs.estate_id }}' }
+        run: '[[ "$ESTATE_ID" =~ ^[a-z][a-z0-9-]{1,30}$ ]] || { echo "not an estate id"; exit 1; }'
+
+      - uses: actions/checkout@v4
+      - name: Check out ap-town (its chain gateway holds the tokens)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.AP_TOWN_REPO || 'agentictrustlabs/ap-town' }}
+          path: ap-town
+          token: ${{ secrets.AP_TOWN_PUSH_TOKEN }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Install ap-home
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Only for an estate this town built
+        env: { ESTATE_ID: '${{ inputs.estate_id }}' }
+        run: test -f "estates/${ESTATE_ID}.estate.json" || { echo "no estates/${ESTATE_ID}.estate.json on master"; exit 1; }
+
+      - name: Make the demo people
+        env:
+          ESTATE_ID: ${{ inputs.estate_id }}
+          TOWN: ${{ vars.TOWN || 'faithchain' }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          FUNDER_PRIVATE_KEY: ${{ secrets.ESTATE_FUNDER_PRIVATE_KEY }}
+        run: |
+          P="scripts/estate-oneclick/towns/${TOWN}.json"
+          GW_DIR="ap-town/$(jq -r .chainGateway.dir "$P")"; GW_ENV=$(jq -r .chainGateway.env "$P"); GATEWAY=$(jq -r .chain.gateway "$P")
+          TOKEN=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
+          HASH=$(printf %s "$TOKEN" | sha256sum | cut -d' ' -f1)
+          echo "::add-mask::$TOKEN"
+          cleanup() { (cd "$GW_DIR" && npx -y wrangler@4 kv key delete --binding TOKENS --env "$GW_ENV" --remote "t:$HASH" >/dev/null 2>&1) || echo "::warning::could not delete the temporary gateway token t:$HASH"; }
+          trap cleanup EXIT
+          (cd "$GW_DIR" && npx -y wrangler@4 kv key put --binding TOKENS --env "$GW_ENV" --remote "t:$HASH" "{\"app\":\"${ESTATE_ID}-demo-people\",\"readRps\":10,\"writeRps\":10}" >/dev/null)
+          sleep 10 # a new KV key takes a moment to reach the gateway
+          RPC_URL="${GATEWAY}/?k=${TOKEN}" npx tsx scripts/estate-oneclick/demo-people.mts --estate "$ESTATE_ID" --redeploy --repo "$GITHUB_REPOSITORY"
