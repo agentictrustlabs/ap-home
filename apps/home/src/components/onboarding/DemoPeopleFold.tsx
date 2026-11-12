@@ -51,7 +51,7 @@ export function DemoPeopleFold({ enroll, appName, onSession }: {
       <p style={{ margin: '.5rem 0' }}>
         {enroll
           ? `Walkthrough only — each is a real Home this stack seeded. Pick one to continue to ${appName ?? 'the app'} as them; they authorize it on the next screen.`
-          : 'Local walkthrough only — each is a real Home this stack seeded. Signing in as one opens THEIR portal session on this browser.'}
+          : 'For trying this Home — each is a real demo person with a Home here. Signing in as one opens THEIR Home on this browser.'}
       </p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
         {personas.map((p) => (

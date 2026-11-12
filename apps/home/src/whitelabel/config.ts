@@ -69,6 +69,16 @@ export function gatherSurfaceOrigins(plural: string | undefined, singular: strin
   return out;
 }
 
+type CredentialMethod = WhiteLabelConfig['onboarding']['credentialMethods'][number];
+const KNOWN_METHODS: readonly CredentialMethod[] = ['passkey', 'wallet', 'google', 'youversion', 'email', 'phone'];
+/** The ways in a Home offers. `NEXT_PUBLIC_CREDENTIAL_METHODS=email` (comma-separated) replaces the default — an estate's
+ *  Home whose Google client is not set up drops Google, since Google refuses a Home it has not been told about. Unknown
+ *  entries are ignored; a value naming none falls back to the default. */
+export function credentialMethods(raw: string | undefined, defaults: readonly CredentialMethod[]): CredentialMethod[] {
+  const picked = (raw ?? '').split(',').map((m) => m.trim()).filter((m): m is CredentialMethod => (KNOWN_METHODS as readonly string[]).includes(m));
+  return picked.length ? [...new Set(picked)] : [...defaults];
+}
+
 /** The footer links, from `NEXT_PUBLIC_FOOTER_LINKS` (a JSON array of `{label, href}`) or the defaults. A value
  *  that does not parse to such an array is refused loudly at build, never silently swapped for the defaults. */
 export function footerLinks(raw: string | undefined, defaults: ReadonlyArray<{ label: string; href: string }>): ReadonlyArray<{ label: string; href: string }> {
@@ -109,7 +119,7 @@ const faithImpact: WhiteLabelConfig = {
   onboarding: {
     // The ways in, in the order the front door offers them (2026-09-13: Google · email; wallet, passkey, phone
     // and YouVersion are OFF — a passkey cannot sign on faithchain, and the door stays two doors, both nameless).
-    credentialMethods: ['google', 'email'],
+    credentialMethods: credentialMethods(process.env.NEXT_PUBLIC_CREDENTIAL_METHODS, ['google', 'email']),
   },
   services: { devices: true, connectedApps: true },
   // The stewardship hub: what the member helps oversee / manage / protect from their home.
