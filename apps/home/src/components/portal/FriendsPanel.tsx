@@ -13,7 +13,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
-import { Section, List, Empty, ErrorNote, Note, Button, LinkButton, Chip, Meta, FilterChip, Avatar } from '../../ui';
+import { Section, List, Empty, ErrorNote, Note, Button, LinkButton, Chip, Meta, FilterChip, Avatar, useReadyReport } from '../../ui';
+import { WorkingBar } from '../onboarding/WorkingBar';
 import { AgentName } from '../shared/AgentName';
 import { askCommand } from '../../home/ask-command';
 import { readFriendsThroughHarness, FRIEND_TYPES, FRIEND_TYPE_WORDS, type FriendType, type FriendsView } from '../../home/friends-harness';
@@ -22,7 +23,7 @@ import { searchAgentsKb } from '../../lib/agent-search';
 import { kindOfName } from '@agenticprimitives/ontology/participant-vocabulary';
 import { whitelabel } from '../../whitelabel/config';
 import { activateInteractionsIfNeeded, resolveVia, signHashFor } from '../../home/onboarding';
-import { signInvitationHalf } from '../../home/friend-invitation';
+import { signInvitationHalf, type SentInvitation } from '../../home/friend-invitation';
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '');
@@ -69,6 +70,10 @@ export function FriendsPanel() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteNote, setInviteNote] = useState('');
   const [inviteState, setInviteState] = useState<{ busy: boolean; done?: string; error?: string; half?: { token: string; expiresAt: number; state: 'ask' | 'signing' | 'done' } }>({ busy: false });
+  // Your invitations still out (the Home's list, GET /connect/friend-invite/email) — an invitation sent is never out of sight.
+  const [sentInvites, setSentInvites] = useState<SentInvitation[] | null>(null);
+  const [inviteAct, setInviteAct] = useState<{ token: string; what: 'resend' | 'cancel' } | null>(null);
+  const [inviteActNote, setInviteActNote] = useState('');
   // Where each friend is right now (the runtime's /presence/friends); this page beats so friends see "at their Home".
   const [presence, setPresence] = useState<Record<string, Array<{ app: string; label?: string; at: number }>>>({});
 
@@ -79,6 +84,19 @@ export function FriendsPanel() {
     else { const behind = playbookBehind(r.error); setErr(behind ? playbookBehindWords(behind.toolId) : r.error); }
   }, [session, agentAddress]);
   useEffect(() => { void load(); }, [load]);
+  const loadSent = useCallback(async () => {
+    if (!session) return;
+    try {
+      const r = await fetch('/connect/friend-invite/email', { headers: { authorization: `Bearer ${session.token}` } });
+      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; sent?: SentInvitation[] };
+      if (d.ok) setSentInvites(d.sent ?? []);
+    } catch { /* the list is a courtesy beside the act; the act's own result is what is shown */ }
+  }, [session]);
+  useEffect(() => { void loadSent(); }, [loadSent]);
+  // THE PAGE SAYS IT IS WORKING — the thin bar under the topbar and "Reading…" — while anything here is out.
+  const signing = inviteState.half?.state === 'signing';
+  useReadyReport('friends-read', !!session && !view && !err);
+  useReadyReport('friend-invite', inviteState.busy || signing || !!inviteAct);
   // The flyout's run finishes elsewhere; read again when it says something happened.
   useEffect(() => {
     const on = () => { void load(); };
@@ -177,8 +195,8 @@ export function FriendsPanel() {
     askCommand({ toolId: 'person.friend.add', args: { friend: agent, type }, message: type === 'friend' ? `add ${label(agent, name)} as a friend` : `add ${label(agent, name)} as a friend (${type})`, ...(name ? { labels: { [agent]: name } } : {}) });
   };
   // Your half, signed now, so whoever accepts the invitation is your friend at once (src/home/friend-invitation.ts).
-  const signHalf = async () => {
-    const half = inviteState.half;
+  const signHalf = async (given?: { token: string; expiresAt: number }) => {
+    const half = given ? { ...given, state: 'ask' as const } : inviteState.half;
     if (!session || !agentAddress || !half) return;
     setInviteState((s) => ({ ...s, error: undefined, half: { ...half, state: 'signing' } }));
     try {
@@ -186,7 +204,7 @@ export function FriendsPanel() {
       const out = await signInvitationHalf({ session, token: half.token, expiresAt: half.expiresAt, signHash });
       if (!out.ok) throw new Error(out.error);
       setInviteState((s) => ({ ...s, half: { ...half, state: 'done' } }));
-    } catch (e) { setInviteState((s) => ({ ...s, error: e instanceof Error ? e.message : String(e), half: { ...half, state: 'ask' } })); }
+    } catch (e) { setInviteState((s) => ({ ...s, error: `Your invitation went out, but your half was not saved: ${e instanceof Error ? e.message : String(e)}. Try again below.`, half: { ...half, state: 'ask' } })); }
   };
   const remove = (agent: string, name: string | null, words: (who: string) => string) => {
     askCommand({ toolId: 'person.friend.remove', args: { friend: agent }, message: words(label(agent, name)), ...(name ? { labels: { [agent]: name } } : {}) });
@@ -204,12 +222,31 @@ export function FriendsPanel() {
       const d = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; delivery?: string; token?: string; expiresAt?: string };
       if (!r.ok || !d.ok) throw new Error(d.error ?? `could not send (${r.status})`);
       const expiresAt = d.expiresAt ? Date.parse(d.expiresAt) : NaN;
+      const half = d.token && Number.isFinite(expiresAt) ? { token: d.token, expiresAt } : null;
       setInviteState({
         busy: false, done: d.delivery === 'sent' ? `Invitation sent to ${email}.` : `This Home doesn't send mail, so nothing went out to ${email}.`,
-        ...(d.token && Number.isFinite(expiresAt) ? { half: { token: d.token, expiresAt, state: 'ask' as const } } : {}),
+        ...(half ? { half: { ...half, state: 'signing' as const } } : {}),
       });
       setInviteEmail(''); setInviteNote('');
+      void loadSent();
+      // ONE ACT: sending the invitation also signs your half, so whoever accepts is your friend at once.
+      if (half) await signHalf(half);
     } catch (e) { setInviteState({ busy: false, error: e instanceof Error ? e.message : String(e) }); }
+  };
+  const actOnInvite = async (token: string, what: 'resend' | 'cancel', email: string) => {
+    if (!session) return;
+    setInviteAct({ token, what }); setInviteActNote('');
+    try {
+      const r = await fetch('/connect/friend-invite/email', {
+        method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+        body: JSON.stringify({ token, [what]: true }),
+      });
+      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!r.ok || !d.ok) throw new Error(d.error ?? `could not ${what} (${r.status})`);
+      setInviteActNote(what === 'resend' ? `Sent again to ${email}.` : `Invitation to ${email} cancelled.`);
+      await loadSent();
+    } catch (e) { setInviteActNote(e instanceof Error ? e.message : String(e)); }
+    finally { setInviteAct(null); }
   };
 
   if (!session || !agentAddress) return null;
@@ -324,14 +361,16 @@ export function FriendsPanel() {
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
                 <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="their email" aria-label="Their email" style={{ flex: '1 1 220px', minWidth: 0 }} />
                 <input value={inviteNote} onChange={(e) => setInviteNote(e.target.value)} placeholder="a short note (optional)" aria-label="A note" style={{ flex: '2 1 240px', minWidth: 0 }} />
-                <Button variant="primary" onClick={() => void sendInvite()} disabled={inviteState.busy || !inviteEmail.trim()}>{inviteState.busy ? 'Sending…' : 'Send invitation'}</Button>
+                <Button variant="primary" onClick={() => void sendInvite()} disabled={inviteState.busy || signing || !inviteEmail.trim()}>{inviteState.busy ? 'Sending…' : 'Send invitation'}</Button>
               </div>
-              <Meta>The email comes from you. When they join, they can add you — then you’ll see their request here.</Meta>
+              <Meta>The email comes from you. When they accept, you become friends — no second step.</Meta>
+              {inviteState.busy && <WorkingBar label="Sending your invitation…" />}
+              {signing && <WorkingBar label="Saving your half, so you are friends the moment they accept — confirm with your passkey if asked…" />}
               {inviteState.done && <Note>{inviteState.done}</Note>}
-              {inviteState.half && inviteState.half.state !== 'done' && (
+              {inviteState.half && inviteState.half.state === 'ask' && (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <Meta>Be friends the moment they accept, with nothing more to do later?</Meta>
-                  <Button size="sm" variant="primary" onClick={() => void signHalf()} disabled={inviteState.half.state === 'signing'} data-testid="invite-half-yes">{inviteState.half.state === 'signing' ? 'Saving…' : 'Yes, be friends when they accept'}</Button>
+                  <Button size="sm" variant="primary" onClick={() => void signHalf()} data-testid="invite-half-yes">Yes, be friends when they accept</Button>
                 </div>
               )}
               {inviteState.half?.state === 'done' && <Note>You will be friends when they accept.</Note>}
@@ -347,6 +386,35 @@ export function FriendsPanel() {
               <Person key={r.agent} agent={r.agent} name={r.name} testId={`sent-${r.agent}`}
                 line={`Waiting for them to accept · sent ${day(r.since)}`}
                 side={<Button size="sm" variant="ghost" onClick={() => remove(r.agent, r.name, (w) => `cancel my friend request to ${w}`)}>Cancel</Button>} />
+            ))}
+          </List>
+        </Section>
+      )}
+
+      {sentInvites && sentInvites.length > 0 && (
+        <Section title="Invitations you sent" count={sentInvites.length} testId="friend-invites-sent">
+          {inviteAct && <WorkingBar label={inviteAct.what === 'resend' ? 'Sending it again…' : 'Cancelling…'} />}
+          {inviteActNote && <Note>{inviteActNote}</Note>}
+          <List>
+            {[...sentInvites].reverse().map((s) => (
+              <div className="ui-row" key={s.token} data-testid={`invite-${s.token}`}>
+                <div className="ui-row-main">
+                  <div className="ui-row-title">{s.email}</div>
+                  <div className="ui-row-meta">
+                    {s.acceptedBy
+                      ? <>Accepted by <AgentName address={s.acceptedBy} />{s.acceptedAt ? ` · ${day(new Date(s.acceptedAt).toISOString())}` : ''}</>
+                      : <>Waiting for them to accept · expires {day(new Date(s.expiresAt).toISOString())}</>}
+                  </div>
+                </div>
+                <div className="ui-row-side" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  {s.acceptedBy
+                    ? <Chip tone="ok">Accepted</Chip>
+                    : <>
+                        <Button size="sm" disabled={!!inviteAct} onClick={() => void actOnInvite(s.token, 'resend', s.email)}>Send again</Button>
+                        <Button size="sm" variant="ghost" disabled={!!inviteAct} onClick={() => void actOnInvite(s.token, 'cancel', s.email)}>Cancel</Button>
+                      </>}
+                </div>
+              </div>
             ))}
           </List>
         </Section>
