@@ -106,6 +106,18 @@ describe('/connect/friend-invite', () => {
     const res = (await (await post({ email: 'naomi@example.org' }, sessions[RUTH]!)).json()) as { token: string };
     expect((await post({ token: res.token, claim: true }, sessions[RUTH]!)).status).toBe(400);
 
+    // SENT TO AN ADDRESS: whoever is signed in on the browser that opened the link is not its person. Boaz (no
+    // verified naomi@ address) is told so and nothing is claimed; the lookup says the invitation is not for him.
+    const wrong = await post({ token: res.token, claim: true }, sessions[BOAZ]!);
+    expect(wrong.status).toBe(403);
+    expect(((await wrong.json()) as { wrongAccount?: boolean }).wrongAccount).toBe(true);
+    expect(((await (await get(`?token=${res.token}`, sessions[BOAZ]!)).json()) as { forYou?: boolean }).forYou).toBe(false);
+    expect(((await (await get(`?token=${res.token}`, null)).json()) as { forYou?: boolean; accepted: boolean })).toMatchObject({ accepted: false });
+    // Naomi's verified address is hers (an email code or Google sign-in records it).
+    const { recordEmailOwner } = await import('../../src/lib/kv-indexer');
+    await recordEmailOwner(env.AUTH_CODES, 'naomi@example.org', `eip155:84532:${NAOMI}` as never);
+    expect(((await (await get(`?token=${res.token}`, sessions[NAOMI] ?? await homeSession(NAOMI))).json()) as { forYou?: boolean }).forYou).toBe(true);
+
     const claimed = (await (await post({ token: res.token, claim: true }, await readerIdToken(NAOMI))).json()) as { claimed: boolean; from: string };
     expect(claimed).toMatchObject({ claimed: true, from: RUTH });
     const taken = (await (await post({ token: res.token, claim: true }, sessions[BOAZ]!)).json()) as { claimed: boolean };
