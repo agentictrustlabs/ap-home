@@ -172,6 +172,13 @@ export async function ownersOfEmailHash(kv: KvLike, hash: string): Promise<Canon
   return agents.filter((_, i) => findable[i]);
 }
 
+/** EVERY agent a verified address belongs to — owners and sign-in facets, findable or not. For checking that the person
+ *  accepting something sent to an address IS that address's person (an invitation), never for finding anyone. */
+export async function agentsOfEmailHash(kv: KvLike, hash: string): Promise<string[]> {
+  const links = [...(await readLinks(kv, emailOwnerKey(hash))), ...(await readLinks(kv, `facet:email:${hash}`))];
+  return [...new Set(links.map((l) => (String(l.agent).match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? String(l.agent)).toLowerCase()))];
+}
+
 /** Hash-keyed variants for the invite magic-link path — the redeeming server holds only the invited
  *  email's SHA-256 (blast-zone: the raw address was never stored), so it reads/writes the facet by hash.
  *  Identical to `readEmailFacet`/`recordEmailFacet` otherwise (the hash IS the facet key). */

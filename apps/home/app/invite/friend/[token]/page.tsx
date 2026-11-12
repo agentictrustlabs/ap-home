@@ -10,7 +10,7 @@ import { EmailAuthCard } from '../../../../src/components/portal/EmailAuthCard';
 import { BrandShield } from '../../../../src/components/shared/BrandShield';
 import { AgentName } from '../../../../src/components/shared/AgentName';
 
-interface Invite { from: string; fromName: string | null; note: string | null; expiresAt: string }
+interface Invite { from: string; fromName: string | null; note: string | null; expiresAt: string; accepted?: boolean; forYou?: boolean }
 
 export default function FriendInvitePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
@@ -18,25 +18,44 @@ export default function FriendInvitePage({ params }: { params: Promise<{ token: 
   const [invite, setInvite] = useState<Invite | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [added, setAdded] = useState(false);
+  // Signed in as an account the invitation was NOT sent to: confirm the invited email (opens that email's own Home),
+  // or — "this is me" — add that email to the account signed in here.
+  const [linkHere, setLinkHere] = useState(false);
 
+  // Read again whenever who is signed in changes: the answer to "is this invitation for you" is per account.
+  const bearer = session?.token ?? null;
   useEffect(() => {
-    void fetch(`/connect/friend-invite/lookup?token=${encodeURIComponent(token)}`)
+    let cancelled = false;
+    void fetch(`/connect/friend-invite/lookup?token=${encodeURIComponent(token)}`, bearer ? { headers: { authorization: `Bearer ${bearer}` } } : undefined)
       .then((r) => r.json())
-      .then((d: Invite & { ok?: boolean; error?: string }) => (d.ok ? setInvite(d) : setErr(d.error ?? 'invalid invitation')))
-      .catch(() => setErr('could not load this invitation'));
-  }, [token]);
+      .then((d: Invite & { ok?: boolean; error?: string }) => { if (!cancelled) { if (d.ok) { setInvite(d); setErr(null); } else setErr(d.error ?? 'invalid invitation'); } })
+      .catch(() => { if (!cancelled) setErr('could not load this invitation'); });
+    return () => { cancelled = true; };
+  }, [token, bearer]);
+  const recheck = () => {
+    if (!bearer) return;
+    void fetch(`/connect/friend-invite/lookup?token=${encodeURIComponent(token)}`, { headers: { authorization: `Bearer ${bearer}` } })
+      .then((r) => r.json()).then((d: Invite & { ok?: boolean }) => { if (d.ok) { setInvite(d); setLinkHere(false); } }).catch(() => {});
+  };
 
   const who = invite?.fromName ?? null;
   const self = !!invite && !!agentAddress && invite.from.toLowerCase() === agentAddress.toLowerCase();
 
   const addBack = async () => {
     if (!invite || !session) return;
-    setAdded(true);
+    setAdded(true); setErr(null);
     // The stash is spent once the invitee acted on it; the friendship grant is what makes the friendship, not this.
-    await fetch('/connect/friend-invite/email', {
+    // A refusal (signed in as someone the invitation was not sent to) stops here — it is never accepted as them.
+    const claimed = await fetch('/connect/friend-invite/email', {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
       body: JSON.stringify({ token, claim: true }),
-    }).catch(() => {});
+    }).then(async (r) => ({ ok: r.ok, ...((await r.json().catch(() => ({}))) as { error?: string; wrongAccount?: boolean }) })).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e), wrongAccount: false }));
+    if (!claimed.ok) {
+      setAdded(false);
+      if (claimed.wrongAccount) setInvite((i) => (i ? { ...i, forYou: false } : i));
+      else setErr(claimed.error ?? 'this invitation could not be accepted');
+      return;
+    }
     // The add runs in the Ask, which lives in the portal — this page is outside it, so a command fired here was heard by
     // no one. Friends takes `?add=` and starts it there, with the invitation, so the inviter's half completes too.
     const q = new URLSearchParams({ add: invite.from, invitation: token, ...(who ? { name: who } : {}) });
@@ -62,6 +81,19 @@ export default function FriendInvitePage({ params }: { params: Promise<{ token: 
               <p style={{ opacity: 0.7 }}>Checking who is signed in…</p>
             ) : self ? (
               <p className="onboarding-sub">This is your own invitation — send the link to your friend.</p>
+            ) : session && agentAddress && invite.forYou === false ? (
+              <>
+                <p className="onboarding-sub">
+                  This invitation was sent to a different email than the account signed in here (<b>{agentName ?? agentAddress}</b>).
+                  {linkHere
+                    ? <> Enter the email it was sent to — once it is confirmed, it is added to this account and you can accept here.</>
+                    : <> Enter the email it was sent to — we’ll send a code and open that email’s own Home to accept it.</>}
+                </p>
+                {linkHere ? <EmailAuthCard onLinked={recheck} /> : <EmailAuthCard asInvitee />}
+                <button type="button" className="onboarding-link" style={{ marginTop: '.75rem', background: 'none', border: 0, textDecoration: 'underline', cursor: 'pointer', color: 'inherit', opacity: 0.8 }} onClick={() => setLinkHere((v) => !v)}>
+                  {linkHere ? 'No — open the Home for that email instead' : `That email is mine — add it to ${agentName ?? 'this account'} instead`}
+                </button>
+              </>
             ) : session && agentAddress ? (
               added ? (
                 <p className="onboarding-sub">
@@ -76,7 +108,7 @@ export default function FriendInvitePage({ params }: { params: Promise<{ token: 
             ) : (
               <>
                 <p className="onboarding-sub" style={{ marginBottom: '.5rem' }}>Sign in, or set up your home with your email, to accept:</p>
-                <EmailAuthCard />
+                <EmailAuthCard asInvitee />
               </>
             )}
           </>

@@ -26,6 +26,7 @@ import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { personFromBearer } from '../_lib/person-bearer';
 import { sendEmail, friendInviteEmail, emailSendingEnabled } from '../_lib/email-sender';
 import { whitelabel } from '../../src/whitelabel/config';
+import { agentsOfEmailHash } from '../../src/lib/kv-indexer';
 
 function cors(request: Request): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';
@@ -93,6 +94,13 @@ async function writeSent(kv: Kv, person: string, list: SentInvite[]): Promise<vo
   await kv.put(SENT_KEY(person), JSON.stringify(keptSent(list, Date.now())));
 }
 
+/** THE INVITATION IS FOR AN ADDRESS: only the person that address belongs to (a verified email of theirs) accepts it.
+ *  Whoever happens to be signed in on the browser that opened the link is not evidence of who that is. */
+async function ownsInvitedEmail(kv: Kv, emailHash: string, person: string): Promise<boolean> {
+  const me = (person.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? person).toLowerCase();
+  return (await agentsOfEmailHash(kv as never, emailHash)).includes(me);
+}
+
 const hashOf = (email: string) => createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
 
 /** The app a link should land in: the request's own origin when it is a registered app's, else the Home. */
@@ -139,6 +147,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     if (body.claim) {
       if (!stash || (!stash.acceptedBy && stash.expiresAt < now)) return jsonCors({ ok: true, claimed: false, note: 'expired or cancelled' }, request);
       if (stash.from === me.person) return jsonCors({ error: 'this is your own invitation' }, request, 400);
+      if (!stash.acceptedBy && !(await ownsInvitedEmail(kv, stash.emailHash, me.person))) {
+        return jsonCors({ error: 'this invitation was sent to a different email than the account you are signed in as — confirm that email to accept it', wrongAccount: true }, request, 403);
+      }
       if (stash.acceptedBy && stash.acceptedBy !== me.person) return jsonCors({ ok: true, claimed: false, note: 'already used' }, request);
       if (!stash.acceptedBy) {
         const accepted: FriendInviteStash = { ...stash, acceptedBy: me.person, acceptedAt: now };
@@ -217,8 +228,15 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!raw) return jsonCors({ error: 'this invitation has expired or was cancelled' }, request, 404);
   const stash = JSON.parse(raw) as FriendInviteStash;
   if (!stash.acceptedBy && stash.expiresAt < Date.now()) return jsonCors({ error: 'this invitation has expired' }, request, 404);
+  // Signed in: whether this account is the one the invitation was sent to (its verified email), so the page asks for
+  // that email first rather than accepting as whoever is signed in on this browser.
+  const viewer = request.headers.get('authorization') ? await personFromBearer(request, env).catch(() => null) : null;
+  const forYou = viewer
+    ? (stash.acceptedBy ? stash.acceptedBy === viewer.person : await ownsInvitedEmail(env.AUTH_CODES, stash.emailHash, viewer.person))
+    : null;
   return jsonCors({
     ok: true, from: stash.from, fromName: stash.fromName, note: stash.note,
     expiresAt: new Date(stash.expiresAt).toISOString(), accepted: !!stash.acceptedBy,
+    ...(forYou !== null ? { forYou } : {}),
   }, request);
 };
