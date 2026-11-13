@@ -17,6 +17,7 @@
  * credentials are written to `--out <file>` (default stdout) and become the worker's secrets:
  *
  *   npx tsx scripts/issue-self-host-vault-credentials.mts scripture-resolver.svc --by ruth --origin https://scripture.faithnet.io --out /tmp/creds.json
+ *   (a REAL steward: --session-file <their Home session> instead of --by; see scripts/lib/steward-sign.mts)
  *
  * TWO GENERALIZATIONS, both for a worker that is not a harness host (ap-federation's projector, spec 439):
  *   --scope vault:<family>:*   one or more record families instead of the run records. Repeatable. The grant stays
@@ -35,6 +36,7 @@
  * Never a read wire (that one cannot write) and never the runtime's leaf (that one binds the runtime's key). Revoke on
  * chain like any delegation of the agent's; re-run after a rotation (spec 410 §1).
  */
+import { stewardSigner } from './lib/steward-sign.mts';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { issueVaultRecordScopeDelegation, issueSessionDelegation, toWire, RUN_PROVENANCE_RESOURCE_SCOPE } from '../apps/home/src/lib/delegation';
@@ -48,7 +50,7 @@ const by = opt('by'); const origin = opt('origin'); const out = opt('out'); cons
 const delegateOpt = opt('delegate')?.toLowerCase();
 const scopeOpts = args.flatMap((a, i) => (a === '--scope' && args[i + 1] ? [args[i + 1]] : []));
 const ops = (opt('ops') ?? 'write').split(',').map((o) => o.trim()).filter(Boolean) as ('read' | 'write')[];
-if (!target || !by || !(origin || delegateOpt)) { console.error('usage: issue-self-host-vault-credentials.mts <address|name> --by <steward> (--origin <https://host> | --delegate 0x…) [--scope vault:<family>:* …] [--ops read,write] [--days 365] [--out file]'); process.exit(2); }
+if (!target || !(by || process.argv.includes('--session-file')) || !(origin || delegateOpt)) { console.error('usage: issue-self-host-vault-credentials.mts <address|name> --by <steward> (--origin <https://host> | --delegate 0x…) [--scope vault:<family>:* …] [--ops read,write] [--days 365] [--out file]'); process.exit(2); }
 for (const o of ops) if (o !== 'read' && o !== 'write') { console.error(`--ops takes read and/or write, not ${o}`); process.exit(2); }
 for (const sc of scopeOpts) if (!sc.startsWith('vault:')) { console.error(`--scope must name a vault record family, e.g. vault:federation.projection-submission:* (got ${sc})`); process.exit(2); }
 const DEFAULT_HOME = 'https://www.faithnet.me';
@@ -91,14 +93,8 @@ if (delegateOpt) {
   delegate = String(signer.address).toLowerCase() as Address;
 }
 
-const signin = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: by, client_id: 'demo-jp' }) }));
-const token: string = signin.homeSession;
-if (!token) throw new Error(`no session for ${by}`);
-const sign = async (digest: string): Promise<Hex> => {
-  const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ digest }) }));
-  if (!b.signature) throw new Error(b.error ?? 'persona-sign refused');
-  return b.signature as Hex;
-};
+const sessionFile = process.argv.includes('--session-file') ? process.argv[process.argv.indexOf('--session-file') + 1] : undefined;
+const { token, sign } = await stewardSigner(HOME, by, sessionFile);
 
 // The grant: the run records, write only, at this estate's vault server. The anchor citation and the measurements sit beside
 // the provenance under their own keys (`run.anchor:<runRef>`, `run.measures:<runRef>` — service-host's provenance sink).

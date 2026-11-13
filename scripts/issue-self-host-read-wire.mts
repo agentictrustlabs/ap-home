@@ -12,6 +12,7 @@
  *
  * Revoke on chain like any delegation of the agent's; re-run after a rotation (spec 410 §1 re-approves standing wires).
  */
+import { stewardSigner } from './lib/steward-sign.mts';
 import { readdirSync, readFileSync } from 'node:fs';
 import { buildCaveat, encodeAllowedMethodsTerms, encodeAllowedTargetsTerms, encodeTimestampTerms, hashDelegation, ROOT_AUTHORITY, type Delegation } from '@agenticprimitives/delegation';
 import { skillSelector } from '@agenticprimitives/a2a';
@@ -25,7 +26,7 @@ const args = process.argv.slice(2);
 const target = args.find((a) => !a.startsWith('--'));
 const by = args.includes('--by') ? args[args.indexOf('--by') + 1] : undefined;
 const days = args.includes('--days') ? Number(args[args.indexOf('--days') + 1]) : 365;
-if (!target || !by) { console.error('usage: issue-self-host-read-wire.mts <address|name> --by <steward handle> [--days 365]'); process.exit(2); }
+if (!target || !(by || args.includes('--session-file'))) { console.error('usage: issue-self-host-read-wire.mts <address|name> (--by <demo steward handle> | --session-file <a real steward\'s Home session>) [--days 365]'); process.exit(2); }
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 200) }; } };
 
 function resolveTarget(t: string): { address: string; label: string } {
@@ -38,14 +39,8 @@ function resolveTarget(t: string): { address: string; label: string } {
 }
 const who = resolveTarget(target);
 
-const signin = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: by, client_id: 'demo-jp' }) }));
-const token: string = signin.homeSession;
-if (!token) throw new Error(`no session for ${by}`);
-const sign = async (digest: string): Promise<`0x${string}`> => {
-  const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ digest }) }));
-  if (!b.signature) throw new Error(b.error ?? 'persona-sign refused');
-  return b.signature;
-};
+const sessionFile = process.argv.includes('--session-file') ? process.argv[process.argv.indexOf('--session-file') + 1] : undefined;
+const { token, sign } = await stewardSigner(HOME, by, sessionFile);
 
 // The delegate: this Home runtime's interactions-session key (the key that will sign each read's assertion).
 const key = await j(await fetch(`${HOME}/a2a/agent/interactions-session-key`));
@@ -71,5 +66,5 @@ const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME }
 const csrf = (await j(csrfRes)) as { token?: string };
 const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0], 'x-csrf-token': csrf.token ?? '' };
 const res = await j(await fetch(`${HOME}/a2a/self-host/wire`, { method: 'POST', headers: H, body: JSON.stringify({ session: token, agent: who.address, wire: toWire(d) }) }));
-console.log(`${who.label} → read wire to ${delegate} (${HARNESS_READ_SKILL}, ${days} days) by ${by}: ${JSON.stringify(res).slice(0, 200)}`);
+console.log(`${who.label} → read wire to ${delegate} (${HARNESS_READ_SKILL}, ${days} days) by ${by ?? 'the session-file steward'}: ${JSON.stringify(res).slice(0, 200)}`);
 if (!res.ok) process.exit(1);
