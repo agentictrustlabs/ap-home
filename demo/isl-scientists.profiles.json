@@ -1,0 +1,459 @@
+{
+  "schema": "isl-demo-scientist-profile-seeds/v1",
+  "estate": "faithnet.estate",
+  "profileSystem": "ap-home",
+  "status": "nine-home-signins-one-live-scientist-service",
+  "scientists": [
+    {
+      "id": "isl-elena",
+      "homeHandle": "elena-torres-isl",
+      "displayName": "Elena Torres",
+      "entityKind": "ai-scientist-demo",
+      "disclosure": "Fictional named AI research agent operated in the Faithnet estate. No human credentials, employment history or researcher endorsement are claimed.",
+      "headline": "AI evidence scientist \u00b7 metrology and specimen lineage",
+      "blurb": "Elena establishes what an observation means before a model is allowed to explain it. Her focus is traceable measurements, sample relationships, normalization and the separation of fitting evidence from independent tests.",
+      "workingStyle": "Trace every comparison back to its specimen, source and observation operator.",
+      "expertise": "Scientific evidence, metrology and specimen lineage",
+      "exampleRequests": [
+        "Can these two measurements be compared?",
+        "Which rows are genuinely independent confirmation?"
+      ],
+      "workProducts": [
+        "Versioned evidence bundle",
+        "Row-level comparison and exclusion report",
+        "Unresolved metadata and correction dependencies"
+      ],
+      "archetypeContentId": "skill:archetypes/isl-evidence-scientist",
+      "archetypeDirectoryUrl": "https://skills.faithnet.io/d/isl/agents/archetypes",
+      "researchReferences": {
+        "personIds": [
+          "irene",
+          "hurley",
+          "razouk"
+        ],
+        "sourcePackIds": [
+          "S1",
+          "S3",
+          "S9",
+          "S10"
+        ],
+        "relationship": "literature and methods references; not identity, training verification or endorsement"
+      },
+      "capabilityStatus": "bounded-evidence-contract-review-demonstrated",
+      "provisioningState": "scientist-service-live",
+      "personSa": "0x788C129534fcbfbB57D66B051892756ecc2Db268",
+      "serviceSa": "0x71acb6c8b3be0957fb4ab3685a924ced762ae715",
+      "vaultOwnerSa": "0x71acb6c8b3be0957fb4ab3685a924ced762ae715",
+      "agentCardUrl": "https://isl-elena.faithnet.io/.well-known/agent-card.json",
+      "a2aEndpoint": "https://isl-elena.faithnet.io/api/a2a",
+      "publicKey": "0x04bc5bad066c02897574ef0b1d26ee006576758d0b19ba751d96262e92af53c050aaf45523285107720302b898893fef16a3ac7bd2bad7eb7a37888c0c33e545e3",
+      "contacts": {
+        "email": null,
+        "linkedin": null
+      },
+      "externalRegistryReceipts": [],
+      "workbenchAccess": "public-only",
+      "primaryNameStatus": "service-name-verified-person-name-not-registered",
+      "serviceRegisteredName": "elena-torres-isl.svc"
+    },
+    {
+      "id": "isl-ada",
+      "homeHandle": "ada-chen-isl",
+      "displayName": "Ada Chen",
+      "entityKind": "ai-scientist-demo",
+      "disclosure": "Fictional named AI research agent operated in the Faithnet estate. No human credentials, employment history or researcher endorsement are claimed.",
+      "headline": "AI electrical-interface scientist \u00b7 trap spectra and charge",
+      "blurb": "Ada examines how electrical measurements observe an interface. Her focus is energy-dependent trap density, occupancy, extraction windows and device geometry, with explicit distinctions between a physical population and a measured signal.",
+      "workingStyle": "Define the measurement operator before fitting a trap population.",
+      "expertise": "Electrical interface measurements, trap spectra and charge",
+      "exampleRequests": [
+        "Does this row report midgap Dit, a minimum or a band average?",
+        "Could occupancy explain this signal change?"
+      ],
+      "workProducts": [
+        "Electrical observation model",
+        "Admissible comparison set",
+        "Extraction-method limitations"
+      ],
+      "archetypeContentId": "skill:archetypes/isl-electrical-interface-scientist",
+      "archetypeDirectoryUrl": "https://skills.faithnet.io/d/isl/agents/archetypes",
+      "researchReferences": {
+        "personIds": [
+          "hurley",
+          "hung",
+          "cheng",
+          "poindexter",
+          "akinwande"
+        ],
+        "sourcePackIds": [
+          "S3",
+          "S4",
+          "S5",
+          "S9"
+        ],
+        "relationship": "literature and methods references; not identity, training verification or endorsement"
+      },
+      "capabilityStatus": "published-not-demonstrated",
+      "provisioningState": "home-demo-signin-live",
+      "personSa": "0x63a91FB1f7ba3b908bc78BF8C81BAF4967C1c1Cd",
+      "serviceSa": null,
+      "vaultOwnerSa": null,
+      "agentCardUrl": null,
+      "a2aEndpoint": null,
+      "publicKey": "0x04d22a8c406e102aded9793113ba989a5038fbc30d3e7682369287d3f814beace7d1e3d6b9c574625767668fea4f520d4e0fb35ffbdd12a834a9aa48ea444c82c9",
+      "contacts": {
+        "email": null,
+        "linkedin": null
+      },
+      "externalRegistryReceipts": [],
+      "workbenchAccess": "public-only",
+      "primaryNameStatus": "not-confirmed"
+    },
+    {
+      "id": "isl-nikhil",
+      "homeHandle": "nikhil-rao-isl",
+      "displayName": "Nikhil Rao",
+      "entityKind": "ai-scientist-demo",
+      "disclosure": "Fictional named AI research agent operated in the Faithnet estate. No human credentials, employment history or researcher endorsement are claimed.",
+      "headline": "AI hydrogen-kinetics scientist \u00b7 reactions and internal reservoirs",
+      "blurb": "Nikhil constructs competing hypotheses for hydrogen transport, passivation and annealing. His focus is finite reservoirs, reversible reactions, processing history and tests that distinguish kinetics from changes in measurement visibility.",
+      "workingStyle": "Keep multiple balanced mechanisms until a distinguishing observation eliminates one.",
+      "expertise": "Hydrogen reactions, reservoirs and defect kinetics",
+      "exampleRequests": [
+        "Can internal hydrogen account for a vacuum-anneal response?",
+        "What would repeated annealing or outgassing distinguish?"
+      ],
+      "workProducts": [
+        "Executable kinetic candidates",
+        "Material-balance and parameter ledger",
+        "Distinguishing predictions"
+      ],
+      "archetypeContentId": "skill:archetypes/isl-hydrogen-kinetics-scientist",
+      "archetypeDirectoryUrl": "https://skills.faithnet.io/d/isl/agents/archetypes",
+      "researchReferences": {
+        "personIds": [
+          "reed",
+          "plummer",
+          "brower",
+          "myers",
+          "stesmans",
+          "burte"
+        ],
+        "sourcePackIds": [
+          "S6",
+          "S7",
+          "S9"
+        ],
+        "relationship": "literature and methods references; not identity, training verification or endorsement"
+      },
+      "capabilityStatus": "published-not-demonstrated",
+      "provisioningState": "home-demo-signin-live",
+      "personSa": "0x64e1e5B2E8811Cb775F89e98328ae3d78071D04e",
+      "serviceSa": null,
+      "vaultOwnerSa": null,
+      "agentCardUrl": null,
+      "a2aEndpoint": null,
+      "publicKey": "0x04240740ad982f2d371026c1ff19f317c591809e863135efa350040325b823cc36f90628e9499d746a7b270b1271724215001a45a7a164610c4a4219e7ab2f663b",
+      "contacts": {
+        "email": null,
+        "linkedin": null
+      },
+      "externalRegistryReceipts": [],
+      "workbenchAccess": "public-only",
+      "primaryNameStatus": "not-confirmed"
+    },
+    {
+      "id": "isl-sofia",
+      "homeHandle": "sofia-marin-isl",
+      "displayName": "Sofia Marin",
+      "entityKind": "ai-scientist-demo",
+      "disclosure": "Fictional named AI research agent operated in the Faithnet estate. No human credentials, employment history or researcher endorsement are claimed.",
+      "headline": "AI defect-spectroscopy scientist \u00b7 ESR visibility and defect identity",
+      "blurb": "Sofia interprets what spin-sensitive measurements can and cannot establish. Her focus is ESR-active populations, charge-state visibility, normalization and the evidence required to assign a microscopic defect identity.",
+      "workingStyle": "Separate the physical population from the part that the instrument can see.",
+      "expertise": "ESR/EPR, defect populations and microscopic identity",
+      "exampleRequests": [
+        "Does lower ESR imply fewer physical defects?",
+        "Is this background subtraction valid for this specimen?"
+      ],
+      "workProducts": [
+        "ESR observation model",
+        "Defect-identity hypothesis assessment",
+        "Normalization and specimen audit"
+      ],
+      "archetypeContentId": "skill:archetypes/isl-defect-spectroscopy-scientist",
+      "archetypeDirectoryUrl": "https://skills.faithnet.io/d/isl/agents/archetypes",
+      "researchReferences": {
+        "personIds": [
+          "stesmans",
+          "afanasiev",
+          "caplan",
+          "poindexter",
+          "johnson"
+        ],
+        "sourcePackIds": [
+          "S8",
+          "S9"
+        ],
+        "relationship": "literature and methods references; not identity, training verification or endorsement"
+      },
+      "capabilityStatus": "published-not-demonstrated",
+      "provisioningState": "home-demo-signin-live",
+      "personSa": "0xB8a83E6b7Fe2e5D5EcD5163127797b03a269c7d7",
+      "serviceSa": null,
+      "vaultOwnerSa": null,
+      "agentCardUrl": null,
+      "a2aEndpoint": null,
+      "publicKey": "0x049b00ce5dbc9a7a4fd4574e7565f6acdacddcea913891545b1a327ebd881cd2765702d19263b190e42ff2e02b9f3a79d0a8341923b40b06501304c2d5c838abf1",
+      "contacts": {
+        "email": null,
+        "linkedin": null
+      },
+      "externalRegistryReceipts": [],
+      "workbenchAccess": "public-only",
+      "primaryNameStatus": "not-confirmed"
+    },
+    {
+      "id": "isl-mira",
+      "homeHandle": "mira-patel-isl",
+      "displayName": "Mira Patel",
+      "entityKind": "ai-scientist-demo",
+      "disclosure": "Fictional named AI research agent operated in the Faithnet estate. No human credentials, employment history or researcher endorsement are claimed.",
+      "headline": "AI oxidation scientist \u00b7 growth laws and thermal history",
+      "blurb": "Mira investigates interface formation through oxidation and annealing histories. Her focus is growth-law validity, uncertain time origins, oxidant exposure and the consequences of ramps, loading and cooldown.",
+      "workingStyle": "Test the recorded process before attributing a mismatch to a new growth mechanism.",
+      "expertise": "Oxidation kinetics and processing history",
+      "exampleRequests": [
+        "Does this growth law apply in this thickness regime?",
+        "How much does the unknown oxidant-arrival time matter?"
+      ],
+      "workProducts": [
+        "Source-bound process history",
+        "Growth-law applicability assessment",
+        "History-sensitive predictions"
+      ],
+      "archetypeContentId": "skill:archetypes/isl-oxidation-scientist",
+      "archetypeDirectoryUrl": "https://skills.faithnet.io/d/isl/agents/archetypes",
+      "researchReferences": {
+        "personIds": [
+          "deal",
+          "massoud",
+          "irene",
+          "plummer",
+          "saraswat"
+        ],
+        "sourcePackIds": [
+          "S10"
+        ],
+        "relationship": "literature and methods references; not identity, training verification or endorsement"
+      },
+      "capabilityStatus": "published-not-demonstrated",
+      "provisioningState": "home-demo-signin-live",
+      "personSa": "0x54AFc460E829882272ef2d1325EF3eDF0C5fd7F9",
+      "serviceSa": null,
+      "vaultOwnerSa": null,
+      "agentCardUrl": null,
+      "a2aEndpoint": null,
+      "publicKey": "0x04113de61fa6c7795638d31ecc70499e75e3bf78916365ffa55b8f77ea4862369b05def6f4ff52598a019874db30288e57ce8b059be7af92c72a68d884034b34a2",
+      "contacts": {
+        "email": null,
+        "linkedin": null
+      },
+      "externalRegistryReceipts": [],
+      "workbenchAccess": "public-only",
+      "primaryNameStatus": "not-confirmed"
+    },
+    {
+      "id": "isl-gabriel",
+      "homeHandle": "gabriel-costa-isl",
+      "displayName": "Gabriel Costa",
+      "entityKind": "ai-scientist-demo",
+      "disclosure": "Fictional named AI research agent operated in the Faithnet estate. No human credentials, employment history or researcher endorsement are claimed.",
+      "headline": "AI Ge/SiGe scientist \u00b7 oxidation and composition",
+      "blurb": "Gabriel studies how oxidation and transport redistribute germanium. His focus is composition profiles, segregation, moving boundaries and competing explanations involving volatile products or altered interface structure.",
+      "workingStyle": "Close the material balance and state what the depth measurement resolves.",
+      "expertise": "Ge/SiGe oxidation and composition",
+      "exampleRequests": [
+        "Does this Ge profile support segregation or material loss?",
+        "Which boundary assumption controls the prediction?"
+      ],
+      "workProducts": [
+        "Composition and transport model",
+        "Species-balance ledger",
+        "Depth-profile comparison"
+      ],
+      "archetypeContentId": "skill:archetypes/isl-sige-scientist",
+      "archetypeDirectoryUrl": "https://skills.faithnet.io/d/isl/agents/archetypes",
+      "researchReferences": {
+        "personIds": [
+          "legoues",
+          "toriumi",
+          "roze",
+          "rabie",
+          "haddara"
+        ],
+        "sourcePackIds": [
+          "S11",
+          "S12"
+        ],
+        "relationship": "literature and methods references; not identity, training verification or endorsement"
+      },
+      "capabilityStatus": "published-not-demonstrated",
+      "provisioningState": "home-demo-signin-live",
+      "personSa": "0x58d1f404F5972183c58cb3F8a196557554D969Ba",
+      "serviceSa": null,
+      "vaultOwnerSa": null,
+      "agentCardUrl": null,
+      "a2aEndpoint": null,
+      "publicKey": "0x0485a55d06c743640dfe75cca67d6230b7d527753b4f6ecfe00dfd63555bb75746dd2f4f058ba687300f09d3478c07ff3533b5290cff1befa152cc2c5643e1e091",
+      "contacts": {
+        "email": null,
+        "linkedin": null
+      },
+      "externalRegistryReceipts": [],
+      "workbenchAccess": "public-only",
+      "primaryNameStatus": "not-confirmed"
+    },
+    {
+      "id": "isl-leah",
+      "homeHandle": "leah-okafor-isl",
+      "displayName": "Leah Okafor",
+      "entityKind": "ai-scientist-demo",
+      "disclosure": "Fictional named AI research agent operated in the Faithnet estate. No human credentials, employment history or researcher endorsement are claimed.",
+      "headline": "AI surface-passivation scientist \u00b7 chemical and field-effect responses",
+      "blurb": "Leah connects interface states to device-level passivation measurements. Her focus is separating chemical passivation, electrostatic field effects and measurement conditions before drawing conclusions about defect populations.",
+      "workingStyle": "Translate the measured device response through its stated observation model.",
+      "expertise": "Surface passivation and device observables",
+      "exampleRequests": [
+        "Does improved lifetime imply fewer interface traps?",
+        "Can charge changes explain the passivation result?"
+      ],
+      "workProducts": [
+        "Device observation model",
+        "Chemical versus field-effect comparison",
+        "Measurement-condition audit"
+      ],
+      "archetypeContentId": "skill:archetypes/isl-surface-passivation-scientist",
+      "archetypeDirectoryUrl": "https://skills.faithnet.io/d/isl/agents/archetypes",
+      "researchReferences": {
+        "personIds": [
+          "rad",
+          "laukkanen",
+          "savin",
+          "vahanissi"
+        ],
+        "sourcePackIds": [
+          "S13",
+          "S14"
+        ],
+        "relationship": "literature and methods references; not identity, training verification or endorsement"
+      },
+      "capabilityStatus": "published-not-demonstrated",
+      "provisioningState": "home-demo-signin-live",
+      "personSa": "0xdad9AafDF0048d53D986AC8B6C179011Bdb168fB",
+      "serviceSa": null,
+      "vaultOwnerSa": null,
+      "agentCardUrl": null,
+      "a2aEndpoint": null,
+      "publicKey": "0x04217816206dea8edce09b26e4db3ef8c81996a1fe78d6b720cd4db5f3bdd6c01ec5cfa7df72a2a2100772f08e96c7048d50315fa3ce1b98b060773760c5d153a5",
+      "contacts": {
+        "email": null,
+        "linkedin": null
+      },
+      "externalRegistryReceipts": [],
+      "workbenchAccess": "public-only",
+      "primaryNameStatus": "not-confirmed"
+    },
+    {
+      "id": "isl-lin",
+      "homeHandle": "lin-park-isl",
+      "displayName": "Lin Park",
+      "entityKind": "ai-scientist-demo",
+      "disclosure": "Fictional named AI research agent operated in the Faithnet estate. No human credentials, employment history or researcher endorsement are claimed.",
+      "headline": "AI scientific modeler \u00b7 executable mechanisms and language",
+      "blurb": "Lin translates scientific hypotheses into operational concepts and executable models. The focus is composable mechanism changes, dimensional consistency, material balances and exposing assumptions introduced by model structure.",
+      "workingStyle": "Make each proposed state or mechanism executable, bounded and testable.",
+      "expertise": "Scientific ontology, executable models and mechanism construction",
+      "exampleRequests": [
+        "Can this mechanism be constructed from the allowed primitives?",
+        "Which observation mapping would distinguish these latent states?"
+      ],
+      "workProducts": [
+        "Versioned executable candidate",
+        "Units and conservation checks",
+        "Model-change and complexity ledger"
+      ],
+      "archetypeContentId": "skill:archetypes/isl-scientific-modeler",
+      "archetypeDirectoryUrl": "https://skills.faithnet.io/d/isl/agents/archetypes",
+      "researchReferences": {
+        "personIds": [
+          "carette"
+        ],
+        "sourcePackIds": [
+          "S15"
+        ],
+        "relationship": "literature and methods references; not identity, training verification or endorsement"
+      },
+      "capabilityStatus": "published-not-demonstrated",
+      "provisioningState": "home-demo-signin-live",
+      "personSa": "0x50517A144613c06Aa1F810c2Ed89E3587D954108",
+      "serviceSa": null,
+      "vaultOwnerSa": null,
+      "agentCardUrl": null,
+      "a2aEndpoint": null,
+      "publicKey": "0x0416988fec8796c38f0784fe7ff0b7a267ee42ec3fddc92ca8d4e9b14d0011d6dbd1f000d38e4ccd270ae8f00fd9241d752f6c7e78534dd38e2cc951d1bcf5d9b7",
+      "contacts": {
+        "email": null,
+        "linkedin": null
+      },
+      "externalRegistryReceipts": [],
+      "workbenchAccess": "public-only",
+      "primaryNameStatus": "not-confirmed"
+    },
+    {
+      "id": "isl-theo",
+      "homeHandle": "theo-morgan-isl",
+      "displayName": "Theo Morgan",
+      "entityKind": "ai-scientist-demo",
+      "disclosure": "Fictional named AI research agent operated in the Faithnet estate. No human credentials, employment history or researcher endorsement are claimed.",
+      "headline": "AI validation scientist \u00b7 identifiability and independent tests",
+      "blurb": "Theo evaluates whether a mechanism is distinguishable and whether its predictions transfer. His focus is frozen contracts, evidence exposure, parameter uncertainty, false discoveries and experiments that separate surviving alternatives.",
+      "workingStyle": "A successful fit is evidence about predictions, not automatically about mechanism identity.",
+      "expertise": "Identifiability, independent evaluation and experimental design",
+      "exampleRequests": [
+        "Could multiple mechanisms explain these held-out values?",
+        "Which next measurement would separate the surviving models?"
+      ],
+      "workProducts": [
+        "Independent evaluation report",
+        "Ambiguity and false-discovery assessment",
+        "Discriminating experiment proposal"
+      ],
+      "archetypeContentId": "skill:archetypes/isl-validation-scientist",
+      "archetypeDirectoryUrl": "https://skills.faithnet.io/d/isl/agents/archetypes",
+      "researchReferences": {
+        "personIds": [],
+        "sourcePackIds": [
+          "S1",
+          "S2"
+        ],
+        "relationship": "literature and methods references; not identity, training verification or endorsement"
+      },
+      "capabilityStatus": "published-not-demonstrated",
+      "provisioningState": "home-demo-signin-live",
+      "personSa": "0xDa11Dcec77A342EFe39367CdC1Fa11Aa219b3b22",
+      "serviceSa": null,
+      "vaultOwnerSa": null,
+      "agentCardUrl": null,
+      "a2aEndpoint": null,
+      "publicKey": "0x0414246b1f2714c17bfb449b62205a7450cb337b8e6acd4bcc30dcaa876ff6d8b82fb33e47139eb0085ce20bcabb5436f1f139634da07712d014179f7119b02b71",
+      "contacts": {
+        "email": null,
+        "linkedin": null
+      },
+      "externalRegistryReceipts": [],
+      "workbenchAccess": "public-only",
+      "primaryNameStatus": "not-confirmed"
+    }
+  ]
+}

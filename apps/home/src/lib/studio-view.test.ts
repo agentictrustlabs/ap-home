@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { AGENT_CARD_SCOPES, STEWARD_DEFAULT_SCOPES } from '@agenticprimitives/home';
-import type { A2AAgentCardV1 } from '@agenticprimitives/agent-profile/a2a';
+import type { A2AAgentCardV1, A2AAgentCardReleaseV1 } from '@agenticprimitives/agent-profile/a2a';
 import type { ProjectionDiagnosticV1 } from '@agenticprimitives/types';
 import {
   badgeFor,
   cardActionsFor,
   cardUriForName,
+  publishedCardUri,
   diagnosticView,
   diffCards,
   draftStateWord,
@@ -301,10 +302,39 @@ describe('card URI derivation', () => {
     expect(cardUriForName('', opts)).toBeNull();
     expect(cardUriForName('agent', opts)).toBeNull();
   });
+  it('never manufactures a host from a display name', () => {
+    expect(cardUriForName('Elena Torres — ISL Evidence Scientist', opts)).toBeNull();
+    expect(cardUriForName('Elena Torres.svc', opts)).toBeNull();
+    expect(cardUriForName('elena%20torres.svc', opts)).toBeNull();
+  });
   it('a bare-root label that reads as a typed host has NO card URI (spec 445 / NAME-8)', () => {
     // `finance-team.agent` would print `finance-team.<zone>` — the host of `finance.team`.
     expect(cardUriForName('finance-team.agent', opts)).toBeNull();
     expect(cardUriForName('finance-team.me', { nameParent: 'me', a2aDomain: 'faithnet.ai' })).toBeNull();
+  });
+});
+
+describe('the published service card address', () => {
+  const actual = 'https://isl-elena.faithnet.io/.well-known/agent-card.json';
+  const release: A2AAgentCardReleaseV1 = {
+    state: 'published', releaseId: 'card:r2', cardResourceId: 'card', signedContentDigest: 'sha256:abc',
+    releaseNumber: 2, agentVersion: '1.0.0', protocolVersion: '1.0', unsignedContentDigest: 'sha256:def',
+    unsignedCard: { name: 'elena-torres-isl.svc', description: '', version: '1.0.0', protocolVersion: '1.0', supportedInterfaces: [], capabilities: {}, defaultInputModes: ['text/plain'], defaultOutputModes: ['text/plain'], skills: [] },
+    fieldBindings: {}, extendedCardPolicies: [], approvals: [], signatures: [], createdAt: '2026-11-14T00:00:00Z',
+    publication: { uri: 'https://elena-torres-isl-svc.faithnet.ai/.well-known/agent-card.json', publishedAt: '2026-11-14T00:00:00Z' },
+    smartAgentBinding: { chainId: 34348, verifyingContract: '0x0000000000000000000000000000000000000001', signature: '0x', binding: {
+      canonicalAgentId: 'eip155:34348:0x0000000000000000000000000000000000000001', signerKeyThumbprint: 'key', validFrom: 0, validUntil: 0,
+      unsignedCardDigest: 'sha256:def', cardUri: actual, cardReleaseId: 'card:r2', cardResourceId: 'card', signedCardDigest: 'sha256:abc',
+    } },
+  };
+  it('uses the signed self-hosted origin instead of the estate serving copy', () => {
+    expect(publishedCardUri(release)).toBe(actual);
+    expect(publishedCardUri({ ...release, smartAgentBinding: undefined })).toBe(release.publication!.uri);
+  });
+  it('does not advertise a revoked, mismatched or unsafe release link', () => {
+    expect(publishedCardUri({ ...release, state: 'revoked' })).toBeNull();
+    expect(publishedCardUri({ ...release, signedContentDigest: 'sha256:different' })).toBeNull();
+    expect(publishedCardUri({ ...release, smartAgentBinding: undefined, publication: { uri: 'javascript:alert(1)', publishedAt: '' } })).toBeNull();
   });
 });
 

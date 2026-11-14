@@ -1,0 +1,97 @@
+{
+  "estate": "faithnet.estate",
+  "chainId": 34348,
+  "factory": "0xAa0a4B69702145Eb5BBaA3ED3c66919aA1fa7C5c",
+  "identities": [
+    {
+      "id": "isl-elena",
+      "handle": "elena-torres-isl",
+      "displayName": "Elena Torres",
+      "personSa": "0x788C129534fcbfbB57D66B051892756ecc2Db268",
+      "custodianAddress": "0x5260903dFceE8b8922c122724bd39590f51feCA6",
+      "custodianPublicKey": "0x04bc5bad066c02897574ef0b1d26ee006576758d0b19ba751d96262e92af53c050aaf45523285107720302b898893fef16a3ac7bd2bad7eb7a37888c0c33e545e3",
+      "deployed": true,
+      "serviceSa": "0x71acb6c8b3be0957fb4ab3685a924ced762ae715"
+    },
+    {
+      "id": "isl-ada",
+      "handle": "ada-chen-isl",
+      "displayName": "Ada Chen",
+      "personSa": "0x63a91FB1f7ba3b908bc78BF8C81BAF4967C1c1Cd",
+      "custodianAddress": "0x801AA311aB36701EC5E13306EaD935e4b3D750EB",
+      "custodianPublicKey": "0x04d22a8c406e102aded9793113ba989a5038fbc30d3e7682369287d3f814beace7d1e3d6b9c574625767668fea4f520d4e0fb35ffbdd12a834a9aa48ea444c82c9",
+      "deployed": true,
+      "serviceSa": null
+    },
+    {
+      "id": "isl-nikhil",
+      "handle": "nikhil-rao-isl",
+      "displayName": "Nikhil Rao",
+      "personSa": "0x64e1e5B2E8811Cb775F89e98328ae3d78071D04e",
+      "custodianAddress": "0xE2A2104F0a836693aAe860c90d469bCD155A1E90",
+      "custodianPublicKey": "0x04240740ad982f2d371026c1ff19f317c591809e863135efa350040325b823cc36f90628e9499d746a7b270b1271724215001a45a7a164610c4a4219e7ab2f663b",
+      "deployed": true,
+      "serviceSa": null
+    },
+    {
+      "id": "isl-sofia",
+      "handle": "sofia-marin-isl",
+      "displayName": "Sofia Marin",
+      "personSa": "0xB8a83E6b7Fe2e5D5EcD5163127797b03a269c7d7",
+      "custodianAddress": "0x1DB54aC94B78B9f70711c24b3822AF68eE59033d",
+      "custodianPublicKey": "0x049b00ce5dbc9a7a4fd4574e7565f6acdacddcea913891545b1a327ebd881cd2765702d19263b190e42ff2e02b9f3a79d0a8341923b40b06501304c2d5c838abf1",
+      "deployed": true,
+      "serviceSa": null
+    },
+    {
+      "id": "isl-mira",
+      "handle": "mira-patel-isl",
+      "displayName": "Mira Patel",
+      "personSa": "0x54AFc460E829882272ef2d1325EF3eDF0C5fd7F9",
+      "custodianAddress": "0x14309dd87318aB254f631325726BF200edF8A637",
+      "custodianPublicKey": "0x04113de61fa6c7795638d31ecc70499e75e3bf78916365ffa55b8f77ea4862369b05def6f4ff52598a019874db30288e57ce8b059be7af92c72a68d884034b34a2",
+      "deployed": true,
+      "serviceSa": null
+    },
+    {
+      "id": "isl-gabriel",
+      "handle": "gabriel-costa-isl",
+      "displayName": "Gabriel Costa",
+      "personSa": "0x58d1f404F5972183c58cb3F8a196557554D969Ba",
+      "custodianAddress": "0x740fF710f132f7a0F0255B10C854E7973414be4b",
+      "custodianPublicKey": "0x0485a55d06c743640dfe75cca67d6230b7d527753b4f6ecfe00dfd63555bb75746dd2f4f058ba687300f09d3478c07ff3533b5290cff1befa152cc2c5643e1e091",
+      "deployed": true,
+      "serviceSa": null
+    },
+    {
+      "id": "isl-leah",
+      "handle": "leah-okafor-isl",
+      "displayName": "Leah Okafor",
+      "personSa": "0xdad9AafDF0048d53D986AC8B6C179011Bdb168fB",
+      "custodianAddress": "0xDBd01091326B4C5B827903B0550D07955F6aE844",
+      "custodianPublicKey": "0x04217816206dea8edce09b26e4db3ef8c81996a1fe78d6b720cd4db5f3bdd6c01ec5cfa7df72a2a2100772f08e96c7048d50315fa3ce1b98b060773760c5d153a5",
+      "deployed": true,
+      "serviceSa": null
+    },
+    {
+      "id": "isl-lin",
+      "handle": "lin-park-isl",
+      "displayName": "Lin Park",
+      "personSa": "0x50517A144613c06Aa1F810c2Ed89E3587D954108",
+      "custodianAddress": "0x08c4b95b2bDB3734CecD7d1Dc53Dc1F8Bac95b11",
+      "custodianPublicKey": "0x0416988fec8796c38f0784fe7ff0b7a267ee42ec3fddc92ca8d4e9b14d0011d6dbd1f000d38e4ccd270ae8f00fd9241d752f6c7e78534dd38e2cc951d1bcf5d9b7",
+      "deployed": true,
+      "serviceSa": null
+    },
+    {
+      "id": "isl-theo",
+      "handle": "theo-morgan-isl",
+      "displayName": "Theo Morgan",
+      "personSa": "0xDa11Dcec77A342EFe39367CdC1Fa11Aa219b3b22",
+      "custodianAddress": "0xd27FDf75523B7Dc292fb97C10760910ea2D0bE3f",
+      "custodianPublicKey": "0x0414246b1f2714c17bfb449b62205a7450cb337b8e6acd4bcc30dcaa876ff6d8b82fb33e47139eb0085ce20bcabb5436f1f139634da07712d014179f7119b02b71",
+      "deployed": true,
+      "serviceSa": null
+    }
+  ]
+}

@@ -33,6 +33,10 @@ export type DemoPersona = {
   sa: string;
   name?: string;
   blurb?: string;
+  /** Public roster grouping and relying-app access notices; each app enforces its own ceiling. */
+  demoGroup?: string;
+  publicOnlyClients?: string[];
+  archetypeId?: string;
   /** Orgs this demo person custodies, carried through from the app seeds (uupg's alliance gates
    *  read it). Opaque here — the Home stores and returns it, it never interprets it. */
   custodies?: { sa: string; name: string }[];
@@ -54,11 +58,11 @@ function parseRegistry(raw: string | undefined): Map<string, DemoPersona> {
       }
       continue;
     }
-    const v = value as { sa?: string; eoaPrivateKey?: string; privateKey?: string; name?: string; blurb?: string; custodies?: { sa: string; name: string }[] };
+    const v = value as { sa?: string; eoaPrivateKey?: string; privateKey?: string; name?: string; blurb?: string; demoGroup?: string; publicOnlyClients?: string[]; archetypeId?: string; custodies?: { sa: string; name: string }[] };
     const sa = (v.sa ?? '').toLowerCase();
     const pk = v.eoaPrivateKey ?? v.privateKey ?? '';
     if (!/^0x[0-9a-f]{40}$/.test(sa) || !/^0x[0-9a-fA-F]{64}$/.test(pk)) continue;
-    out.set(sa, { handle: key, sa, name: v.name, blurb: v.blurb, custodies: Array.isArray(v.custodies) ? v.custodies : undefined, privateKey: pk as Hex });
+    out.set(sa, { handle: key, sa, name: v.name, blurb: v.blurb, demoGroup: typeof v.demoGroup === 'string' ? v.demoGroup : undefined, archetypeId: typeof v.archetypeId === 'string' ? v.archetypeId : undefined, publicOnlyClients: Array.isArray(v.publicOnlyClients) ? v.publicOnlyClients.filter((x): x is string => typeof x === 'string') : undefined, custodies: Array.isArray(v.custodies) ? v.custodies : undefined, privateKey: pk as Hex });
   }
   return out;
 }
@@ -69,16 +73,18 @@ function parseRegistry(raw: string | undefined): Map<string, DemoPersona> {
  *  own, in either shape. It is ADDITIVE ONLY: an address already in `DEMO_PERSONA_KEYS` keeps that entry (the extra
  *  secret can never replace or re-key an existing persona), and a malformed extra secret adds nothing. */
 // An independently managed additional roster preserves both unreadable existing Vercel secrets.
-export function mergeRegistries(primary: string | undefined, extra: string | undefined, additional?: string): Map<string, DemoPersona> {
+export function mergeRegistries(primary: string | undefined, extra: string | undefined, additional?: string, isl?: string): Map<string, DemoPersona> {
   const out = parseRegistry(primary);
   for (const raw of [extra, additional]) for (const [sa, p] of parseRegistry(raw)) if (!out.has(sa)) out.set(sa, p);
+  // A new scientist must not shadow another team's existing sign-in handle.
+  for (const [sa, p] of parseRegistry(isl)) if (!out.has(sa) && ![...out.values()].some((existing) => existing.handle.toLowerCase() === p.handle.toLowerCase())) out.set(sa, p);
   return out;
 }
 
-let cached: { raw: string | undefined; extra: string | undefined; additional: string | undefined; map: Map<string, DemoPersona> } | null = null;
+let cached: { raw: string | undefined; extra: string | undefined; additional: string | undefined; isl: string | undefined; map: Map<string, DemoPersona> } | null = null;
 function registry(env: Env): Map<string, DemoPersona> {
-  if (!cached || cached.raw !== env.DEMO_PERSONA_KEYS || cached.extra !== env.DEMO_PERSONA_KEYS_EXTRA || cached.additional !== env.DEMO_PERSONA_KEYS_ADDITIONAL) {
-    cached = { raw: env.DEMO_PERSONA_KEYS, extra: env.DEMO_PERSONA_KEYS_EXTRA, additional: env.DEMO_PERSONA_KEYS_ADDITIONAL, map: mergeRegistries(env.DEMO_PERSONA_KEYS, env.DEMO_PERSONA_KEYS_EXTRA, env.DEMO_PERSONA_KEYS_ADDITIONAL) };
+  if (!cached || cached.raw !== env.DEMO_PERSONA_KEYS || cached.extra !== env.DEMO_PERSONA_KEYS_EXTRA || cached.additional !== env.DEMO_PERSONA_KEYS_ADDITIONAL || cached.isl !== env.DEMO_PERSONA_KEYS_ISL) {
+    cached = { raw: env.DEMO_PERSONA_KEYS, extra: env.DEMO_PERSONA_KEYS_EXTRA, additional: env.DEMO_PERSONA_KEYS_ADDITIONAL, isl: env.DEMO_PERSONA_KEYS_ISL, map: mergeRegistries(env.DEMO_PERSONA_KEYS, env.DEMO_PERSONA_KEYS_EXTRA, env.DEMO_PERSONA_KEYS_ADDITIONAL, env.DEMO_PERSONA_KEYS_ISL) };
   }
   return cached.map;
 }
