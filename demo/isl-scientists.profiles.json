@@ -2,7 +2,7 @@
   "schema": "isl-demo-scientist-profile-seeds/v1",
   "estate": "faithnet.estate",
   "profileSystem": "ap-home",
-  "status": "profile-seeds-not-live-accounts",
+  "status": "nine-home-signins-one-live-scientist-service",
   "scientists": [
     {
       "id": "isl-elena",
@@ -39,13 +39,13 @@
         ],
         "relationship": "literature and methods references; not identity, training verification or endorsement"
       },
-      "capabilityStatus": "published-not-demonstrated",
-      "provisioningState": "home-demo-signin-live",
+      "capabilityStatus": "bounded-evidence-contract-review-demonstrated",
+      "provisioningState": "scientist-service-live",
       "personSa": "0x788C129534fcbfbB57D66B051892756ecc2Db268",
-      "serviceSa": null,
-      "vaultOwnerSa": null,
-      "agentCardUrl": null,
-      "a2aEndpoint": null,
+      "serviceSa": "0x71acb6c8b3be0957fb4ab3685a924ced762ae715",
+      "vaultOwnerSa": "0x71acb6c8b3be0957fb4ab3685a924ced762ae715",
+      "agentCardUrl": "https://isl-elena.faithnet.io/.well-known/agent-card.json",
+      "a2aEndpoint": "https://isl-elena.faithnet.io/api/a2a",
       "publicKey": "0x04bc5bad066c02897574ef0b1d26ee006576758d0b19ba751d96262e92af53c050aaf45523285107720302b898893fef16a3ac7bd2bad7eb7a37888c0c33e545e3",
       "contacts": {
         "email": null,
@@ -53,7 +53,8 @@
       },
       "externalRegistryReceipts": [],
       "workbenchAccess": "public-only",
-      "primaryNameStatus": "not-confirmed"
+      "primaryNameStatus": "service-name-verified-person-name-not-registered",
+      "serviceRegisteredName": "elena-torres-isl.svc"
     },
     {
       "id": "isl-ada",

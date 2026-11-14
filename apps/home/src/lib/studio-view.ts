@@ -699,7 +699,9 @@ export function cardUriForName(
   opts: { nameParent: string; a2aDomain: string; nameParents?: readonly string[] },
 ): string | null {
   const labels = name.trim().toLowerCase().split('.').filter(Boolean);
-  if (labels.length === 0) return null;
+  // A display label is not a registered handle. In particular, URL's IDNA conversion can
+  // turn a scientist's full name into a plausible-looking but nonexistent public host.
+  if (labels.length < 2 || labels.some((label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) return null;
   const parents = opts.nameParents?.length ? opts.nameParents : [opts.nameParent];
   const host = labels.length === 2 ? hostForName(labels.join('.'), opts.a2aDomain, parents) : null;
   if (host) return `https://${host}/.well-known/agent-card.json`;
@@ -709,6 +711,22 @@ export function cardUriForName(
   if (parents.includes(labels[labels.length - 1]!)) labels.pop();
   if (labels.length === 0) return null;
   return `https://${labels.join('-')}.${opts.a2aDomain}/.well-known/agent-card.json`;
+}
+
+/** The published document's address is a fact in the release, not a projection of its display name.
+ * Self-hosted services sign their own origin into the binding; the estate may also serve a copy.
+ * This only selects a link for the Studio UI. Signature and identity verification remain server-side. */
+export function publishedCardUri(release: A2AAgentCardReleaseV1 | null): string | null {
+  if (release?.state !== 'published') return null;
+  const binding = release.smartAgentBinding?.binding;
+  const uri = binding?.cardUri ?? release.publication?.uri;
+  if (!uri) return null;
+  if (binding && (binding.cardReleaseId !== release.releaseId || binding.cardResourceId !== release.cardResourceId || binding.signedCardDigest !== release.signedContentDigest)) return null;
+  try {
+    const url = new URL(uri);
+    if (url.protocol !== 'https:' || url.username || url.password || /[%\s]/.test(url.hostname) || url.search || url.hash || url.pathname !== '/.well-known/agent-card.json') return null;
+    return url.href;
+  } catch { return null; }
 }
 
 // ─── The live endpoint (spec 347 §8.1) ───────────────────────────────────────────────────────────────────

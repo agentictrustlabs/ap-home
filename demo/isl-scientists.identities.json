@@ -11,7 +11,7 @@
       "custodianAddress": "0x5260903dFceE8b8922c122724bd39590f51feCA6",
       "custodianPublicKey": "0x04bc5bad066c02897574ef0b1d26ee006576758d0b19ba751d96262e92af53c050aaf45523285107720302b898893fef16a3ac7bd2bad7eb7a37888c0c33e545e3",
       "deployed": true,
-      "serviceSa": null
+      "serviceSa": "0x71acb6c8b3be0957fb4ab3685a924ced762ae715"
     },
     {
       "id": "isl-ada",

@@ -191,6 +191,10 @@ for (let pass = 0; pass < 3 && v.errors > 0; pass++) {
     const ptrs = ds.filter((d) => d.code === 'CAPABILITY_UNVERIFIED').map((d) => String(d.sourcePointer));
     await patch(ptrs.map((path) => ({ op: 'remove', path })), `dropped ${ptrs.join(' ')} — claimed without runtime evidence`);
   } else if (has('SECURITY_SCHEME_INVALID') || has('SECURITY_REF_UNRESOLVED')) {
+    if (!process.argv.includes('--public')) {
+      console.error('  security declaration needs correction; refusing to remove authentication from a service not explicitly declared --public');
+      break;
+    }
     // The shared A2A builder adds a Home-session bearer scheme to every served card, in A2A 1.0's PROTO-JSON form.
     // Released cards do not carry it — no persona release does — and for a service whose admission is PUBLIC it
     // would be inaccurate anyway: there is no bearer to present. Dropped from the release, not from the live card.

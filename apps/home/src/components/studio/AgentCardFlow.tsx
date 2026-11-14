@@ -40,7 +40,7 @@ import {
   type ValidationReport,
 } from '../../studio-client';
 import type { SignHash } from '../../connect-client';
-import { cardUriForName, publicationVerdict, studioErrorSentence, type PublicationVerdict } from '../../lib/studio-view';
+import { cardUriForName, publishedCardUri, publicationVerdict, studioErrorSentence, type PublicationVerdict } from '../../lib/studio-view';
 import { CHAIN_ID } from '../../lib/chain';
 import { A2A_DOMAIN, AGENT_NAME_PARENT, AGENT_NAME_PARENTS } from '../../lib/domain';
 import { Stage, TONE_COLOR, decodeKid, typedNameOf, useUrlFlag } from './parts';
@@ -132,7 +132,11 @@ export function AgentCardFlow({
     }
   })();
   const typedName = typedNameOf(detail, agentName);
-  const cardUri = useMemo(() => cardUriForName(typedName, { nameParent: AGENT_NAME_PARENT, nameParents: AGENT_NAME_PARENTS, a2aDomain: A2A_DOMAIN }), [typedName]);
+  const publishedUri = publishedCardUri(published);
+  const cardUri = useMemo(() => published?.smartAgentBinding
+    ? publishedUri
+    : cardUriForName(typedName, { nameParent: AGENT_NAME_PARENT, nameParents: AGENT_NAME_PARENTS, a2aDomain: A2A_DOMAIN }) ?? publishedUri,
+  [published, publishedUri, typedName]);
 
   const problems = problemsFrom(validation?.diagnostics ?? []);
   const served = servedInterfacesFrom(validation?.diagnostics ?? []);
@@ -158,7 +162,6 @@ export function AgentCardFlow({
   // A live card whose published address is not the address this agent answers at now: the card is fine, the
   // world was told something that has since moved. Publishing again is the fix (and the only way to move a
   // listing, which is written from where the card was published).
-  const publishedUri = detail.releases.filter((r) => r.state === 'published').at(-1)?.publication?.uri ?? null;
   const hostOf = (u: string | null) => { if (!u) return null; try { return new URL(u).host; } catch { return null; } };
   const publishedAtOldAddress = publishedUri && cardUri && hostOf(publishedUri) !== hostOf(cardUri) ? publishedUri : null;
   const plan: PublishPlan = planPublish({ draftState: draft?.state ?? null, errors, release: latest, draftChanged, addressMoved: !!publishedAtOldAddress, scopes });
