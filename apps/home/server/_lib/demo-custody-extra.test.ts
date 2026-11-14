@@ -45,3 +45,19 @@ describe('independently managed additional demo roster', () => {
     expect(demoPersonaFor({ ...env as object, DEMO_PERSONA_KEYS_ADDITIONAL: '{}' } as never, 'calvary')).toBeNull();
   });
 });
+
+describe('independent ISL scientist roster', () => {
+  it('adds scientists while protecting existing addresses and sign-in handles', () => {
+    const isl = JSON.stringify({ elena: { sa: C, eoaPrivateKey: K3 }, ALICE: { sa: `0x${'d'.repeat(40)}`, eoaPrivateKey: K3 }, replaceSeedreader: { sa: B, eoaPrivateKey: K3 } });
+    const merged = mergeRegistries(primary, undefined, undefined, isl);
+    expect([...merged.keys()].sort()).toEqual([A, B, C]);
+    expect(merged.get(A)?.handle).toBe('alice');
+    expect(merged.get(B)?.privateKey).toBe(K2);
+    expect(merged.get(C)?.handle).toBe('elena');
+  });
+  it('Home sign-in sees a newly configured scientist and invalidates its cache when removed', () => {
+    const env = { DEMO_PERSONA_KEYS: primary, DEMO_PERSONA_KEYS_ISL: JSON.stringify({ elena: { sa: C, eoaPrivateKey: K3 } }) } as never;
+    expect(demoPersonaFor(env, 'elena')?.sa).toBe(C);
+    expect(demoPersonaFor({ ...env as object, DEMO_PERSONA_KEYS_ISL: '{}' } as never, 'elena')).toBeNull();
+  });
+});
