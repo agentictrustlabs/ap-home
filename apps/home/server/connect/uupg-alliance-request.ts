@@ -5,6 +5,7 @@
 // `org.applications` document through the InteractionsDO bridge.
 import { importJwks, verifyIdToken } from '@agenticprimitives/connect';
 import { verifySession } from '../_lib/home-session';
+import { bearerNonce } from '../_lib/person-bearer';
 import type { FnContext } from '../_lib/server-broker';
 import { getServer, ownIssuer } from '../_lib/server-broker';
 // Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
@@ -63,13 +64,15 @@ async function callerSa({ request, env }: FnContext): Promise<string | null> {
   if (v.ok) return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
   let iss: string | undefined;
   let aud: string | undefined;
+  let nonce: string | null = null;
   try {
-    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob((token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)))) as { iss?: string; aud?: string };
+    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob((token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)))) as { iss?: string; aud?: string; nonce?: unknown };
     iss = typeof payload.iss === 'string' ? payload.iss : undefined;
     aud = typeof payload.aud === 'string' ? payload.aud : undefined;
+    nonce = bearerNonce(payload);
   } catch { return null; }
   if (!iss || !ownIssuer(request, env)(iss) || !aud || !(await resolveClient(env, aud))) return null;
-  const idv = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud, expectedNonce: null /* an id_token as an API bearer has no nonce flow (spec 445 D5) */ });
+  const idv = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud, expectedNonce: nonce /* bearerNonce: the relying app checked it at sign-in (spec 445 D5) */ });
   if (!idv.ok) return null;
   const sub = (idv.claims.canonical_agent_id ?? idv.claims.sub ?? '') as string;
   return (sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
