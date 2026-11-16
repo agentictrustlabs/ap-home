@@ -17,7 +17,7 @@ import { WorkingBar } from './WorkingBar';
 // explicitly typed a name, so we honour their choice rather than discard it.
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { createHomeKey, secureHome, openHome, givePermission, createOrganization, personGrantForOrgCreate, continueWithGoogle, continueWithYouVersion, activateVaultIfNeeded, isKmsVia, signHashFor, type Via } from '../../home/onboarding';
+import { createHomeKey, secureHome, openHome, givePermission, createOrganization, createGovernedWorkspace, personGrantForOrgCreate, continueWithGoogle, continueWithYouVersion, activateVaultIfNeeded, isKmsVia, signHashFor, type Via } from '../../home/onboarding';
 import { clearStandingGrant } from '../../lib/grant-cache';
 import { readSsoCookie } from '../../lib/sso-cookie';
 import { EmailAuthCard } from '../portal/EmailAuthCard';
@@ -395,6 +395,39 @@ export function OnboardingJourney({
         setBusy(null);
         setScreen('connected');
         setTimeout(() => api.deliverCode(orgCode), 400);
+        return;
+      }
+      // WORKSPACE-CREATE reached through the journey — the same hole org-create had above: a person who signs in on the
+      // way (email / Google, so recognition missed) got the bare site-login below and a code with NO org, so the
+      // relying app was told "signed in" and nothing was chartered (found live on faithnet 2026-11-16, ws-pilot).
+      // Charter the governed workspace exactly as RecognizedEnroll does and submit the grant WITH its org payload.
+      if (api.enroll.template === 'workspace-create') {
+        const name = (api.enroll.orgBase ?? '').trim();
+        if (name.length < 3) return fail('This connect needs a workspace name. Start again from the app and name it there.', 'grant');
+        const created = await createGovernedWorkspace(home, name, delegate, via, kmsAuth, {
+          purpose: api.enroll.purpose ?? 'field-workspace',
+          requestedBy: api.enroll.aud,
+          grantOrg: api.enroll.grantOrg,
+          onProgress: (p) => setBusy(p.label),
+        });
+        if (!created.ok) return fail(created.error, 'grant');
+        const proved = await personGrantForOrgCreate(home, delegate, via, kmsAuth, created, api.enroll.sessionKey);
+        if (!proved.ok) return fail(proved.error, 'grant');
+        const wsCode = await api.submitGrant(grant_id, proved.grant, proved.org, proved.sessionDelegation);
+        const wsTpl = whitelabel.delegationTemplates[api.enroll.template];
+        recordConnectedApp(home.address, {
+          clientId: api.enroll.aud,
+          appName,
+          appDomain: appHost,
+          logo: relyingApp?.logo,
+          canDo: wsTpl?.canDo ?? [],
+          cannotDo: wsTpl?.cannotDo ?? [],
+          grantedAt: Date.now(),
+          expiresAt: wsTpl?.expiryDays ? Date.now() + wsTpl.expiryDays * 86_400_000 : undefined,
+        });
+        setBusy(null);
+        setScreen('connected');
+        setTimeout(() => api.deliverCode(wsCode), 400);
         return;
       }
       // spec 345 — a self-vault grant rides this SAME plain sign-in when the client declares one.
