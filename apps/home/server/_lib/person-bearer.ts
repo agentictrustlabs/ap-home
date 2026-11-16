@@ -39,6 +39,20 @@ function audOf(token: string): string | null {
   } catch { return null; }
 }
 
+/**
+ * The nonce to STATE when an id_token arrives as an API bearer (spec 445 D5: the expectation is explicit).
+ *
+ * A nonce binds an id_token to the sign-in that requested it, and the RELYING APP checked it when it received
+ * the token. On every later call the token is a bearer and no flow of ours sent a nonce, so there is nothing to
+ * compare against. Stating `null` here meant "must carry none" — which refused EVERY real sign-in (the OIDC
+ * flow always sets one) while `/connect/demo-signin` tokens (no nonce) passed, so only demo walks worked:
+ * field.faithnet.io "couldn't load your workspaces", 2026-11-15. So the statement is the token's own nonce.
+ * Signature, issuer, audience and expiry still decide.
+ */
+export function bearerNonce(payload: { nonce?: unknown }): string | null {
+  return typeof payload.nonce === 'string' && payload.nonce.length > 0 ? payload.nonce : null;
+}
+
 /** Verify `token` as an id_token this Home minted for a REGISTERED relying client. The SIGNATURE is checked
  *  against our own JWKS (the real proof it's ours); iss is gated by the same `ownIssuer` predicate the
  *  session path uses (accepts apex/www/subdomain forms); aud must be a registered client_id. Returns the
@@ -54,14 +68,15 @@ export async function verifyIdTokenForRelyingClient(
   // Peek the unverified iss + aud, gate them cheaply, THEN verify (signature/iss/aud/exp) against exactly
   // those values. verifyIdToken's iss/aud checks are strict-equality, so we pass the peeked values — the
   // signature check against our JWKS is what actually authenticates; the gates constrain what we accept.
-  let iss: string | undefined, aud: string | undefined;
+  let iss: string | undefined, aud: string | undefined, nonce: string | null = null;
   try {
-    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob((token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)))) as { iss?: string; aud?: string };
+    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob((token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)))) as { iss?: string; aud?: string; nonce?: unknown };
     iss = typeof payload.iss === 'string' ? payload.iss : undefined;
     aud = typeof payload.aud === 'string' ? payload.aud : undefined;
+    nonce = bearerNonce(payload);
   } catch { return null; }
   if (!iss || !isOwnIss(iss) || !aud || !(await resolveClient(env, aud))) return null;
-  const r = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud, expectedNonce: null /* an id_token as an API bearer has no nonce flow (spec 445 D5) */ });
+  const r = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud, expectedNonce: nonce });
   if (!r.ok) return null;
   const sub = (r.claims.canonical_agent_id ?? r.claims.sub ?? '') as string;
   return (sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
