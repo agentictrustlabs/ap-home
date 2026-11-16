@@ -548,6 +548,7 @@ const faithImpact: WhiteLabelConfig = {
     // CLI's own registration step lands.
     {
       client_id: 'ws-pilot',
+      remembered_consent: 'on',
       name: 'Workspace pilot',
       redirect_uris: [
         'https://ws-pilot-web-faithnet.richardpedersen3.workers.dev/',
