@@ -181,6 +181,15 @@ describe('the Home-session gate runs real verification', () => {
   // must be this Home. The token asserts only WHO the person is; authorization is enforced downstream
   // by the on-chain steward/member gate. The assertion below is that it gets past AUTH and stops at
   // the next gate — not that it is authorized.
+  // A REAL sign-in's id_token carries the nonce of the flow that requested it. Stating `expectedNonce: null`
+  // ("must carry none") refused every one while demo-signin tokens (no nonce) passed — Field's attention read on
+  // faithnet, 2026-11-15. The relying app checked the nonce at sign-in; as a bearer it is the token's own.
+  it('accepts a RELYING app id_token that carries a nonce (a real sign-in), and still stops at the next gate', async () => {
+    const r = await call('channels.list', await mint(signer, caip(MEMBER), { aud: 'some-other-app', nonce: 'n-from-the-sign-in' }));
+    expect(r.status).not.toBe(401);
+    expect(r.status).toBe(409);
+  });
+
   it('accepts a foreign audience as a RELYING app id_token, and still stops at the next gate', async () => {
     const r = await call('channels.list', await mint(signer, caip(MEMBER), { aud: 'some-other-app' }));
     expect(r.status).not.toBe(401);
