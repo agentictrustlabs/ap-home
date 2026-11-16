@@ -73,18 +73,18 @@ function parseRegistry(raw: string | undefined): Map<string, DemoPersona> {
  *  own, in either shape. It is ADDITIVE ONLY: an address already in `DEMO_PERSONA_KEYS` keeps that entry (the extra
  *  secret can never replace or re-key an existing persona), and a malformed extra secret adds nothing. */
 // An independently managed additional roster preserves both unreadable existing Vercel secrets.
-export function mergeRegistries(primary: string | undefined, extra: string | undefined, additional?: string, isl?: string): Map<string, DemoPersona> {
+export function mergeRegistries(primary: string | undefined, extra: string | undefined, additional?: string, isl?: string, family?: string): Map<string, DemoPersona> {
   const out = parseRegistry(primary);
   for (const raw of [extra, additional]) for (const [sa, p] of parseRegistry(raw)) if (!out.has(sa)) out.set(sa, p);
   // A new scientist must not shadow another team's existing sign-in handle.
-  for (const [sa, p] of parseRegistry(isl)) if (!out.has(sa) && ![...out.values()].some((existing) => existing.handle.toLowerCase() === p.handle.toLowerCase())) out.set(sa, p);
+  for (const raw of [isl, family]) for (const [sa, p] of parseRegistry(raw)) if (!out.has(sa) && ![...out.values()].some((existing) => existing.handle.toLowerCase() === p.handle.toLowerCase())) out.set(sa, p);
   return out;
 }
 
-let cached: { raw: string | undefined; extra: string | undefined; additional: string | undefined; isl: string | undefined; map: Map<string, DemoPersona> } | null = null;
+let cached: { raw: string | undefined; extra: string | undefined; additional: string | undefined; isl: string | undefined; family: string | undefined; map: Map<string, DemoPersona> } | null = null;
 function registry(env: Env): Map<string, DemoPersona> {
-  if (!cached || cached.raw !== env.DEMO_PERSONA_KEYS || cached.extra !== env.DEMO_PERSONA_KEYS_EXTRA || cached.additional !== env.DEMO_PERSONA_KEYS_ADDITIONAL || cached.isl !== env.DEMO_PERSONA_KEYS_ISL) {
-    cached = { raw: env.DEMO_PERSONA_KEYS, extra: env.DEMO_PERSONA_KEYS_EXTRA, additional: env.DEMO_PERSONA_KEYS_ADDITIONAL, isl: env.DEMO_PERSONA_KEYS_ISL, map: mergeRegistries(env.DEMO_PERSONA_KEYS, env.DEMO_PERSONA_KEYS_EXTRA, env.DEMO_PERSONA_KEYS_ADDITIONAL, env.DEMO_PERSONA_KEYS_ISL) };
+  if (!cached || cached.raw !== env.DEMO_PERSONA_KEYS || cached.extra !== env.DEMO_PERSONA_KEYS_EXTRA || cached.additional !== env.DEMO_PERSONA_KEYS_ADDITIONAL || cached.isl !== env.DEMO_PERSONA_KEYS_ISL || cached.family !== env.DEMO_PERSONA_KEYS_FAMILY) {
+    cached = { raw: env.DEMO_PERSONA_KEYS, extra: env.DEMO_PERSONA_KEYS_EXTRA, additional: env.DEMO_PERSONA_KEYS_ADDITIONAL, isl: env.DEMO_PERSONA_KEYS_ISL, family: env.DEMO_PERSONA_KEYS_FAMILY, map: mergeRegistries(env.DEMO_PERSONA_KEYS, env.DEMO_PERSONA_KEYS_EXTRA, env.DEMO_PERSONA_KEYS_ADDITIONAL, env.DEMO_PERSONA_KEYS_ISL, env.DEMO_PERSONA_KEYS_FAMILY) };
   }
   return cached.map;
 }
