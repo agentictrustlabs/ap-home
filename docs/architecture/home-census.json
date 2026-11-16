@@ -204,7 +204,8 @@
         "(portal)/agents",
         "(portal)/service/[agent]/members",
         "(portal)/service/[agent]/access",
-        "invite/[token]"
+        "invite/[token]",
+        "(portal)/organization-invitation"
       ],
       "capabilities": [
         "organization.create",
@@ -228,7 +229,9 @@
         "apps/home/src/lib/invitation-check.test.ts",
         "apps/home/src/lib/invite-copy.test.ts",
         "apps/home/src/lib/new-member.test.ts",
-        "scripts/check-invitation-audit.mts"
+        "scripts/check-invitation-audit.mts",
+        "apps/home/server/connect/member-access-wire.test.ts",
+        "apps/home/src/lib/member-library-grant.test.ts"
       ],
       "gates": [
         "verify-home-mcp-people"

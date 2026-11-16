@@ -209,5 +209,5 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // The joiner is told the role and shown its offer (spec 427 §4): the name and description they read, and the
   // skill packs their agent may be equipped with — theirs to accept, on their own Playbook page.
   const roleOffer = offeredRole && recordedRole && recordedRole.roleDefinitionId === offeredRole.roleDefinitionId ? offeredRole : null;
-  return json({ ok: true, memberAccess: madValid, membershipRecorded, ...(membershipError ? { membershipError } : {}), ...(offerFits ? { relationshipOffer } : {}), ...(recordedRole ? { role: recordedRole } : {}), ...(roleOffer ? { roleOffer } : {}) });
+  return json({ ok: true, organizationKind, ...(madValid ? {memberAccessDelegation:mad} : {}), memberAccess: madValid, membershipRecorded, ...(membershipError ? { membershipError } : {}), ...(offerFits ? { relationshipOffer } : {}), ...(recordedRole ? { role: recordedRole } : {}), ...(roleOffer ? { roleOffer } : {}) });
 };

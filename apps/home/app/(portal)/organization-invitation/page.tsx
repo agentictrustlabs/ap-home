@@ -28,7 +28,7 @@ export default function OrganizationInvitationPage() {
     setBusy(true);setError('');
     try {
       if(request.join){
-        await joinOrganization({member:agentAddress,org:request.org,displayName:personName??agentName??'Family member',session,credential:profile?.credential,named:!!agentName?.trim()});
+        await joinOrganization({member:agentAddress,org:request.org,displayName:personName??agentName??'Family member',session,credential:profile?.credential,named:!!agentName?.trim(),requireRecorded:true});
         // The native join is best-effort about some projections. Do not call it complete without a persisted member link.
         const r=await fetch('/connect/related-orgs',{headers:{authorization:`Bearer ${session.token}`}});
         const b=await r.json();
@@ -48,6 +48,7 @@ export default function OrganizationInvitationPage() {
     }catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}
   };
   return <section style={{maxWidth:480,margin:'6vh auto',padding:24}}>
+    <p>Approving as {personName??agentName??agentAddress??'your Home'}</p>
     <h1>{request?.join?'Join this family?':'Approve family access?'}</h1>
     {request&&!done&&<>
       <p>{request.join?'Accept the invitation in':<>Invite <strong>{request.label}</strong> to</>} {request.appName}.</p>
