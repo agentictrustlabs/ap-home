@@ -9,11 +9,14 @@
     "agents",
     "secrets",
     "deploy",
-    "custody"
+    "custody",
+    "home"
   ],
   "notes": [],
   "operatorNotes": [],
   "vercelProjectId": "prj_UlXt5EDB05f28tbuhcX0hlcbmEMP",
   "homeHost": "coach-assist-home.vercel.app",
-  "gatewayTokenHash": "ad8ebbc2dfc0b3ab5c85f1d7c8bbe114bec7a0cd7bbb27ab3a1c09819cecffae"
+  "gatewayTokenHash": "ad8ebbc2dfc0b3ab5c85f1d7c8bbe114bec7a0cd7bbb27ab3a1c09819cecffae",
+  "kvStoreId": "store_TgG8yaCItstXDrys",
+  "kvConnected": true
 }
