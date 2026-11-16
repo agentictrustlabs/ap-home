@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { generateBrokerKeypair, importJwks, mintAgentSession, verifyAgentSession, verifyIdToken } from '@agenticprimitives/connect';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { generateBrokerKeypair, importJwks, mintAgentSession, mintIdToken, verifyAgentSession, verifyIdToken } from '@agenticprimitives/connect';
 import { resolveOrigin } from '../_lib/origin';
 import { onRequestPost } from './session-token';
+import { verifyRelyingIdToken } from '../../../agent-runtime/src/custody-oidc';
 
 // Spec 426 §5 — the production session seam. A Home session (the same JWT /connect/demo-signin and the
 // portal mint) becomes an id_token for the session's OWN agent at ONE registered client. Self-contained:
@@ -103,5 +104,41 @@ describe('/connect/session-token — spec 426 §5 production seam', () => {
     const res = await post({ client_id: 'gc-platform' }, appToken);
     expect(res.status).toBe(200);
     expect(((await res.json()) as { aud: string }).aud).toBe('gc-platform');
+  });
+
+  it.each(['family-field', 'family-field-join'])('exchanges %s nonce-bound sign-in for a runtime-compatible bearer without creating an AgentSession', async (clientId) => {
+    const { getServer } = await import('../_lib/server-broker');
+    const { signer, jwks } = await getServer(env);
+    const login = await mintIdToken({
+      iss, sub: `eip155:34348:${SA}` as Parameters<typeof mintIdToken>[0]['sub'], aud: clientId, ttlSeconds: 600, nonce: 'real-login-flow-nonce',
+    }, signer);
+    const result = await post({ client_id: clientId, as: SA }, login);
+    expect(result.status).toBe(200);
+    const body = await result.json() as { id_token: string; sub: string; aud: string };
+    expect(body.aud).toBe(clientId);
+    expect(body.sub.endsWith(SA)).toBe(true);
+    const keys = await importJwks(jwks);
+    // The callback token is nonce-bound; the API exchange deliberately has no
+    // sign-in nonce. Both remain ID tokens, never custody-grade Home sessions.
+    expect((await verifyIdToken(login, { keys, expectedIss: iss, expectedAud: clientId, expectedNonce: 'real-login-flow-nonce' })).ok).toBe(true);
+    expect((await verifyIdToken(login, { keys, expectedIss: iss, expectedAud: clientId, expectedNonce: null })).ok).toBe(false);
+    expect((await verifyIdToken(body.id_token, { keys, expectedIss: iss, expectedAud: clientId, expectedNonce: null })).ok).toBe(true);
+    expect((await verifyAgentSession(body.id_token, { keys, expectedIss: iss, expectedAud: clientId })).ok).toBe(false);
+
+    // Real verifier, real signed tokens. Mock only the broker's public JWKS transport.
+    const jwksUrl = 'https://home.test/unit-family-api-jwks';
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (String(input) !== jwksUrl) throw new Error('Unexpected request in bearer contract test');
+      return Response.json(jwks);
+    });
+    try {
+      const gate = { BROKER_ISS: iss, BROKER_JWKS_URL: jwksUrl };
+      // #150 also allows direct nonce-bearing API callers. This test protects
+      // the existing exchange, not the old runtime refusal that exposed it.
+      expect(await verifyRelyingIdToken(login, gate)).toMatchObject({ ok: true, sa: SA, clientId });
+      expect(await verifyRelyingIdToken(body.id_token, gate)).toMatchObject({ ok: true, sa: SA, clientId });
+    } finally { fetch.mockRestore(); }
+    expect((await post({ client_id: clientId, as: '0x2222222222222222222222222222222222222222' }, login)).status).toBe(403);
+    expect((await post({ client_id: clientId, as: SA }, login.slice(0, -4) + 'xxxx')).status).toBe(401);
   });
 });
