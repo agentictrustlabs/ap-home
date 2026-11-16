@@ -3,7 +3,8 @@
     "home-address",
     "declare",
     "workers-config",
-    "cloud-resources"
+    "cloud-resources",
+    "key-vault"
   ],
   "notes": [],
   "operatorNotes": [],
