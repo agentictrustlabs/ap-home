@@ -118,6 +118,10 @@ describe('/connect/session-token — spec 426 §5 production seam', () => {
     expect(body.aud).toBe(clientId);
     expect(body.sub.endsWith(SA)).toBe(true);
     const keys = await importJwks(jwks);
+    // The callback token is nonce-bound; the API exchange deliberately has no
+    // sign-in nonce. Both remain ID tokens, never custody-grade Home sessions.
+    expect((await verifyIdToken(login, { keys, expectedIss: iss, expectedAud: clientId, expectedNonce: 'real-login-flow-nonce' })).ok).toBe(true);
+    expect((await verifyIdToken(login, { keys, expectedIss: iss, expectedAud: clientId, expectedNonce: null })).ok).toBe(false);
     expect((await verifyIdToken(body.id_token, { keys, expectedIss: iss, expectedAud: clientId, expectedNonce: null })).ok).toBe(true);
     expect((await verifyAgentSession(body.id_token, { keys, expectedIss: iss, expectedAud: clientId })).ok).toBe(false);
 
@@ -129,7 +133,9 @@ describe('/connect/session-token — spec 426 §5 production seam', () => {
     });
     try {
       const gate = { BROKER_ISS: iss, BROKER_JWKS_URL: jwksUrl };
-      expect((await verifyRelyingIdToken(login, gate)).ok).toBe(false);
+      // #150 also allows direct nonce-bearing API callers. This test protects
+      // the existing exchange, not the old runtime refusal that exposed it.
+      expect(await verifyRelyingIdToken(login, gate)).toMatchObject({ ok: true, sa: SA, clientId });
       expect(await verifyRelyingIdToken(body.id_token, gate)).toMatchObject({ ok: true, sa: SA, clientId });
     } finally { fetch.mockRestore(); }
     expect((await post({ client_id: clientId, as: '0x2222222222222222222222222222222222222222' }, login)).status).toBe(403);
