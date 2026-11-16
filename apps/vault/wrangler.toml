@@ -385,6 +385,7 @@ workers_dev = true
 crons = ["17 4 * * *"]   # daily JTI-ledger prune (src/index.ts pruneExpiredJtis)
 
 [env.coach-assist.vars]
+VAULT_KEY_SERVER_DELEGATE = "0x9901fE6E73775Fc4ec465b43f23F73612112fB47"
 AKCS_TENANT_ID = "coach-assist"
 AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"
 MCP_AUDIENCE = "urn:mcp:server:person"
