@@ -15,7 +15,8 @@
   ],
   "notes": [],
   "operatorNotes": [
-    "Register coach-assist.estate: in agenticprimitives/packages/contracts, as the naming root's owner — ESTATE_LABEL=coach-assist ESTATE_AGENT=0x88043da280d04a76e8363cd99d1a80371ff43e23 forge script script/AddEstateName.s.sol:AddEstateName --rpc-url <faithchain rpc> --broadcast. Until then the estate works; its agent simply has no .estate name."
+    "Register coach-assist.estate: in agenticprimitives/packages/contracts, as the naming root's owner — ESTATE_LABEL=coach-assist ESTATE_AGENT=0x88043da280d04a76e8363cd99d1a80371ff43e23 forge script script/AddEstateName.s.sol:AddEstateName --rpc-url <faithchain rpc> --broadcast. Until then the estate works; its agent simply has no .estate name.",
+    "Naming gate: run scripts/add-naming-gate.mts --estate coach-assist (not in the public repo yet), then set NAMING_GATE_PRIVATE_KEY on the coach-assist-home Vercel project. Until then its people can use the estate but not buy .me names from its Home."
   ],
   "vercelProjectId": "prj_UlXt5EDB05f28tbuhcX0hlcbmEMP",
   "homeHost": "coach-assist-home.vercel.app",
