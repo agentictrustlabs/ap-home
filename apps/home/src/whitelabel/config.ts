@@ -435,6 +435,9 @@ const faithImpact: WhiteLabelConfig = {
       allowed_delegation_templates: ['site-login'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0' as const,
       socialCustody: true,
+      // Home approves a revocable, read-only profile grant at connect. Family Field displays
+      // the name/photo via /connect/profile; it receives no profile write or payment authority.
+      read_grant: { resources: ['vault:impact-profile'] },
       setup_notice: client_id === 'family-field'
         ? 'Home will prepare your family household if you do not already have one, and your personal treasury using the existing SHEQL starter flow. No spending permission is granted.'
         : 'Home will prepare your personal treasury using the existing SHEQL starter flow. Accept the invitation to join your family; this connection does not create another household or grant spending permission.',
