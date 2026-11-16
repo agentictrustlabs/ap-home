@@ -602,6 +602,7 @@ it('discloses founder versus invitee setup without payment authority', () => {
     expect(result.canDo).toContain(app.setup_notice);
     expect(result.cannotDo).toEqual(template.cannotDo);
     expect(app.allowed_delegation_templates).toEqual(['site-login']);
+    expect(app.read_grant).toEqual({ resources: ['vault:impact-profile'] });
     expect(withCurrencyConsent(result, app)).toEqual(result);
   }
 });
