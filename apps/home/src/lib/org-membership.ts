@@ -104,6 +104,7 @@ export async function recordOrgMembership(
   /** Spec 410 §8 — the organization's side of the membership credential, when the redeem handed it over (the
    *  in-app path finds it in the organization's invitation record server-side). */
   relationshipOffer?: RelationshipOfferV1 | null,
+  requireRecorded = false,
 ): Promise<JoinedRole | null> {
   let joinedRole: JoinedRole | null = null;
   const t0 = Date.now();
@@ -150,7 +151,8 @@ export async function recordOrgMembership(
     // Spec 410 §8 — THE COUNTERSIGNATURE. The organization signed the credential's digest when it invited; the
     // member signs the same digest now, and the agent verifies both on chain and writes one copy into each vault.
     // Best-effort like the rest of this ceremony: a membership stands without it, and the miss is logged by name.
-    const joinedBody = (await joined.json().catch(() => ({}))) as { relationshipOffer?: RelationshipOfferV1; role?: JoinedRole['role']; roleOffer?: JoinedRole['offer'] };
+    const joinedBody = (await joined.json().catch(() => ({}))) as { error?: string; membershipError?: string; membershipRecorded?: boolean; memberAccess?: boolean; organizationKind?: string; memberAccessDelegation?: unknown; relationshipOffer?: RelationshipOfferV1; role?: JoinedRole['role']; roleOffer?: JoinedRole['offer'] };
+    if (requireRecorded && (!joined.ok || !joinedBody.membershipRecorded || !joinedBody.memberAccess)) throw new Error(joinedBody.membershipError ?? joinedBody.error ?? 'Home has not recorded membership and its access grant.');
     // The ROLE the organization's own object recorded (never what this client sent) — a named one only.
     if (joinedBody.role?.assignedRole && joinedBody.role.assignedRole !== 'member') joinedRole = { role: joinedBody.role, ...(joinedBody.roleOffer ? { offer: joinedBody.roleOffer } : {}) };
     const offer = joinedBody.relationshipOffer ?? relationshipOffer ?? null;
@@ -198,7 +200,7 @@ export async function recordOrgMembership(
     await Promise.all([
       fetch(`${doBase}/relationships.merge`, {
         method: 'POST', headers: hdrs,
-        body: JSON.stringify({ session: bearer, entry: { org: org.toLowerCase(), relationship: 'member', delegations: [toWire(d)], ...(membershipProvenance ?? {}) } }),
+        body: JSON.stringify({ session: bearer, entry: { org: org.toLowerCase(), relationship: 'member', kind: joinedBody.organizationKind === 'household' ? 'household' : 'org', delegations: joinedBody.memberAccessDelegation ? [joinedBody.memberAccessDelegation, toWire(d)] : [toWire(d)], ...(membershipProvenance ?? {}) } }),
       }).catch(() => null),
       displayName?.trim()
         ? fetch(`${doBase}/member.profile.put`, {
@@ -209,6 +211,7 @@ export async function recordOrgMembership(
     ]);
     lap('relationships + profile written');
   } catch (e) {
+    if (requireRecorded) throw e;
     console.warn('[org-membership] membership delegation not recorded (join still succeeded):', e);
   }
   return joinedRole;

@@ -102,6 +102,18 @@ describe('/connect/friend-invite', () => {
     expect(env.AUTH_CODES.m.get(`friend-invite:${first.token}`)).not.toContain('boaz@');
   });
 
+  it('keeps an app organization context without creating membership; deduplication is per context', async () => {
+    const contextOrg = '0x1111111111111111111111111111111111111111';
+    const body = {email:'context@example.org',contextOrg};
+    const first=await (await post(body,sessions[RUTH]!)).json() as {token:string};
+    const same=await (await post(body,sessions[RUTH]!)).json() as {token:string};
+    const other=await (await post({...body,contextOrg:'0x2222222222222222222222222222222222222222'},sessions[RUTH]!)).json() as {token:string};
+    expect(same.token).toBe(first.token);expect(other.token).not.toBe(first.token);
+    const lookup=await (await get('?token='+first.token,null)).json();
+    expect(lookup).toMatchObject({contextOrg,accepted:false});expect(lookup).not.toHaveProperty('memberAccessDelegation');
+    expect((await post({...body,contextOrg:'not-an-org'},sessions[RUTH]!)).status).toBe(400);
+  });
+
   it('accepting marks who accepted; nobody else can take it after; the inviter cannot accept their own', async () => {
     const res = (await (await post({ email: 'naomi@example.org' }, sessions[RUTH]!)).json()) as { token: string };
     expect((await post({ token: res.token, claim: true }, sessions[RUTH]!)).status).toBe(400);

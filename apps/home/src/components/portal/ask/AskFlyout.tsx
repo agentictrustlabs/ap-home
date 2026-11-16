@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Address } from '@agenticprimitives/types';
 import { useRouter } from 'next/navigation';
 import { useSession } from '../../../context/session';
+import { playbookBehind } from '../../../home/playbook-behind';
 import { RunInspector } from '../runs/RunInspector';
 import { TurnOperations } from '../runs/TurnOperations';
 import { turnModelCallsOf, turnSelectionOf } from '../../../home/run-trace-view';
@@ -1329,6 +1330,7 @@ function ReplyView({ reply, realm, addressee, onNext }: { reply: AskReply; realm
     );
   }
   if (reply.kind === 'refused') {
+    if (playbookBehind(reply.error)) return <div><p>Your agent needs an update to handle this request.</p><p>Review the available update in Home, then return here and try again.</p><a href="/playbook" target="_blank" rel="noopener noreferrer">Review your agent update</a></div>;
     return (
       <div>
         <div>{reply.outcome === 'denied' ? 'Refused — the authority does not cover this.' : 'That did not go through.'}</div>

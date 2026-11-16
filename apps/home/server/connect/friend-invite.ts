@@ -59,6 +59,8 @@ export interface FriendInviteStash {
   expiresAt: number;
   /** Where the invitation was made from (a registered app's origin) — its link lands there. */
   origin?: string | null;
+  /** App navigation context only; never a membership or access grant. */
+  contextOrg?: string;
   acceptedBy?: string;
   acceptedAt?: number;
 }
@@ -68,6 +70,8 @@ export interface SentInvite {
   email: string;
   createdAt: number;
   expiresAt: number;
+  /** App navigation context only; never a membership or access grant. */
+  contextOrg?: string;
   acceptedBy?: string;
   acceptedAt?: number;
 }
@@ -130,7 +134,7 @@ async function deliver(
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
   const body = (await request.json().catch(() => null)) as {
-    email?: string; note?: string; fromName?: string; token?: string; claim?: boolean; cancel?: boolean; resend?: boolean;
+    contextOrg?: string; email?: string; note?: string; fromName?: string; token?: string; claim?: boolean; cancel?: boolean; resend?: boolean;
   } | null;
   const me = await personFromBearer(request, env);
   if (!me) return jsonCors({ error: 'sign in to invite a friend' }, request, 401);
@@ -175,6 +179,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return jsonCors({ ok: true, resent: true }, request);
   }
 
+  const contextOrg = typeof body?.contextOrg === 'string' && /^0x[0-9a-fA-F]{40}$/.test(body.contextOrg) ? body.contextOrg.toLowerCase() : undefined;
+  if(body?.contextOrg && !contextOrg) return jsonCors({error:'Invalid organization context'},request,400);
   const email = (body?.email ?? '').trim().toLowerCase();
   if (!EMAIL_RE.test(email)) return jsonCors({ error: 'email required' }, request, 400);
   const note = (body?.note ?? '').trim().slice(0, 500) || null;
@@ -184,7 +190,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const emailHash = hashOf(email);
 
   const sent = await readSent(kv, me.person);
-  const open = keptSent(sent, now).find((s) => !s.acceptedBy && hashOf(s.email) === emailHash);
+  const open = keptSent(sent, now).find((s) => !s.acceptedBy && hashOf(s.email) === emailHash && s.contextOrg === contextOrg);
   if (open) {
     const raw = await kv.get(KEY(open.token));
     if (raw) {
@@ -197,6 +203,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '').slice(0, 8);
   const origin = request.headers.get('Origin');
   const stash: FriendInviteStash = {
+    ...(contextOrg ? {contextOrg} : {}),
     from: me.person,
     fromName,
     emailHash,
@@ -211,7 +218,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     await kv.delete(KEY(token));
     return jsonCors({ error: `could not send the invitation: ${delivered.error}` }, request, 502);
   }
-  await writeSent(kv, me.person, [...sent, { token, email, createdAt: now, expiresAt: stash.expiresAt }]);
+  await writeSent(kv, me.person, [...sent, { token, email, ...(contextOrg ? {contextOrg} : {}), createdAt: now, expiresAt: stash.expiresAt }]);
   return jsonCors({ ok: true, token, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', expiresAt: new Date(stash.expiresAt).toISOString() }, request);
 };
 
@@ -235,7 +242,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     ? (stash.acceptedBy ? stash.acceptedBy === viewer.person : await ownsInvitedEmail(env.AUTH_CODES, stash.emailHash, viewer.person))
     : null;
   return jsonCors({
-    ok: true, from: stash.from, fromName: stash.fromName, note: stash.note,
+    ok: true, ...(stash.contextOrg ? {contextOrg:stash.contextOrg} : {}), from: stash.from, fromName: stash.fromName, note: stash.note,
     expiresAt: new Date(stash.expiresAt).toISOString(), accepted: !!stash.acceptedBy,
     ...(forYou !== null ? { forYou } : {}),
   }, request);

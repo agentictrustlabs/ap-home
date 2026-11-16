@@ -22,6 +22,8 @@ export interface JoinOrganizationInput {
   credential?: unknown;
   /** Whether the member has a naming-service name (messaging provisioning uses it). */
   named: boolean;
+  /** A relying app may require confirmed membership rather than a best-effort projection. */
+  requireRecorded?: boolean;
 }
 
 /** Resolves with the ROLE the organization recorded the member as (spec 427), when it named one — so whatever ran the
@@ -40,7 +42,7 @@ export async function joinOrganization(input: JoinOrganizationInput): Promise<Jo
   // spec 322 W3d — the member's own interactions plane, when it costs no extra device prompt.
   if (isKmsVia(via)) await activateInteractionsIfNeeded(input.member, via, { token: input.session.token }).catch(() => null);
   // spec 321 W1/W2b — the membership delegation (member→org); the server attaches any steward-pre-signed grant.
-  const joinedRole = await recordOrgMembership(input.member, org, sign, input.session.token, null, input.displayName);
+  const joinedRole = await recordOrgMembership(input.member, org, sign, input.session.token, null, input.displayName, null, input.requireRecorded);
   await provisionCommunityMessaging({ person: input.member, org: org as Address, named: input.named, via, token: input.session.token })
     .catch((e) => { console.warn('[join] community messaging provision failed (non-fatal):', e); });
   return joinedRole;

@@ -20,3 +20,8 @@ describe('an app\'s one request', () => {
     expect(appRequestOf({ pathname: '/friend-invitation', search: '?from=seed-reader' })).toBeNull();
   });
 });
+
+it('keeps an app membership approval focused through sign-in',()=>{
+ expect(appRequestOf({pathname:'/organization-invitation',search:'?org=0xabc&from=family-field-join'})).toEqual({act:'membership',name:null,from:'family-field-join'});
+ expect(appRequestOf({pathname:'/organization-invitation',search:'?org=0xabc'})).toBeNull();
+});

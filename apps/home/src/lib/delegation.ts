@@ -562,6 +562,23 @@ export async function issueOrganizationResourceAccessDelegation(
   return d;
 }
 
+/** A relying app's member invitation: profile read + exactly its declared Library artifacts.
+ * No private person records, treasury, custody, or other Library documents. */
+export async function issueOrganizationLibraryMemberAccessDelegation(
+  org: Address, member: Address, artifacts: string[], server: string, sign: SignHash,
+): Promise<Delegation> {
+  if (!artifacts.length || artifacts.some(id => !/^[a-z0-9][a-z0-9._-]{0,127}$/i.test(id))) throw new Error('Exact Library artifact IDs required');
+  const d = await issueOrganizationResourceAccessDelegation(org, member, server, async () => '0x');
+  d.caveats = [
+    buildVaultRecordScopeCaveat([
+      {server,resources:[ORG_PROFILE_RESOURCE_SCOPE],ops:['read']},
+      {server,resources:['vault:content.catalog', ...artifacts.map(id => `vault:content.artifact.${id}`)],ops:['read','write']},
+    ]), ...d.caveats.slice(1),
+  ];
+  d.signature = await sign(hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager));
+  return d;
+}
+
 /**
  * P4 record coverage — the workspace/team MEMBERSHIP wire `org → member`, signed by the org's
  * custody at invite time ALONGSIDE the site delegation. The site delegation is reach; this wire is

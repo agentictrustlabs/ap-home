@@ -4,7 +4,8 @@
 // not a broken read and not an empty one: it is a version behind, and the fix is hers to take on the Playbook page
 // (K3 — never a silent upgrade). Every screen that reads through the harness says exactly that, with the way there.
 export function playbookBehind(error: string | null | undefined): { toolId: string } | null {
-  const m = /unknown_tool[^:]*:.*?not exposed by this agent:\s*([a-z0-9.]+)/i.exec(error ?? '');
+  const m = /unknown_tool[^:]*:.*?not exposed by this agent:\s*([a-z0-9.]+)/i.exec(error ?? '')
+    ?? /plan_refused:.*?names ["']([a-z0-9.]+)["'], which this agent does not offer/i.exec(error ?? '');
   return m ? { toolId: m[1]! } : null;
 }
 

@@ -75,6 +75,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }
   if (!vault) return json({ error: 'org vault not enabled — a steward must enable channel/vault storage first' }, 409);
   try {
+    const stewardLink = JSON.parse((await env.AUTH_CODES.get(`related:${control.person.toLowerCase()}:${org}`)) ?? '{}') as {kind?: string};
+    const organizationKind = stewardLink.kind === 'household' ? 'household' : 'org';
     // Household facets (spec 368) ride on the record so redemption can put them on the membership. Declarative.
     const kin = typeof body?.kin === 'string' ? body.kin.trim().toLowerCase().slice(0, 40) : '';
     const role = typeof body?.role === 'string' ? body.role.trim().toLowerCase().slice(0, 40) : '';
@@ -83,7 +85,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     const offer = body?.relationshipOffer;
     const offerFits = !!offer && (offer.subject ?? '').toLowerCase() === agent && (offer.object ?? '').toLowerCase() === org && /^0x[0-9a-fA-F]{64}$/.test(String(offer.digest ?? ''));
     // `invitedBy` is who offered: the join records them as the role's `assignedBy`, and the room's line names them.
-    await vault.set(`org.invite:agent:${agent}`, { delegation: mad, createdAt: Date.now(), status: 'pending', invitedBy: control.person.toLowerCase(), ...(kin ? { kin } : {}), ...(role ? { role } : {}), ...(orgRole ? { orgRole } : {}), ...(offerFits ? { relationshipOffer: offer } : {}) });
+    await vault.set(`org.invite:agent:${agent}`, { organizationKind, delegation: mad, createdAt: Date.now(), status: 'pending', invitedBy: control.person.toLowerCase(), ...(kin ? { kin } : {}), ...(role ? { role } : {}), ...(orgRole ? { orgRole } : {}), ...(offerFits ? { relationshipOffer: offer } : {}) });
   } catch (e) {
     return json({ error: 'could not store the invitation in the organization vault', detail: String(e instanceof Error ? e.message : e) }, 502);
   }
