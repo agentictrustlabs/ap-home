@@ -6,6 +6,16 @@ const A = `0x${'a'.repeat(40)}`, B = `0x${'b'.repeat(40)}`, C = `0x${'c'.repeat(
 const primary = JSON.stringify({ alice: { sa: A, eoaPrivateKey: K1, name: 'Alice' }, seedreader: { sa: B, eoaPrivateKey: K2 } });
 
 describe('DEMO_PERSONA_KEYS_EXTRA — additive only', () => {
+  it('adds the Family custodian without replacing another address or handle, and removes cached entries', () => {
+    const family = JSON.stringify({ 'ap-family': { sa: C, eoaPrivateKey: K3 }, ALICE: { sa: `0x${'d'.repeat(40)}`, eoaPrivateKey: K3 }, replacement: { sa: B, eoaPrivateKey: K3 } });
+    const merged = mergeRegistries(primary, undefined, undefined, undefined, family);
+    expect([...merged.keys()].sort()).toEqual([A, B, C]);
+    expect(merged.get(A)?.handle).toBe('alice');
+    expect(merged.get(B)?.privateKey).toBe(K2);
+    const env = { DEMO_PERSONA_KEYS: primary, DEMO_PERSONA_KEYS_FAMILY: family } as never;
+    expect(demoPersonaFor(env, 'ap-family')?.sa).toBe(C);
+    expect(demoPersonaFor({ ...env as object, DEMO_PERSONA_KEYS_FAMILY: '{}' } as never, 'ap-family')).toBeNull();
+  });
   it('adds a persona the primary roster does not hold, and keeps every primary persona', () => {
     const m = mergeRegistries(primary, JSON.stringify({ 'demo-publisher': { sa: C, eoaPrivateKey: K3, name: 'Demo Publisher' } }));
     expect([...m.keys()].sort()).toEqual([A, B, C]);
