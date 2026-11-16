@@ -430,7 +430,7 @@ const faithImpact: WhiteLabelConfig = {
       client_id,
       remembered_consent: 'on' as const,
       name: client_id === 'family-field' ? 'Family Field' : 'Family Field · join your family',
-      redirect_uris: ['https://family-field.tiledfacet64.chatgpt.site/', 'http://127.0.0.1:5189/', 'http://localhost:5189/'],
+      redirect_uris: ['https://ap-family.faithnet.io/', 'https://family-field.tiledfacet64.chatgpt.site/', 'http://127.0.0.1:5189/', 'http://localhost:5189/'],
       allowed_scopes: ['openid', 'profile', 'agent'],
       allowed_delegation_templates: ['site-login'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0' as const,
