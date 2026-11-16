@@ -1996,7 +1996,7 @@ async function createManagedAgentSocial(
   }
   requestReindex([child]); // auto-index: the new managed agent (treasury/org, Google path) appears now
   // Creator = first member (same as the device-credential path): C_sub signs, zero prompts.
-  if (input.kind === 'org') {
+  if (input.kind === 'org' || input.kind === 'household') {
     onStep?.('Adding you as the first member…');
     await recordOrgMembership(input.person, child, googleSignHash(input.person, sessionToken), sessionToken);
     // Spec 410 §8 — the founder's own membership credential. The KMS custodian signs for the SAs it custodies: the
@@ -2133,6 +2133,16 @@ async function readRelatedOrgs(token: string): Promise<RelatedOrgsBody> {
 export async function listManagedAgents(sessionToken: string, surface: OrgSurface = 'working'): Promise<ManagedAgent[]> {
   const b = (await readRelatedOrgs(sessionToken).catch(() => ({}))) as RelatedOrgsRows;
   return managedAgentsFrom(b, surface);
+}
+
+/** Provisioning must distinguish an empty roster from unavailable storage. Never create on a failed read. */
+export async function listManagedAgentsStrict(sessionToken: string, surface: OrgSurface = 'any'): Promise<ManagedAgent[]> {
+  invalidateRelatedOrgs();
+  const body = await readRelatedOrgs(sessionToken);
+  if (!Array.isArray(body.orgs) || body.orgs.some((r) => !/^0x[0-9a-fA-F]{40}$/.test(String(r.orgAgent ?? '')))) {
+    throw new Error('The managed-agent roster could not be verified; no agent will be created.');
+  }
+  return managedAgentsFrom(body as RelatedOrgsRows, surface);
 }
 
 /** A PERSONA's managed agents — what SHE stewards and belongs to — read by her custodian (server `?for=`). Throws when

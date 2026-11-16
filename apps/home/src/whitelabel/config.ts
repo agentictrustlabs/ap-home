@@ -424,6 +424,21 @@ const faithImpact: WhiteLabelConfig = {
       // Where the service-agent-wire ceremony talks to engage-a2a.
       serviceAgentConfig: { a2aBase: 'https://engage-a2a-production.richardpedersen3.workers.dev' },
     },
+    // Family Field: founder creates a household; invitees join an existing household. Neither client
+    // receives Ask, payment, or operational authority through the shared login-only delegate.
+    ...(['family-field', 'family-field-join'] as const).map(client_id => ({
+      client_id,
+      remembered_consent: 'on' as const,
+      name: client_id === 'family-field' ? 'Family Field' : 'Family Field · join your family',
+      redirect_uris: ['https://ap-family.faithnet.io/', 'https://family-field.tiledfacet64.chatgpt.site/', 'http://127.0.0.1:5189/', 'http://localhost:5189/'],
+      allowed_scopes: ['openid', 'profile', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0' as const,
+      socialCustody: true,
+      setup_notice: client_id === 'family-field'
+        ? 'Home will prepare your family household if you do not already have one, and your personal treasury using the existing SHEQL starter flow. No spending permission is granted.'
+        : 'Home will prepare your personal treasury using the existing SHEQL starter flow. Accept the invitation to join your family; this connection does not create another household or grant spending permission.',
+    })),
     // field-app — Field Circles / Field Workspace (agentictrustlabs/engage apps/field-*).
     // A SEPARATE product (ADR-0007), not a mode of Engage. Login-grade connect via the Personal
     // Home; no PII held by the broker. No service-agent-wire yet — field-a2a signs nothing as

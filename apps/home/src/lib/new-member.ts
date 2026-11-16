@@ -450,9 +450,12 @@ export function shouldSeedCoin(plan: MemberCurrencyPlan | null, balance: bigint 
  */
 export function withCurrencyConsent<T extends { canDo: string[]; cannotDo: string[] }>(
   template: T,
-  app?: Pick<RelyingApp, 'new_member' | 'paymentConfig'> | null,
+  app?: Pick<RelyingApp, 'new_member' | 'paymentConfig' | 'setup_notice'> | null,
   appName = 'This app',
 ): T {
+  if (app?.setup_notice && !template.canDo.includes(app.setup_notice)) {
+    template = { ...template, canDo: [...template.canDo, app.setup_notice] };
+  }
   const plan = memberCurrencyPlan(app);
   if (!plan?.spendGrant) return template;
   const lines = currencyConsentLines(plan, appName);
