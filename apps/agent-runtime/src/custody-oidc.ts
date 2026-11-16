@@ -240,11 +240,12 @@ export async function verifyRelyingIdToken(
     return { ok: false, status: 503, error: 'broker JWKS unavailable (fail-closed)' };
   }
   // Peek iss + aud (unverified), gate iss to THIS Home, THEN verify sig/iss/aud/exp against those values.
-  let iss: string | undefined, aud: string | undefined;
+  let iss: string | undefined, aud: string | undefined, nonce: string | null = null;
   try {
-    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob((token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)))) as { iss?: string; aud?: string };
+    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob((token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)))) as { iss?: string; aud?: string; nonce?: unknown };
     iss = typeof payload.iss === 'string' ? payload.iss : undefined;
     aud = typeof payload.aud === 'string' ? payload.aud : undefined;
+    nonce = typeof payload.nonce === 'string' && payload.nonce.length > 0 ? payload.nonce : null;
   } catch {
     return { ok: false, status: 401, error: 'unparseable id_token' };
   }
@@ -262,9 +263,12 @@ export async function verifyRelyingIdToken(
     } catch { return false; }
   };
   if (!issOk(iss) || !aud) return { ok: false, status: 401, error: 'id_token iss/aud not accepted' };
-  // D5 (spec 445 decision 8): the nonce expectation is STATED. This id_token arrives as an API bearer — no flow of this
-  // Worker sent a nonce — so the statement is `null`; a token that carries one is a mismatch, and is refused.
-  const r = await verifyIdToken(token, { keys, expectedIss: iss!, expectedAud: aud, expectedNonce: null });
+  // D5 (spec 445 decision 8): the nonce expectation is STATED — and for an id_token arriving as an API bearer the
+  // statement is the token's OWN nonce. The nonce binds the token to the sign-in that requested it, and the relying app
+  // checked it there; no flow of this Worker sent one, so there is nothing to compare. Stating `null` ("must carry
+  // none") refused every REAL sign-in (an OIDC flow always sets one) while demo-signin tokens passed: Field's
+  // attention read on faithnet, 2026-11-15 (the Home's twin, person-bearer.ts, fixed in #149).
+  const r = await verifyIdToken(token, { keys, expectedIss: iss!, expectedAud: aud, expectedNonce: nonce });
   if (!r.ok) return { ok: false, status: 401, error: `invalid id_token: ${r.reason}` };
   const sub = (r.claims.canonical_agent_id ?? r.claims.sub ?? '') as string;
   const sa = sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] as Address | undefined;
