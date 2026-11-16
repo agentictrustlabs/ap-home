@@ -61,6 +61,15 @@ const seedLink = (extra: Record<string, unknown> = {}) => {
 describe('related-orgs — the organization common name', () => {
   beforeEach(() => { store = new Map(); });
 
+  it('keeps a photo-only projection and clears it when the steward removes the image', async () => {
+    seedLink();
+    const photo = 'data:image/png;base64,iVBORw0KGgo=';
+    expect((await project({ photo })).status).toBe(200);
+    expect((await rowsFor())[0]).toHaveProperty('photo', photo);
+    await project({ photo: '' });
+    expect((await rowsFor())[0]).not.toHaveProperty('photo');
+  });
+
   it('returns no displayName for a link that carries no projection', async () => {
     seedLink();
     const [row] = await rowsFor();

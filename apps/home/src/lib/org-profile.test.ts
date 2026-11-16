@@ -40,6 +40,13 @@ describe('sanitizeOrgProfileProjection', () => {
 });
 
 describe('orgCommonNameFields', () => {
+  it('projects an inline organization image independently of the name and removes unsafe URLs', () => {
+    const photo = 'data:image/png;base64,iVBORw0KGgo=';
+    expect(orgCommonNameFields('family.household', { photo })).toEqual({ photo });
+    for (const bad of ['https://tracker.example/photo', 'data:image/svg+xml;base64,PHN2Zz4=', 'data:image/png;base64,' + 'A'.repeat(200_000)]) {
+      expect(orgCommonNameFields('family.household', { photo: bad })).toEqual({});
+    }
+  });
   it('returns the common name beside the naming-service name', () => {
     expect(orgCommonNameFields('global-church.org', { displayName: 'Global.Church', website: 'https://global.church' })).toEqual({
       displayName: 'Global.Church',

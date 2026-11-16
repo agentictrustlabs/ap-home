@@ -20,6 +20,13 @@
 export interface OrgProfileProjection {
   displayName?: string;
   website?: string;
+  /** Steward-selected organization image, never inferred from a member's photo. */
+  photo?: string;
+}
+
+export function validOrgPhoto(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 200_000 &&
+    /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(value);
 }
 
 const MAX_DISPLAY_NAME = 80;
@@ -47,7 +54,7 @@ export function sanitizeOrgProfileProjection(input: unknown): OrgProfileProjecti
       if (u.protocol === 'https:' || u.protocol === 'http:') website = rawSite;
     } catch { /* not a URL — dropped */ }
   }
-  return { ...(displayName ? { displayName } : {}), ...(website ? { website } : {}) };
+  return { ...(displayName ? { displayName } : {}), ...(website ? { website } : {}), ...(validOrgPhoto(p.photo) ? { photo: p.photo } : {}) };
 }
 
 /**
@@ -65,5 +72,5 @@ export function orgCommonNameFields(orgName: unknown, stored: unknown): OrgProfi
   const name = String(orgName ?? '').trim().toLowerCase();
   const shown = (p.displayName ?? '').toLowerCase();
   const addsNothing = !shown || shown === name || shown === name.split('.')[0];
-  return { ...(addsNothing ? {} : { displayName: p.displayName }), ...(p.website ? { website: p.website } : {}) };
+  return { ...(addsNothing ? {} : { displayName: p.displayName }), ...(p.website ? { website: p.website } : {}), ...(p.photo ? { photo: p.photo } : {}) };
 }
