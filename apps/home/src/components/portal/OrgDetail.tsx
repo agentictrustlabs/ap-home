@@ -20,6 +20,8 @@ import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LinkIcon } from '../shared/Icons';
 
 import { Loading } from '../shared/Loading';
+import { fileToAvatarDataUrl } from '../../lib/avatar-store';
+import { validOrgPhoto } from '../../lib/org-profile';
 /** The org's managed profile — the canonical "org details" record the steward edits.
  *  Stored in the ORG's own vault under `org:profile`, written over the stewardship
  *  delegation (delegator = org). Free-form, vertical-agnostic. */
@@ -31,6 +33,7 @@ interface OrgProfile {
   website?: string;
   contactEmail?: string;
   location?: string;
+  photo?: string;
 }
 
 const ROOT_AUTHORITY = '0x0000000000000000000000000000000000000000000000000000000000000000';
@@ -184,7 +187,7 @@ async function projectOrgProfile(input: { delegation: DelegationWire; token: str
     body: JSON.stringify({
       person: input.delegation.delegate,
       orgAgent: input.delegation.delegator,
-      orgProfile: { displayName: input.profile.displayName ?? '', website: input.profile.website ?? '' },
+      orgProfile: { displayName: input.profile.displayName ?? '', website: input.profile.website ?? '', photo: input.profile.photo ?? '' },
     }),
   }).catch(() => null);
 }
@@ -198,14 +201,19 @@ export function OrgProfileManager({ delegation }: { delegation: DelegationWire }
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [imageBusy, setImageBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setBusy(true);
+    setLoaded(false);
     setErr(null);
     vaultReadWithDelegation<OrgProfile>(delegation, RT_ORG_PROFILE)
       .then((r) => {
-        if (cancelled || !r) return;
+        if (cancelled) return;
+        setLoaded(true);
+        if (!r) return;
         setP({ ...r, v: 1 });
         // Reconcile the projection from its source: a profile saved before the projection existed (or from another
         // Home) reaches relying apps the first time its steward opens this card, without a migration.
@@ -221,7 +229,10 @@ export function OrgProfileManager({ delegation }: { delegation: DelegationWire }
     setErr(null);
     setMsg(null);
     try {
+      if (!loaded || imageBusy) throw new Error('Read the current organization profile before saving.');
       await vaultWriteWithDelegation(delegation, RT_ORG_PROFILE, p);
+      const back = await vaultReadWithDelegation<OrgProfile>(delegation, RT_ORG_PROFILE);
+      if (JSON.stringify(back) !== JSON.stringify(p)) throw new Error('The saved organization profile could not be verified. Reload before editing again.');
       // Record first, projection second (the order `home/org-lifecycle.ts` keeps, for the same reason). A failed
       // projection leaves the save standing; the read above repairs it the next time this card opens.
       if (session?.token) void projectOrgProfile({ delegation, token: session.token, profile: p });
@@ -244,6 +255,26 @@ export function OrgProfileManager({ delegation }: { delegation: DelegationWire }
         <Loading label="Loading the org’s details…" />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '.6rem', maxWidth: 520 }}>
+          <div>
+            {validOrgPhoto(p.photo) && <img src={p.photo} alt="Organization profile" style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 16 }} />}
+            <label style={{ display: 'block', fontSize: '.85rem' }}>
+              Organization image
+              <input type="file" accept="image/jpeg,image/png,image/webp" disabled={!loaded || saving || imageBusy} onChange={async (e) => {
+                const file = e.currentTarget.files?.[0]; e.currentTarget.value = '';
+                if (!file) return;
+                setImageBusy(true); setErr(null);
+                try {
+                  if (!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size > 10_000_000) throw new Error('Choose a JPEG, PNG or WebP image under 10 MB.');
+                  const photo = await fileToAvatarDataUrl(file);
+                  if (!validOrgPhoto(photo)) throw new Error('This image is too large to save as a profile photo.');
+                  setP(s => ({ ...s, photo }));
+                } catch (error) { setErr(error instanceof Error ? error.message : 'The image could not be read.'); }
+                finally { setImageBusy(false); }
+              }} />
+            </label>
+            <small>The image is saved in this organization’s profile and displayed in connected apps. Choose an image you intend to share there.</small>
+            {p.photo && <button type="button" disabled={!loaded || saving || imageBusy} onClick={() => setP(s => ({ ...s, photo: '' }))}>Remove image</button>}
+          </div>
           {FIELDS.map((f) => (
             <label key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: '.25rem', fontSize: '.8rem', color: 'var(--c-g600, #475569)' }}>
               {f.label}
@@ -265,7 +296,7 @@ export function OrgProfileManager({ delegation }: { delegation: DelegationWire }
             </label>
           ))}
           <div style={{ display: 'flex', gap: '.6rem', alignItems: 'center', marginTop: '.2rem' }}>
-            <button type="button" className="btn-primary" style={{ fontSize: '.85rem', padding: '.45rem .9rem' }} onClick={() => void save()} disabled={saving}>
+            <button type="button" className="btn-primary" style={{ fontSize: '.85rem', padding: '.45rem .9rem' }} onClick={() => void save()} disabled={saving || !loaded || imageBusy}>
               {saving ? 'Saving…' : 'Save org details'}
             </button>
             {msg && <span style={{ fontSize: '.8rem', color: 'var(--c-success, #16a34a)' }}>{msg}</span>}

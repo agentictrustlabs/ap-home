@@ -581,7 +581,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       const { orgProfile: prev, ...rest } = stewardLink;
       // Unchanged is the common case (the card re-projects on every open) — skip the write.
       if (JSON.stringify(sanitizeOrgProfileProjection(prev)) !== JSON.stringify(next)) {
-        await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify({ ...rest, ...(next.displayName || next.website ? { orgProfile: next } : {}) }));
+        await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify({ ...rest, ...(next.displayName || next.website || next.photo ? { orgProfile: next } : {}) }));
       }
       return jsonCors({ ok: true, orgProfile: next }, request);
     }
