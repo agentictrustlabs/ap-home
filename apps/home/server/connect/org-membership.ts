@@ -114,7 +114,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }).reverseResolve(person as Address).catch(() => null);
   if (existing) {
     const link = JSON.parse(existing) as Record<string, unknown>;
-    await env.AUTH_CODES.put(linkKey, JSON.stringify({ ...link, membershipDelegation: d, ...(madValid ? { memberAccessDelegation: mad } : {}) }));
+    await env.AUTH_CODES.put(linkKey, JSON.stringify({ ...link, ...(organizationKind === 'household' ? {kind: 'household'} : {}), membershipDelegation: d, ...(madValid ? { memberAccessDelegation: mad } : {}) }));
   } else {
     const orgName = await new AgentNamingClient({
       rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID,
