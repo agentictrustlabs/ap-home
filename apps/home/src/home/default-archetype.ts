@@ -21,6 +21,7 @@ import { ensureCsrfToken, csrfHeaders } from '../csrf';
  *  exactly the incident that started spec 360, reappearing one agent at a time. An org is a payer too.
  *  Every kind that can hold or move value is born knowing what follows the act. */
 const DEFAULT_ARCHETYPE: Record<string, { context: string; archetype: string }> = {
+  household: { context: 'agentic-trust', archetype: 'household-steward' },
   person: { context: 'agentic-trust', archetype: 'person-steward' },
   treasury: { context: 'agentic-trust', archetype: 'treasury-steward' },
   org: { context: 'agentic-trust', archetype: 'org-steward' },

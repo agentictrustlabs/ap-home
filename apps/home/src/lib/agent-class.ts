@@ -112,4 +112,4 @@ export function creatableKinds(under: 'person' | 'org', claimable: (k: AgentKind
  *  portal's charter enables the same three (`enableAgentPlanes`). A treasury holds money, not records, and a person's
  *  planes are the onboarding ceremony's. Found twice: a service with no planes (2026-10-09) and a workspace with no vault
  *  (Gather27, 2026-10-06). */
-export const KINDS_BORN_WITH_PLANES: ReadonlySet<string> = new Set(['org', 'team', 'workspace', 'service']);
+export const KINDS_BORN_WITH_PLANES: ReadonlySet<string> = new Set(['org', 'team', 'workspace', 'service', 'household']);

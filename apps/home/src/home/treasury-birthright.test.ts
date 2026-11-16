@@ -1,0 +1,16 @@
+import {beforeEach,it,expect,vi} from 'vitest';
+const m=vi.hoisted(()=>({list:vi.fn(),create:vi.fn(),execute:vi.fn(),balance:vi.fn()}));
+vi.mock('../components/portal/ManagedAgents',()=>({createAgentWithBirthrights:m.create}));
+vi.mock('../connect-client',()=>({executeCalls:m.execute,listManagedAgentsStrict:m.list}));
+vi.mock('../lib/chain',()=>({CHAIN:{id:34348},DEFAULT_RPC_URL:'https://example.invalid'}));
+vi.mock('../lib/naming-price',()=>({NAMING_COIN:{address:'0x3333333333333333333333333333333333333333',decimals:6},TREASURY_BIRTHRIGHT_COINS:1000}));
+vi.mock('viem',()=>({createPublicClient:()=>({readContract:m.balance}),encodeFunctionData:()=> '0x1234',http:()=>({})}));
+import {ensurePersonTreasury} from './treasury-birthright';
+const person='0x1111111111111111111111111111111111111111' as const,treasury='0x2222222222222222222222222222222222222222' as const;
+const input={person,via:'google',token:'session',signPerson:vi.fn()};
+beforeEach(()=>{vi.resetAllMocks();const values=new Map<string,string>();vi.stubGlobal('localStorage',{getItem:(k:string)=>values.get(k)??null,setItem:(k:string,v:string)=>values.set(k,v),removeItem:(k:string)=>values.delete(k)});m.list.mockResolvedValue([]);m.create.mockResolvedValue({ok:true,result:{agent:treasury}});m.execute.mockResolvedValue({ok:true});m.balance.mockResolvedValue(0n);});
+it('uses the existing birthright once for concurrent session and app setup',async()=>{const [a,b]=await Promise.all([ensurePersonTreasury(input),ensurePersonTreasury(input)]);expect(a).toEqual(b);expect(a).toMatchObject({ok:true,treasury,minted:true});expect(m.create).toHaveBeenCalledTimes(1);expect(m.execute).toHaveBeenCalledTimes(1);});
+it('fails a roster read instead of creating from a false empty result',async()=>{m.list.mockRejectedValue(new Error('vault offline'));await expect(ensurePersonTreasury(input)).rejects.toThrow('vault offline');expect(m.create).not.toHaveBeenCalled();expect(m.execute).not.toHaveBeenCalled();});
+it('does not repeat minting from an existing birthright receipt after spending',async()=>{localStorage.setItem(`ap-treasury-birthright:${person}`,'1');m.list.mockResolvedValue([{agent:treasury,kind:'person-treasury',relationship:'steward'}]);m.balance.mockResolvedValue(25n);expect(await ensurePersonTreasury(input)).toMatchObject({ok:true,balance:25n,minted:false});expect(m.execute).not.toHaveBeenCalled();expect(m.create).not.toHaveBeenCalled();});
+it('uncertain creation cannot be retried into another treasury',async()=>{m.create.mockResolvedValue({ok:false,error:'connection lost'});expect(await ensurePersonTreasury(input)).toMatchObject({ok:false});expect(await ensurePersonTreasury(input)).toMatchObject({ok:false});expect(m.create).toHaveBeenCalledTimes(1);});
+it('a sufficient balance never causes minting',async()=>{m.list.mockResolvedValue([{agent:treasury,kind:'person-treasury',relationship:'steward'}]);m.balance.mockResolvedValue(1000_000000n);expect(await ensurePersonTreasury(input)).toMatchObject({ok:true,minted:false,created:false});expect(m.execute).not.toHaveBeenCalled();});

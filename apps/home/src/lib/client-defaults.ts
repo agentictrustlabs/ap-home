@@ -15,6 +15,10 @@
 // (`src/lib/coaches.ts`), and the person can fire it under Settings → Coaches at any time. Run AFTER the
 // site-login grant is minted and BEFORE the code is handed back, so the app's first hand already has the
 // coach; a failure here is logged and never blocks the sign-in — the app's own sheet offers the Coaches page.
+import { ensurePersonTreasury } from '../home/treasury-birthright';
+import { enableAgentPlanes } from '../components/portal/ManagedAgents';
+import { listManagedAgentsStrict } from '../connect-client';
+import { ensureFamilyOnboarding } from './family-onboarding';
 import type { Address } from '@agenticprimitives/types';
 import { resolveVia, signHashFor, type Via } from '../home/onboarding';
 import { SESSION_KEY } from '../context/session';
@@ -35,10 +39,14 @@ export interface ClientDefaults {
    * nothing — the buy-in mandate is still the person's to sign, by name, before a single coin moves.
    */
   treasury?: boolean;
+  family?: boolean;
+  personalBirthright?: boolean;
 }
 
 /** By OIDC client id. The card room is the one app with default coaches today: Bob for hold'em, Carol for canasta. */
 export const CLIENT_DEFAULTS: Record<string, ClientDefaults> = {
+  'family-field': { coaches: [], family: true, personalBirthright: true },
+  'family-field-join': { coaches: [], personalBirthright: true },
   pokernight: { coaches: [{ game: 'poker', service: 'bob-coach.svc' }, { game: 'canasta', service: 'carol-coach.svc' }], treasury: true },
 };
 
@@ -76,6 +84,33 @@ export async function applyClientDefaults(clientId: string, onStep?: (line: stri
   const games = d.coaches.map((c) => ({ ...c, game: GAMES.find((g) => g.id === c.game)! })).filter((c) => c.game);
   const route = toVia(profile?.credential, via);
   const signer = () => signHashFor(route, agent, { token });
+
+  if (d.personalBirthright) {
+    try {
+      await ensureFamilyOnboarding(agent, !!d.family, {
+        list: () => listManagedAgentsStrict(token),
+        treasury: async () => {
+          const result = await ensurePersonTreasury({ person: agent, via: route, token, signPerson: await signer() }, onStep);
+          if (!result.ok) throw new Error(result.error);
+        },
+        create: async () => {
+          onStep?.('Preparing your private family space…');
+          const result = await createAgentWithBirthrights({ kind: 'household', parent: agent, person: agent, via: route, displayName: 'Our family' }, token, line => onStep?.(line));
+          if (!result.ok) throw new Error(result.error);
+          return result.result.agent;
+        },
+        ready: async address => {
+          const planes = await enableAgentPlanes(address, route, token, onStep);
+          if (!planes.ok) throw new Error(planes.error);
+          const playbook = await assignDefaultArchetype(address, 'household', token);
+          if (!playbook.ok) throw new Error(`household playbook: ${playbook.reason}`);
+        },
+        receipt: localStorage,
+      });
+      out.applied.push(d.family ? 'family-and-personal-treasury' : 'personal-treasury');
+    } catch (e) { out.error = e instanceof Error ? e.message : String(e); }
+    return out; // Family apps do not enroll card-room capabilities or coaches.
+  }
 
   // 0. A money account, when the app settles and the person has none. Never a second one; never on failure
   //    a blocked sign-in — the card room's own "Set up your stake" panel remains the recovery path.

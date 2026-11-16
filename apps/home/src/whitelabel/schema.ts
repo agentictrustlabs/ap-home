@@ -186,6 +186,8 @@ export interface RelyingApp {
    *  path, shared by every member of the platform, so a new provisioning step has to be something an
    *  app OPTS INTO rather than something every app suddenly inherits. */
   new_member?: NewMemberOnboarding;
+  /** Curated setup disclosure, never copied from a dynamic client registration or query string. */
+  setup_notice?: string;
 }
 
 /**

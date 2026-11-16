@@ -192,7 +192,7 @@ describe('profile-name sharing is registry-gated', () => {
 
   it('is declared by ap-church (the connected member’s name), pokernight, gc-engage (#554 — "profile so the member\'s human name can label the account"), gc-platform (the same, for platform.global.church), source-publishing (87c8b4d4 — its one-time About-you step) openbook-reader (e537b759 — "Signed in as <name>" on the reader\'s own record) and seed-bible-reader (c02ca7bc — its Profile shows your name) and by no one else in the live registry', () => {
     const scoped = whitelabel.relyingApps.filter(sharesProfileName).map((a) => a.client_id);
-    expect(scoped).toEqual(['ap-church', 'pokernight', 'seed-bible-reader', 'gc-engage', 'gc-platform', 'source-publishing', 'openbook-reader']);
+    expect(scoped).toEqual(['ap-church', 'family-field', 'family-field-join', 'pokernight', 'seed-bible-reader', 'gc-engage', 'gc-platform', 'source-publishing', 'openbook-reader']);
   });
 
   it('leaves consent copy untouched for every app without the scope', () => {
@@ -565,7 +565,7 @@ describe('the words the member is shown before they agree', () => {
     const tpl = { canDo: ['Sign in as you'], cannotDo: ['Move your funds'] };
     expect(withCurrencyConsent(tpl, undefined)).toBe(tpl);
     for (const app of whitelabel.relyingApps) {
-      if (app.client_id === 'pokernight') continue;
+      if (app.client_id === 'pokernight' || app.setup_notice) continue;
       expect(withCurrencyConsent(tpl, app), app.client_id).toBe(tpl);
     }
   });
@@ -592,4 +592,16 @@ describe('the words the member is shown before they agree', () => {
     const once = withCurrencyConsent({ canDo: [], cannotDo: [] }, cardRoom, 'Poker Night');
     expect(withCurrencyConsent(once, cardRoom, 'Poker Night')).toEqual(once);
   });
+});
+
+it('discloses founder versus invitee setup without payment authority', () => {
+  const template = { canDo: ['Sign in as you'], cannotDo: ['Move your funds'] };
+  for (const id of ['family-field', 'family-field-join']) {
+    const app = whitelabel.relyingApps.find(a => a.client_id === id)!;
+    const result = withCurrencyConsent(template, app);
+    expect(result.canDo).toContain(app.setup_notice);
+    expect(result.cannotDo).toEqual(template.cannotDo);
+    expect(app.allowed_delegation_templates).toEqual(['site-login']);
+    expect(withCurrencyConsent(result, app)).toEqual(result);
+  }
 });
