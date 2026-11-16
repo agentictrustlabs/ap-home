@@ -1,7 +1,8 @@
 {
   "done": [
     "home-address",
-    "declare"
+    "declare",
+    "workers-config"
   ],
   "notes": [],
   "operatorNotes": [],

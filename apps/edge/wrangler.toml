@@ -277,3 +277,38 @@ service = "isl-1-vault"
 [[env.isl-1.services]]
 binding = "A2A"
 service = "isl-1-runtime"
+
+# ── coach-assist (spec 441) — stamped by scripts/estate-oneclick from [env.faithnet]. Worker names, storage ids and
+# hosts are this estate's own; the town baseline is the sibling's. Do not hand-edit the derived vars.
+[env.coach-assist]
+name = "coach-assist-edge"
+workers_dev = true
+
+[env.coach-assist.vars]
+EDGE_ALLOWED_ORIGINS = "https://coach-assist-home.vercel.app,https://*.coach-assist-home.vercel.app,http://localhost:5175,http://127.0.0.1:5175,http://localhost:8795"
+CHAIN_ID = "34348"
+ENTRY_POINT = "0x107060f796bdf2495C6Ce9074ED49fe785bfFE0b"
+DELEGATION_MANAGER = "0x3BBeCcC7a52E1CE04a3BF7E7404D3BCBF566C490"
+UNIVERSAL_SIGNATURE_VALIDATOR = "0x0B4B34b21a4E396489344cDFEe1d15F3EDE7AE4E"
+SA_BUDGET_LIMIT_UNITS = "10"
+
+[[env.coach-assist.durable_objects.bindings]]
+name = "SA_BUDGET"
+class_name = "SmartAgentBudgetDO"
+
+[[env.coach-assist.migrations]]
+tag = "v1"
+new_sqlite_classes = ["SmartAgentBudgetDO"]
+
+[[env.coach-assist.ratelimits]]
+name = "EDGE_LIMITER"
+namespace_id = "33376"
+simple = { limit = 120, period = 60 }
+
+[[env.coach-assist.services]]
+binding = "MCP"
+service = "coach-assist-vault"
+
+[[env.coach-assist.services]]
+binding = "A2A"
+service = "coach-assist-runtime"
