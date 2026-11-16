@@ -24,15 +24,19 @@ export interface JoinOrganizationInput {
   named: boolean;
   /** A relying app may require confirmed membership rather than a best-effort projection. */
   requireRecorded?: boolean;
+  /** Progress for focused approval screens; does not change the ceremony. */
+  onProgress?: (message: string) => void;
 }
 
 /** Resolves with the ROLE the organization recorded the member as (spec 427), when it named one — so whatever ran the
  *  ceremony can say "you joined as Field worker" and point at the pack that role offers. Null for a plain member. */
 export async function joinOrganization(input: JoinOrganizationInput): Promise<JoinedRole | null> {
   const org = input.org.toLowerCase();
+  input.onProgress?.('Confirming your Home…');
   const via = resolveVia(input.credential as never, input.session.via as never);
   const sign = await signHashFor(via, input.member, { token: input.session.token });
   const listing = await issueDirectoryListing(input.member, sign, { communityId: org, displayName: input.displayName });
+  input.onProgress?.('Recording your invitation acceptance…');
   const res = await fetch('/connect/directory', {
     method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${input.session.token}` },
     body: JSON.stringify({ action: 'publish', listing }),
@@ -41,8 +45,10 @@ export async function joinOrganization(input: JoinOrganizationInput): Promise<Jo
   if (!res.ok || !body.ok) throw new Error(body.error ?? `join failed (${res.status})`);
   // spec 322 W3d — the member's own interactions plane, when it costs no extra device prompt.
   if (isKmsVia(via)) await activateInteractionsIfNeeded(input.member, via, { token: input.session.token }).catch(() => null);
+  input.onProgress?.('Saving your membership and family access…');
   // spec 321 W1/W2b — the membership delegation (member→org); the server attaches any steward-pre-signed grant.
   const joinedRole = await recordOrgMembership(input.member, org, sign, input.session.token, null, input.displayName, null, input.requireRecorded);
+  input.onProgress?.('Membership saved. Preparing family messaging…');
   await provisionCommunityMessaging({ person: input.member, org: org as Address, named: input.named, via, token: input.session.token })
     .catch((e) => { console.warn('[join] community messaging provision failed (non-fatal):', e); });
   return joinedRole;
