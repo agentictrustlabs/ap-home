@@ -434,7 +434,7 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'profile', 'agent'],
       allowed_delegation_templates: ['site-login', 'ask-as-me'],
       ask_with_login: true,
-      ask_delegate: '0xdeCb3ef7f2C5e6087999F1be28e3eBB2884F10cf' as const,
+      ask_delegate: '0x31c1307aa8529096ec1fa38226c708bc558ffc4b' as const,
       member_library_artifacts: ['family-field-plan-v1'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0' as const,
       socialCustody: true,
