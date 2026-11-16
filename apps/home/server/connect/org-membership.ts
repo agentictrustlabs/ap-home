@@ -72,6 +72,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // Two delivery channels for the SAME steward-signed artifact, gated identically: the email path
   // POSTs it (redeem handed it to the invitee); the in-app path stored it in the org vault at invite
   // time (`org.invite:agent:<sa>`, spec 321 W2b) — looked up here when none was posted.
+  let organizationKind = 'org';
   let mad = body?.memberAccessDelegation;
   // Household facets the invitation carried (spec 368) — read from the org's own record, never from the
   // joiner's body: how they are related is the founder's statement, made when they invited.
@@ -93,10 +94,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // `org.invite:agent:*` read to `invite.claim`, where the AGENT derives the key from the session.
       // The address below is not sent — passing one would re-open the hole that op closes.
       const vault = await orgVault(env, org, token);
-      const rec = vault ? ((await vault.get(`org.invite:agent:${person}`)) as { delegation?: typeof mad; status?: string; kin?: string; role?: string; relationshipOffer?: unknown; orgRole?: unknown } | null) : null;
+      const rec = vault ? ((await vault.get(`org.invite:agent:${person}`)) as { delegation?: typeof mad; status?: string; organizationKind?: string; kin?: string; role?: string; relationshipOffer?: unknown; orgRole?: unknown } | null) : null;
       if (rec?.orgRole && rec.status !== 'removed') { const parsed = parseRoleOffer(rec.orgRole); if (parsed.ok) offeredRole = parsed.offer; }
       if (!mad && rec?.delegation && rec.status !== 'removed') mad = rec.delegation;
       if (!relationshipOffer && rec?.relationshipOffer && rec.status !== 'removed') relationshipOffer = rec.relationshipOffer;
+      if (rec?.status !== 'removed' && rec?.organizationKind === 'household') organizationKind = 'household';
       if (rec) facets = { ...(typeof rec.kin === 'string' ? { kin: rec.kin } : {}), ...(typeof rec.role === 'string' ? { role: rec.role } : {}) };
     } catch { /* unreachable — membership still records; the grant can be re-looked-up later */ }
   }
@@ -122,7 +124,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       orgAgent: org, orgName: orgName ?? org, purpose: 'org membership', requestedBy: 'home-invite',
       siteDelegation: null, membershipDelegation: d, ...(madValid ? { memberAccessDelegation: mad } : {}),
       proofHash: null, createdAt: Date.now(),
-      kind: 'org', parent: person, relationship: 'member',
+      kind: organizationKind, parent: person, relationship: 'member',
     }));
     const idxKey = `related-idx:${person}`;
     const idx = JSON.parse((await env.AUTH_CODES.get(idxKey)) ?? '[]') as string[];

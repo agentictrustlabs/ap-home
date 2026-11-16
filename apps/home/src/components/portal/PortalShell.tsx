@@ -65,7 +65,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   useEffect(() => {
     const q = window.location.search;
     setFocused((pathname === '/friends' || pathname === '/contacts') && /[?&]from=/.test(q) && /[?&](add|remove)=/.test(q));
-    setFocusedPage((pathname === '/profile-update' || pathname === '/friend-invitation') && /[?&]from=/.test(q));
+    setFocusedPage((pathname === '/profile-update' || pathname === '/friend-invitation' || pathname === '/organization-invitation') && /[?&]from=/.test(q));
   }, [pathname]);
   const searchParams = useSearchParams();
   // Spec 397 §6 — `/you?run=<runRef>`: the run an assistant parked for this person's signature. Read HERE, by the shell

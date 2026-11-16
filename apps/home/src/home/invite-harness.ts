@@ -12,7 +12,7 @@
 // asked.
 import type { Address } from '@agenticprimitives/types';
 import { mintApprovedMandate, type AskReply } from './ask';
-import { recordInvitation, invitationOf } from './ask-record';
+import { recordInvitation, invitationOf, type IssuedInvitation } from './ask-record';
 import type { SignHash } from './resolution';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
 
@@ -40,7 +40,7 @@ export async function inviteThroughHarness(input: {
   role?: string;
   session: { token: string };
   signHash: SignHash;
-}): Promise<{ ok: true; recorded: boolean; emailDelivery?: { ok: boolean; delivery?: string; error?: string } } | { ok: false; error: string }> {
+}): Promise<{ ok: true; recorded: boolean; invitation?: IssuedInvitation; emailDelivery?: { ok: boolean; delivery?: string; error?: string } } | { ok: false; error: string }> {
   const { org, invitee, session, signHash } = input;
   // Household facets (spec 368): how the invitee is related, carried on the invitation and the membership.
   const facets = { ...(input.kin ? { kin: input.kin } : {}), ...(input.role ? { role: input.role } : {}) };
@@ -77,5 +77,5 @@ export async function inviteThroughHarness(input: {
   const inv = rep2.kind === 'done' ? invitationOf(rep2.result) : null;
   if (!inv) return { ok: true, recorded: false, ...(emailDelivery ? { emailDelivery } : {}) };
   const stored = await recordInvitation(inv, session.token);
-  return { ok: true, recorded: stored.ok, ...(emailDelivery ? { emailDelivery } : {}) };
+  return { ok: true, recorded: stored.ok, invitation: inv, ...(emailDelivery ? { emailDelivery } : {}) };
 }

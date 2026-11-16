@@ -842,7 +842,9 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
       <h1 className="onboarding-h1">{appRequest ? 'Confirm it’s you' : hintedEmail ? 'Confirm your email' : enroll && appName ? `Continue to ${appName}` : whitelabel.copy.arrivalTitle}</h1>
       <p className="onboarding-sub">
         {appRequest
-          ? appRequest.act === 'profile'
+          ? appRequest.act === 'membership'
+            ? 'Sign in to review the membership invitation. No access changes until you approve.'
+            : appRequest.act === 'profile'
             ? 'Sign in the way you usually do to save your profile change. You will see it before anything is saved.'
             : appRequest.act === 'invitation'
             ? 'Sign in the way you usually do to finish your friend invitation. You will see what it does before you say yes.'

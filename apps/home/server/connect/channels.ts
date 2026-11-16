@@ -175,7 +175,12 @@ export async function scopedWireFor(env: FnContext['env'], person: string, org: 
   const raw = await env.AUTH_CODES.get(`related:${person}:${org}`);
   if (!raw) return null;
   const link = JSON.parse(raw) as { membershipDelegation?: unknown; memberAccessDelegation?: unknown };
-  return link.membershipDelegation ?? link.memberAccessDelegation ?? null;
+  // Membership consent is member→org; it cannot authorize reads as org→member.
+  for (const candidate of [link.memberAccessDelegation, link.membershipDelegation]) {
+    const wire = candidate as {delegator?: string; delegate?: string} | undefined;
+    if (wire?.delegator?.toLowerCase() === org.toLowerCase() && wire.delegate?.toLowerCase() === person.toLowerCase()) return wire;
+  }
+  return null;
 }
 
 /** The org→person MEMBER-ACCESS wire (SEC-H1) — the ORG's authorization that `person` may join,

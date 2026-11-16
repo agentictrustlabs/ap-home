@@ -432,7 +432,10 @@ const faithImpact: WhiteLabelConfig = {
       name: client_id === 'family-field' ? 'Family Field' : 'Family Field · join your family',
       redirect_uris: ['https://ap-family.faithnet.io/', 'https://family-field.tiledfacet64.chatgpt.site/', 'http://127.0.0.1:5189/', 'http://localhost:5189/'],
       allowed_scopes: ['openid', 'profile', 'agent'],
-      allowed_delegation_templates: ['site-login'],
+      allowed_delegation_templates: ['site-login', 'ask-as-me'],
+      ask_with_login: true,
+      ask_delegate: '0xdeCb3ef7f2C5e6087999F1be28e3eBB2884F10cf' as const,
+      member_library_artifacts: ['family-field-plan-v1'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0' as const,
       socialCustody: true,
       // Home approves a revocable, read-only profile grant at connect. Family Field displays
