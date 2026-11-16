@@ -1617,7 +1617,7 @@ bindings = [
 [[env.coach-assist.d1_databases]]
 binding = "OPS"
 database_name = "coach-assist-ops"
-database_id = "__D1_OPS__"
+database_id = "a6b7498f-92c0-4a70-ada4-60a4c0588dea"
 
 [[env.coach-assist.queues.producers]]
 binding = "RUNTIME_WAKE"
@@ -1636,17 +1636,17 @@ max_concurrency = 2
 
 [[env.coach-assist.kv_namespaces]]
 binding = "BRIDGE_NONCES"
-id = "__KV_BRIDGE_NONCES__"
+id = "fc0bb1b4b4144b2f9532fcb927be57de"
 [[env.coach-assist.kv_namespaces]]
 binding = "SUBJECT_SA_MAP"
-id = "__KV_SUBJECT_SA_MAP__"
+id = "c37633775de44e808292e799bd56051f"
 [[env.coach-assist.kv_namespaces]]
 binding = "FED_TOKENS"
-id = "__KV_FED_TOKENS__"
+id = "8b35aafed741411887b3254f255dca7c"
 
 [[env.coach-assist.kv_namespaces]]
 binding = "RELEASED_CARDS"
-id = "__KV_RELEASED_CARDS__"
+id = "a26cc67f3d444b8eb03ec7b44d36d8c1"
 
 [[env.coach-assist.services]]
 binding = "MCP"

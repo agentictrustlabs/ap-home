@@ -409,7 +409,7 @@ AKCS_BASE_URL = "https://kms.faithnet.io"
 [[env.coach-assist.d1_databases]]
 binding = "DB"
 database_name = "coach-assist-db"
-database_id = "__D1_DB__"
+database_id = "c4a124e6-8288-49e7-b02a-7bbca7585c2f"
 migrations_dir = "migrations"
 
 [[env.coach-assist.durable_objects.bindings]]
