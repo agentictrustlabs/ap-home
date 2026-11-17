@@ -26,7 +26,9 @@
   },
   "_extras": "This estate's own product choices. ORCHESTRATION_LLM is impact-agent's: the model the harness plans with, paid through the GEMINI_API_KEY the build installs.",
   "extras": {
-    "ORCHESTRATION_LLM": "gemini"
+    "ORCHESTRATION_LLM": "gemini",
+    "EMAIL_FROM": "invites@faithnet.ai",
+    "EMAIL_FROM_NAME": "coach assist"
   },
   "requestedBy": "0x89360a88cba349835ee08a105290ee1da427a34b",
   "createdBy": "createestate.faithnet.town"

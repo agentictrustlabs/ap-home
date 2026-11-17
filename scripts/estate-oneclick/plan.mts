@@ -16,7 +16,7 @@ export type Hosting = 'town' | 'own';
 
 export const HOSTED_STEPS = [
   'home-address', 'declare', 'workers-config', 'cloud-resources', 'key-vault', 'chain-access', 'agents', 'secrets',
-  'deploy', 'custody', 'home', 'estate-name', 'town', 'names', 'check', 'save', 'handover',
+  'deploy', 'custody', 'names', 'home', 'estate-name', 'town', 'check', 'save', 'handover',
 ] as const;
 
 export const OWN_STEPS = {

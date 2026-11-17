@@ -83,6 +83,8 @@ jobs:
       # allow-lists (`pnpm.onlyBuiltDependencies`).
       - name: Install ap-home
         run: pnpm install --frozen-lockfile=false
+      - name: Check estate readiness provisioning
+        run: pnpm exec tsx --test scripts/estate-oneclick/readiness.test.mts
       - name: Install ap-town
         if: env.NEEDS_TOWN == 'true'
         working-directory: ap-town
@@ -122,6 +124,10 @@ jobs:
           # Pays a few cents of chain coin to each new estate's own relay key, so it can create its agents.
           ESTATE_FUNDER_PRIVATE_KEY: ${{ secrets.ESTATE_FUNDER_PRIVATE_KEY }}
           TOWN_RPC_URL: ${{ secrets.TOWN_RPC_URL }}
+          # Only the town's hosted/finish jobs approve public gate addresses; never an owner's build.
+          NAMING_CLERK_PRIVATE_KEY: ${{ (inputs.part == 'all' || inputs.part == 'finish') && secrets.NAMING_CLERK_PRIVATE_KEY || '' }}
+          # An owner on a different account must onboard their own outbound sender there.
+          ESTATE_EMAIL_FROM: ${{ vars.ESTATE_EMAIL_FROM }}
           # The owner's only: the build key file the createestate page gave them.
           ESTATE_BUILD_KEY: ${{ secrets.ESTATE_BUILD_KEY }}
         run: npx tsx scripts/estate-oneclick/run.mts --estate "$ESTATE_ID" --part "$PART" ${REQUEST_ID:+--request-id "$REQUEST_ID"}

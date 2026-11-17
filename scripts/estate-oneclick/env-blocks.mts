@@ -9,7 +9,8 @@
 //                            queue names get the estate's id; rate-limit namespaces get numbers of their own
 //   · hosts                  every faithnet ESTATE host in a value is mapped to this estate's; a value still naming
 //                            faithnet's own Home, agent zone or apps after that is DROPPED and reported, never kept
-//   · routes, send_email     dropped: an estate on default hosts has no custom domains and no mail rail of its own
+//   · routes                dropped: default hosts have no custom domains
+//   · send_email            kept only with an explicitly configured outbound sender on this account
 //   · vars                   the runtime's are written by estate-new's own rule — DERIVED + POSTURE + the town's
 //                            baseline from the sibling, minus the sibling's declared extras — and the other three
 //                            Workers' by the same rule plus their few host vars
@@ -61,6 +62,7 @@ export interface StampInput {
    * same account, so every binding to a town Worker is dropped; the estate binds only its own Workers.
    */
   crossAccount?: boolean;
+  outboundEmail?: { from: string; name: string };
 }
 
 export interface StampResult { block: string; dropped: string[]; placeholders: string[] }
@@ -143,6 +145,10 @@ const LATER = new Set(['AKCS_RELAY_KEY_ID', 'AKCS_INTERACTIONS_KEY_ID', 'HARNESS
 
 function stampVars(body: string[], input: StampInput, dropped: string[]): string[] {
   const overrides = overridesFor(input);
+  if (input.app === 'runtime' && input.outboundEmail) {
+    overrides.EMAIL_FROM = input.outboundEmail.from;
+    overrides.EMAIL_FROM_NAME = input.outboundEmail.name;
+  }
   const kept: Array<[string, string]> = [];
   for (const [k, v] of parseVars(body)) {
     if (k in overrides || LATER.has(k)) continue;
@@ -200,7 +206,7 @@ export function stampEnvBlock(toml: string, input: StampInput): StampResult {
     const body = s.body.filter((l) => !/^\s*#/.test(l)); // the sibling's commentary is about the sibling
 
     if (suffix === '.routes') { routes += 1; continue; }
-    if (suffix === '.send_email') { dropped.push(`[${s.name}] — mail rail (no zone of its own)`); continue; }
+    if (suffix === '.send_email' && !input.outboundEmail) { dropped.push(`[${s.name}] — no outbound sender configured for this account`); continue; }
     if (suffix === '.containers') { dropped.push(`[${s.name}] — container (faithnet's choice; costs money, needs an image)`); continue; }
     // The RUNTIME's cron is faithnet's cache warmer (a choice); the VAULT's is housekeeping every estate needs — the
     // daily JTI-ledger prune (spec 445, 2026-11-11: faithnet's D1 filled its 10 GB cap without it). Keep the vault's.

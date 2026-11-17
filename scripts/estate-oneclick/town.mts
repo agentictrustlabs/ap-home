@@ -16,10 +16,11 @@ export interface TownProfile {
   site: string;
   townOrigin: string;
   naming: string;
+  namingGate: { relayerHome: string };
   discoveryA2a: string;
   estateNameRoot: string;
   nameRoots: string[];
-  hosted: { cloudflareAccount: string; workersSubdomain: string; repo: string; townWorkerEnv: string };
+  hosted: { cloudflareAccount: string; workersSubdomain: string; repo: string; townWorkerEnv: string; emailFrom?: string };
   sibling: {
     env: string;
     declaration: string;
