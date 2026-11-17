@@ -7,6 +7,7 @@
   "site": "https://createestate.faithnet.town",
   "townOrigin": "https://faithnet.town",
   "naming": "https://names.faithnet.town",
+  "namingGate": { "relayerHome": "https://www.faithnet.me" },
   "discoveryA2a": "https://discovery-a2a.faithnet.town",
   "estateNameRoot": "estate",
   "nameRoots": ["me", "org", "team", "svc", "workspace", "treasury", "registry", "church", "circle"],
@@ -16,7 +17,8 @@
     "cloudflareAccount": "5da2feaa56593839672948e16c6e809d",
     "workersSubdomain": "richardpedersen3",
     "repo": "agentictrustlabs/ap-home",
-    "townWorkerEnv": "faithnet"
+    "townWorkerEnv": "faithnet",
+    "emailFrom": "invites@faithnet.ai"
   },
 
   "_sibling": "The estate whose Worker blocks a new estate is stamped from (runbook §3: copy faithnet's block, rename everything).",

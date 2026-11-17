@@ -159,7 +159,9 @@ foreign keys). `KV_KEY_PREFIX` exists for an unavoidable share; leave it unset o
 ## 6. Sign-in
 
 - **Email**: the Home posts to the runtime, which needs a mail rail (`[[env.<estate>.send_email]]`,
-  `EMAIL_FROM` at a zone that has one). `emailSendingEnabled()` reports true from configuration PRESENT, so
+  `EMAIL_FROM` at a zone that has one). Hosted builds install the town profile's explicit outbound sender
+  and use the estate's display name. Owner-hosted builds set `ESTATE_EMAIL_FROM` to a sender onboarded on
+  their own Cloudflare account. Inbound email zones are never copied. `emailSendingEnabled()` reports true from configuration PRESENT, so
   `DEV_OTP_ECHO` is dead on any estate with a custody URL — do not "fix" it by echoing on send failure. An
   operator can read the OTP from the store (`emailotp:<sha256(lowercased email)>`, 600 s).
 - **Google**: one client may hold two secrets; add the Home's origin + `/oidc/google/callback` to the existing
@@ -173,7 +175,12 @@ npx tsx scripts/add-naming-gate.mts --estate <estate>
 ```
 
 Mints a gate key into `.estate-<estate>.local` and has `naming.svc` (the town's agent, clerk-signed through the
-faithnet relayer) allow it on every priced root; set it as `NAMING_GATE_PRIVATE_KEY` on the Home. One gate per Home,
+town profile's relayer) allow it on every priced root from the pinned contracts package. Supply
+`NAMING_CLERK_PRIVATE_KEY` in the town's protected build environment, or `--clerk-key-file <file>` locally.
+The script verifies the chain, each root's governor, the clerk's custody and every resulting gate approval.
+Use `--check` to verify without changing anything. Hosted builds checkpoint the gate key before approval and
+install it as `NAMING_GATE_PRIVATE_KEY` before launching the Home. An owner-hosted build reports only the
+public gate address; the town's finish step approves it. One gate per Home,
 revocable alone. The **domain rule** refuses any label whose `.com`/`.org` exists (`maya`, `mayafernandes`,
 `tomasvargas`…) unless a verified email at that domain is on the Home — hyphenated full names were free.
 

@@ -45,6 +45,7 @@ import { loadTown } from './town.mts';
 import { azArgs, ensureKeyVault, mintToken, withEgress, type AzRun, type CvmRun } from './kms.mts';
 import { ecSigner, parseBuildKey, type Signer } from './signer.mts';
 import { stepsFor, type Hosting, type Part } from './plan.mts';
+import { ensureNamingGate } from './naming-gate.mts';
 
 // ── inputs ──────────────────────────────────────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -62,7 +63,7 @@ const CALLBACK = process.env.BUILD_CALLBACK_SECRET;
 const BUILD_KEY = PART === 'estate' ? parseBuildKey(process.env.ESTATE_BUILD_KEY ?? '') : undefined;
 const AUTH: string | Signer | undefined = BUILD_KEY ? await ecSigner(BUILD_KEY.sig) : CALLBACK;
 
-type Result = { homeOrigin: string; hosts: Record<string, string>; agents: Record<string, string> };
+type Result = { homeOrigin: string; hosts: Record<string, string>; agents: Record<string, string>; namingGate?: string };
 type Request = {
   requestId: string; id: string; name: string; requestedBy: string; ownerKey: JsonWebKey;
   hosting: Hosting; repo?: string; workersSubdomain?: string; buildKey?: { enc: JsonWebKey; sig: JsonWebKey };
@@ -428,7 +429,9 @@ const steps: Record<string, Step> = {
         const path = TOML_PATHS[app];
         const toml = readFileSync(path, 'utf8');
         if (toml.includes(`[env.${request.id}]`)) continue;
-        const r = stampEnvBlock(toml, { id: request.id, app, names, hosts: d.hosts as Hosts, homeOrigin: `https://${d.homeHost}`, derived: deriveVars(d), siblingExtras: extras, commonRuntimeKeys: common, extras: d.extras, sibling: TOWN.sibling, crossAccount: OWN });
+        const from = OWN ? process.env.ESTATE_EMAIL_FROM : TOWN.hosted.emailFrom;
+        const r = stampEnvBlock(toml, { id: request.id, app, names, hosts: d.hosts as Hosts, homeOrigin: `https://${d.homeHost}`, derived: deriveVars(d), siblingExtras: extras, commonRuntimeKeys: common, extras: d.extras, sibling: TOWN.sibling, crossAccount: OWN,
+          ...(from ? { outboundEmail: { from, name: request.name } } : {}) });
         writeFileSync(path, appendBlock(toml, r.block));
         state.notes.push(...r.dropped.filter((x) => x.startsWith('REVIEW')).map((x) => `${app}: ${x}`));
         if (OWN) state.notes.push(...r.dropped.filter((x) => x.includes('another Cloudflare account')).map((x) => `${app}: ${x.replace(/^\[[^\]]+\] /, '')} — off until the town offers it over the internet`));
@@ -520,6 +523,8 @@ const steps: Record<string, Step> = {
         await mustCheckpoint('agents');
       }
       chmodSync(LOCAL, 0o600);
+      ensureNamingGate(LOCAL);
+      await mustCheckpoint('agents');
       // THE HOME'S SIGNING KEY. bootstrap-estate does not make one, and the Home throws without it
       // (apps/home/server/_lib/server-broker.ts). Same shape as scripts/gen-dev-vars.ts: an ES256 P-256 private JWK.
       // Kept in the custody file, single-quoted (runbook §2 ⚠), and checkpointed, so a resumed build installs the SAME
@@ -629,6 +634,8 @@ const steps: Record<string, Step> = {
     title: 'Launch its Home',
     run: async () => {
       const d = decl();
+      ensureNamingGate(LOCAL);
+      await mustCheckpoint('home');
       const v = localVars();
       const home = `https://${d.homeHost}`;
       // Its OWN, EMPTY key-value store (runbook §5 ⚠: a shared store opens the wrong Home), made through the Vercel
@@ -648,6 +655,7 @@ const steps: Record<string, Step> = {
         state.notes.push('No demo people: this build has no funder key to create them. Sign-in needs Google or email set up on the Home.');
       }
       const sensitive: Record<string, string> = {
+        NAMING_GATE_PRIVATE_KEY: v.NAMING_GATE_PRIVATE_KEY,
         RPC_URL: v.RPC_URL, A2A_CUSTODY_URL: d.hosts.runtime, A2A_CUSTODY_BRIDGE_SECRET: v.A2A_CUSTODY_BRIDGE_SECRET ?? '',
         BROKER_PRIVATE_JWK: v.BROKER_PRIVATE_JWK, ...(v.DEMO_SIGNER_SECRET ? { DEMO_SIGNER_SECRET: v.DEMO_SIGNER_SECRET } : {}),
         DEMO_A2A_URL: d.hosts.runtime, DEMO_EDGE_URL: d.hosts.edge, A2A_VAULT_URL: d.hosts.vault,
@@ -751,12 +759,17 @@ const steps: Record<string, Step> = {
   names: {
     title: 'Let its people claim names',
     run: async () => {
-      // runbook §7. The script that mints the gate and asks naming.svc to allow it is not in this checkout yet.
-      if (!existsSync('scripts/add-naming-gate.mts')) {
-        state.operatorNotes.push(`Naming gate: run scripts/add-naming-gate.mts --estate ${request.id} (not in the public repo yet), then set NAMING_GATE_PRIVATE_KEY on the ${names.home} Vercel project${OWN ? ' (the owner sets it: it is on their Vercel)' : ''}. Until then its people can use the estate but not buy .me names from its Home.`);
-        return 'waiting';
+      if (!DRY && !process.env.NAMING_CLERK_PRIVATE_KEY) throw new Error('NAMING_CLERK_PRIVATE_KEY is missing from the town build environment; naming is not ready');
+      const args = ['tsx', 'scripts/add-naming-gate.mts', '--estate', request.id];
+      if (OWN) {
+        const gate = reportedResult().namingGate;
+        if (!gate || !/^0x[0-9a-fA-F]{40}$/.test(gate)) throw new Error('the owner build reported no naming gate address');
+        args.push('--gate', gate);
+      } else {
+        ensureNamingGate(LOCAL);
+        await mustCheckpoint('names');
       }
-      ctx.sh('npx', ['tsx', 'scripts/add-naming-gate.mts', '--estate', request.id]);
+      ctx.sh('npx', args, { secret: true });
     },
   },
   check: {
@@ -885,6 +898,7 @@ async function main() {
 
   // ── handover: the custody file, sealed to the owner, and nothing else leaves ──
   const d = decl();
+  if (!localVars().NAMING_GATE_PRIVATE_KEY) throw new Error('the Home has no naming gate key; resume the agents and Home steps before handover');
   const sealed = await sealForOwner(readFileSync(LOCAL, 'utf8'), request.ownerKey);
   const hb = localVars().TOWN_HEARTBEAT_TOKEN;
   // The town's ESTATE_HEARTBEAT_TOKENS is ONE JSON secret this build cannot read back, so it cannot merge into it.
@@ -892,7 +906,7 @@ async function main() {
   if (hb) state.operatorNotes.push(`Pulse (optional): add "${request.id}": "${hb}" to ESTATE_HEARTBEAT_TOKENS on ${TOWN.town}-town-agent.`);
   const delivered = await report({
     step: 'handover', state: 'done', detail: 'sealed to your key',
-    result: { homeOrigin: `https://${d.homeHost}`, hosts: d.hosts, agents: d.agents, custody: sealed, notes: state.notes, operatorNotes: state.operatorNotes },
+    result: { homeOrigin: `https://${d.homeHost}`, hosts: d.hosts, agents: d.agents, namingGate: ensureNamingGate(LOCAL).address, custody: sealed, notes: state.notes, operatorNotes: state.operatorNotes },
   }, { retries: 4 });
   if (!delivered && !DRY) {
     console.error('\n✗ the sealed custody file could not be delivered — it is kept here; re-run to retry.');
