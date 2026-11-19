@@ -15,7 +15,8 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useSession } from '../../../src/context/session';
-import { bindVaultKey, activateInteractionsIfNeeded, resolveVia, type Via } from '../../../src/home/onboarding';
+import { bindVaultKey, activateInteractionsIfNeeded, resolveVia, signHashFor, type Via } from '../../../src/home/onboarding';
+import { keccak256, toBytes } from 'viem';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { VAULT_SERVER_ID } from '../../../src/lib/domain';
 
@@ -52,10 +53,17 @@ export default function VaultKeyPage() {
     setPrepError(null);
     (async () => {
       const infoRes = await fetch(`${MCP_BIND}/custody/vault-key/server-info`).then((r) => r.json());
+      // The provision route requires an OWNER-CONTROL PROOF (NEW-C3): an ERC-1271 signature over a
+      // freshness-bound challenge, exactly as onboarding's activateVault sends it. An unsigned { owner } is
+      // refused with issued_at_required, so this page could not prepare a key on any estate enforcing it.
+      // KMS/email homes sign server-side (no prompt); passkey/wallet homes see one signature here.
+      const issuedAt = Math.floor(Date.now() / 1000);
+      const challenge = keccak256(toBytes(['demo-mcp:vault-key-provision:v1', agentAddress.toLowerCase(), String(issuedAt)].join('\n')));
+      const proof = await (await signHashFor(via, agentAddress, session?.token ? { token: session.token } : undefined))(challenge);
       const provRes = await fetch(`${MCP_BIND}/custody/vault-key/provision`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ owner: agentAddress }),
+        body: JSON.stringify({ owner: agentAddress, issuedAt, proof }),
       }).then((r) => r.json());
       if (cancelled) return;
       if (!provRes?.ok || !provRes.kmsKeyRef) {
@@ -77,7 +85,7 @@ export default function VaultKeyPage() {
       setPrep('error');
     });
     return () => { cancelled = true; };
-  }, [agentAddress]);
+  }, [agentAddress, via]); // via: the provision proof is signed with it (resolves once the profile loads)
 
   const canSubmit = !!agentAddress && prep === 'ready' && agreed && !!info && !busy;
 
