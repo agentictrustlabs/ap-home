@@ -240,6 +240,13 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   let orgCommonName: { displayName?: string; website?: string } = {};
   if (orgPayload?.orgAgent && orgPayload.person) {
     const person = orgPayload.person.toLowerCase();
+    // WHOSE LINK THIS IS. The request proves one person, the delegator of the site delegation verified above, and the
+    // link written below is `related:<person>:<org>`; it is written only for that person. Every ceremony that sends an
+    // org payload sends the signed-in agent here (onboarding.ts, connect-client.ts), which is that delegator.
+    if (person !== String(body.delegation.delegator).toLowerCase()) {
+      console.warn(`[oidc/grant] refused an org link for ${person}: the delegation proves ${String(body.delegation.delegator).toLowerCase()}`);
+      return json({ error: 'the organization link can be written only for the person who signed this grant' }, 403);
+    }
     const org = orgPayload.orgAgent.toLowerCase();
     const existing = JSON.parse((await env.AUTH_CODES.get(`related:${person}:${org}`)) ?? '{}') as Record<string, unknown>;
     const link = {
