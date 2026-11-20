@@ -68,6 +68,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       v = await verifySession(token, { keys, expectedAud: aud, expectedIss: iss });
       const sa = v.ok ? null : await verifyIdTokenForRelyingClient(env, token, keys, iss);
       if (sa) v = { ok: true, session: { ...(v as { session?: object }).session, sub: sa } } as unknown as typeof v;
+      // AN APP'S TOKEN MINTS FOR THAT APP ONLY. A token for another app comes from the person's own Home session (the
+      // first reading above). Checked only once the token has verified, so an unverifiable token is still 401.
+      if (v.ok && aud !== clientId) return json({ error: 'an app’s token can be renewed for that app only; a token for another app needs the person’s Home session' }, 403);
     }
   }
   if (!v.ok) return json({ error: 'session not verified' }, 401);
