@@ -975,6 +975,19 @@ export async function isAgentDeployed(sa: Address): Promise<boolean> {
   }
 }
 
+/** THE CHAIN SAYS IT EXISTS. A new agent's link is saved only once the chain shows its account. The
+ *  deploy is mined before the route answers, but a read replica can lag a few seconds, so this polls (bounded,
+ *  ADR-0013 — the same ~15 s budget as the org-create confirmation below) and reports false rather than guessing. */
+export async function awaitAgentDeployed(sa: Address, tries = 15): Promise<boolean> {
+  const pub = createPublicClient({ chain: CHAIN, transport: http('/a2a/rpc') });
+  for (let i = 0; i < tries; i++) {
+    const code = await pub.getBytecode({ address: sa }).catch(() => undefined);
+    if (code && code !== '0x') return true;
+    await new Promise((r) => setTimeout(r, fastPollMs(1000)));
+  }
+  return false;
+}
+
 /** Pick a free name + build the `executeBatch(register, setPrimary)` calldata the new SA runs
  *  to claim it (newOwner = the SA itself). Returned to ride along in the deploy userOp. */
 type NameClaimRecords = {
@@ -1969,6 +1982,10 @@ async function createManagedAgentSocial(
   }
   const child = b.agent;
   let name = b.name ?? '';
+  onStep?.('Confirming it on the chain…');
+  if (!(await awaitAgentDeployed(child))) {
+    return { ok: false, error: `the create was reported, but ${child} has no account on the chain — nothing was saved. Try again.` };
+  }
 
   onStep?.('Saving to your private vault…');
   const credential = buildRelatedAgentCredential({
@@ -2293,6 +2310,9 @@ export async function createOrganizationWithGoogle(
 
   const childAgent = b.org;
   const personAgent = b.person;
+  if (!(await awaitAgentDeployed(childAgent))) {
+    return { ok: false, error: `the organization was reported created, but ${childAgent} has no account on the chain — nothing was saved. Try again.` };
+  }
   let childName = cOpts.nameLater ? '' : (b.name || picked.name || '');
   if (!cOpts.nameLater && bought && typed) {
     onStep?.('Buying its name…');
