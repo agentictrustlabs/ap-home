@@ -282,7 +282,10 @@ export async function getVaultKeyAllowedResources(env: Pick<VaultKeyEnv, 'DB' | 
  * the person SA actually SIGNED the authorization via ERC-1271 (UniversalSignatureValidator).
  * No stub: a forged/unsigned authorization fails the on-chain signature check.
  */
-export function buildVaultKeyVerifier(env: VaultKeyEnv): VaultKeyAuthorizationVerifier {
+/** `trustPin: false` is BIND TIME: the pin is being computed from the very authorization presented, so it proves
+ *  nothing yet and the on-chain signature check must run (see verifyAndStoreBinding). */
+export function buildVaultKeyVerifier(env: VaultKeyEnv, opts: { trustPin?: boolean } = {}): VaultKeyAuthorizationVerifier {
+  const trustPin = opts.trustPin !== false;
   return createVaultKeyAuthorizationVerifier({
     verifyAuthorization: async ({ authorization, binding }) => {
       const del = authorization as Delegation;
@@ -311,7 +314,7 @@ export function buildVaultKeyVerifier(env: VaultKeyEnv): VaultKeyAuthorizationVe
       // signer rotates credentials — re-verifying live could wrongly reject it). A HASH MISMATCH (a
       // different/tampered authorization than the one bound) falls through to the real on-chain check.
       const presentedHash = (await sha256Hex(canonicalize(delegationToWire(del)))) as Sha256;
-      if (presentedHash === binding.authorizationHash) return true;
+      if (trustPin && presentedHash === binding.authorizationHash) return true;
 
       // Fallback: the presented authorization is NOT the pinned one — verify it on-chain. Fail-closed
       // on a missing validator (we will not accept an authorization we can't verify).
@@ -387,6 +390,16 @@ function p_delegationManager(env: Pick<VaultKeyEnv, 'DELEGATION_MANAGER'>): Addr
  * the owner SA (ERC-1271 via the UniversalSignatureValidator). Fail-closed on any mismatch.
  * Idempotent: re-binding the same (owner, server) upserts.
  */
+/** The Home issues 90 days; anything far beyond that is not a binding a person asked for. */
+const MAX_BINDING_DAYS = 400;
+
+/** The VAULT_KEY_USE terms the authorization actually carries (what the owner signed), or null. */
+function signedVaultKeyUse(authorization: Delegation): ReturnType<typeof decodeVaultKeyUseTerms> | null {
+  const caveat = authorization?.caveats?.find((c) => c.enforcer?.toLowerCase() === VAULT_KEY_USE_ENFORCER.toLowerCase());
+  if (!caveat) return null;
+  try { return decodeVaultKeyUseTerms(caveat.terms); } catch { return null; }
+}
+
 export async function verifyAndStoreBinding(
   env: VaultKeyEnv,
   input: Omit<VaultKeyBindingParams, 'serverKey' | 'salt'> & { authorization: Delegation },
@@ -397,6 +410,20 @@ export async function verifyAndStoreBinding(
   // a bigint. `input.authorization` keeps salt as bigint for the verifier's hashDelegation.
   const wire = delegationToWire(input.authorization);
   const authorizationHash = (await sha256Hex(canonicalize(wire))) as Sha256;
+  // WHAT IS STORED IS WHAT WAS SIGNED. Scope, ops and ceiling arrive in the body beside the authorization and are
+  // compared with the signed VAULT_KEY_USE terms: the body may ask for less than was signed, never more or other.
+  const signed = signedVaultKeyUse(input.authorization);
+  if (!signed) return { ok: false, reason: 'authorization carries no readable VAULT_KEY_USE caveat' };
+  if (signed.vaultId !== input.vaultId) return { ok: false, reason: 'vaultId is not the one signed' };
+  if (signed.kmsKeyRef !== input.kmsKeyRef) return { ok: false, reason: 'kmsKeyRef is not the one signed' };
+  if (signed.classificationCeiling !== input.classificationCeiling) return { ok: false, reason: 'classification ceiling is not the one signed' };
+  if (!input.allowedResources.every((r) => signed.resources.includes(r))) return { ok: false, reason: 'a resource is outside the signed scope' };
+  if (!input.ops.every((o) => signed.ops.includes(o))) return { ok: false, reason: 'an op is outside the signed scope' };
+  // The expiry is NOT in the signed terms (the authorization carries one caveat and no time bound), so it cannot be
+  // compared with anything. Bound it instead: a real date, in the future, at most MAX_BINDING_DAYS out.
+  const until = Date.parse(input.expiresAt);
+  if (!Number.isFinite(until) || until <= Date.now()) return { ok: false, reason: 'expiresAt is not a future date' };
+  if (until > Date.now() + MAX_BINDING_DAYS * 86_400_000) return { ok: false, reason: `expiresAt is more than ${MAX_BINDING_DAYS} days out` };
   const candidate: VaultKeyBindingV1 = {
     type: 'VaultKeyBindingV1',
     vaultId: input.vaultId,
@@ -414,7 +441,9 @@ export async function verifyAndStoreBinding(
   };
   // Validate the authorization end-to-end (caveat match + owner signature) using an
   // in-scope probe request (first authorized resource + op).
-  const verdict = await buildVaultKeyVerifier(env).verify({
+  // `trustPin: false`: the candidate's pin was computed from this same authorization just above, so the per-op
+  // pin short-circuit does not apply here; bind time always runs the on-chain signature check.
+  const verdict = await buildVaultKeyVerifier(env, { trustPin: false }).verify({
     authorization: input.authorization,
     binding: candidate,
     request: {
@@ -427,7 +456,11 @@ export async function verifyAndStoreBinding(
     },
     now: new Date(),
   });
-  if (!verdict.ok) return { ok: false, reason: verdict.reason };
+  if (!verdict.ok) {
+    console.warn(`[vault-key] bind REFUSED for ${String(input.owner).toLowerCase()}: ${verdict.reason}`);
+    return { ok: false, reason: verdict.reason };
+  }
+  console.log(`[vault-key] bind for ${String(input.owner).toLowerCase()} pin=${authorizationHash.slice(0, 16)} ops=${input.ops.join('+')} until=${input.expiresAt}`);
 
   await putVaultKeyBindingRow(env.DB, {
     owner_address: input.owner,
