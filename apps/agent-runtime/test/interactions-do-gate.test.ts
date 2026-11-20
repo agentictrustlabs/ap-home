@@ -540,7 +540,12 @@ describe('org content accepts either identity, still gated on stewardship', () =
     }));
     expect(junkWire.ok).toBe(false);
     expect((await call('content.getMany', 'not-a-jwt', ORG)).status).toBe(401);
-    expect((await call('content.getMany', await relying(caip(ORG)), MEMBER)).status).toBe(401);
+    // Another principal has its own object: this one is the ORG's and answers for nobody else (isOwnPrincipal).
+    expect((await call('content.getMany', await relying(caip(ORG)), MEMBER)).status).toBe(403);
+    const members = new InteractionsDO({ storage: { async get() { return undefined; }, async put() {}, async delete() {} } } as unknown as DurableObjectState, env());
+    const asOrg = await relying(caip(ORG));
+    const other = await members.fetch(new Request(`https://do.test/interactions/${MEMBER}/content.getMany`, { method: 'POST', body: JSON.stringify({ session: asOrg }), headers: { 'Content-Type': 'application/json', authorization: `Bearer ${asOrg}` } }));
+    expect(other.status).toBe(401);
   });
 
   it('lets the principal past the gate for the batch read, as for the single one', async () => {

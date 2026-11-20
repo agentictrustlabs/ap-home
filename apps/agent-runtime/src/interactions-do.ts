@@ -22,6 +22,7 @@ import { CATALOG_PAGE_COUNT, CATALOG_ROOT_RECORD, applyCatalogEdit, assembleCata
 import { CONTACT_FIELD_ARGS, contactField, precisionOf } from '@agenticprimitives/ontology';
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { chainFor, chainIdOf } from './chain';
+import { isInteractionsOp } from './interactions-op.js';
 import { kinTermFor, householdRoleFor } from '@agenticprimitives/ontology';
 import { hashDelegation, decodeTimestampTerms, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, SESSION_AUDIENCE_ENFORCER, decodeSessionAudienceTerms, type Delegation, type VaultRecordScopeGrant, currentWireOf, LINEAGE_RECORD_PREFIX, type DelegationLineageV1 } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
@@ -306,6 +307,8 @@ function scopedContentOp(
   return undefined;
 }
 
+/** The principal this object belongs to, pinned on first use (see `isOwnPrincipal`). */
+const OWN_PRINCIPAL_KEY = 'self.principal';
 const READ_GRANT_KEY = (clientId: string): string => `read.grant:${clientId.toLowerCase()}`;
 /** A STUDY GRANT — the person's delegation to a COACH SERVICE (never an app, never a person) to read their
  *  card-room study records and append the coach's notes. Keyed by the coach's typed name. */
@@ -2651,12 +2654,44 @@ export class InteractionsDO {
     return countedOp(() => this.handleOp(request));
   }
 
+  /** WHOSE OBJECT THIS IS. Every owner and steward check compares the caller with the principal named in the request
+   *  URL, so the object also confirms that principal is its own, whoever calls it. Three checks, in order of strength:
+   *    1. the name this object was addressed by (`idFromName(principal)`), where the runtime reports it;
+   *    2. the principal pinned in storage the first time the object served one;
+   *    3. before pinning: a stored grant must be the principal's own — an object holding somebody else's grant is
+   *       refused, not pinned, so an inconsistent object shows up as an error instead of being made permanent. */
+  private ownPrincipal: string | null = null;
+  private async isOwnPrincipal(principal: string): Promise<{ ok: true } | { ok: false; why: string }> {
+    const named = (this.state.id as { name?: string } | undefined)?.name?.toLowerCase();
+    if (named && /^0x[0-9a-f]{40}$/.test(named) && named !== principal) return { ok: false, why: `addressed as ${named}, asked to act as ${principal}` };
+    if (this.ownPrincipal) return this.ownPrincipal === principal ? { ok: true } : { ok: false, why: `pinned to ${this.ownPrincipal}, asked to act as ${principal}` };
+    const pinned = (await this.state.storage.get(OWN_PRINCIPAL_KEY)) as string | undefined;
+    if (pinned) {
+      this.ownPrincipal = pinned;
+      return pinned === principal ? { ok: true } : { ok: false, why: `pinned to ${pinned}, asked to act as ${principal}` };
+    }
+    const st = ((await this.state.storage.get('state')) ?? {}) as { grant?: { delegator?: string }; deliveryGrant?: { delegator?: string } };
+    for (const [what, g] of [['grant', st.grant], ['delivery grant', st.deliveryGrant]] as const) {
+      const holder = g?.delegator?.toLowerCase();
+      if (holder && holder !== principal) return { ok: false, why: `the stored ${what} is ${holder}'s, asked to act as ${principal} — NOT pinned; repair this object` };
+    }
+    await this.state.storage.put(OWN_PRINCIPAL_KEY, principal);
+    this.ownPrincipal = principal;
+    return { ok: true };
+  }
+
   private async handleOp(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const parts = url.pathname.split('/').filter(Boolean); // interactions/<principal>/<op>
     const principal = (parts[1] ?? '').toLowerCase();
     let op = parts[2] ?? '';
     if (!/^0x[0-9a-fA-F]{40}$/.test(principal)) return json({ error: 'bad principal' }, 400);
+    if (parts.length !== 3 || parts[0] !== 'interactions' || !isInteractionsOp(op)) return json({ error: 'bad op' }, 400);
+    const mine = await this.isOwnPrincipal(principal);
+    if (!mine.ok) {
+      console.warn(`[interactions] refused ${op}: ${mine.why}`);
+      return json({ error: 'this is not that principal’s object' }, 403);
+    }
     const rawBody = await request.text();
     let body: Record<string, unknown> = {};
     try { body = JSON.parse(rawBody) as Record<string, unknown>; } catch { /* empty body ok */ }
