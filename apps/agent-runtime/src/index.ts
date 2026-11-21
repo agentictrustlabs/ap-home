@@ -84,6 +84,7 @@ import {
 import { chainFor, chainIdOf } from './chain';
 import { isInteractionsOp } from './interactions-op.js';
 import { rpcProxyCheck } from './rpc-proxy.js';
+import { accountDeployedFor } from './deploy-landed.js';
 import {
   AgentAccountClient,
   buildExecuteBatchCallData,
@@ -867,6 +868,26 @@ function unpackedCallGasLimit(op: { accountGasLimits?: unknown }): string | null
   const packed = typeof op.accountGasLimits === 'string' ? op.accountGasLimits : null;
   if (!packed || packed.length < 66) return null;
   try { return BigInt('0x' + packed.slice(34)).toString(); } catch { return null; }
+}
+
+/** A deploy's verdict for ONE sender: its own UserOperationEvent must say success, and EntryPoint must have emitted
+ *  AccountDeployed for it in the same receipt, as /session/deploy/submit already requires. */
+function deployLanded(
+  receipt: Parameters<typeof detectInnerOpFailure>[0],
+  sender: `0x${string}`,
+): InnerOpResult & { notDeployed?: boolean } {
+  const inner = detectInnerOpFailure(receipt, { sender });
+  if (!inner.ok) return inner;
+  if (!accountDeployedFor(receipt, sender)) return { ok: false, notDeployed: true };
+  return inner;
+}
+
+/** The one sentence a bootstrap route reports for a deploy that did not land. */
+function deployFailureDetail(inner: InnerOpResult & { notDeployed?: boolean; matched?: boolean }, sender: string): string {
+  if (inner.revertReason) return `inner userOp reverted with ${inner.revertReason}`;
+  if (inner.notDeployed) return `the transaction succeeded but no account was created for ${sender}`;
+  if (inner.matched === false) return `this userOp is not in that transaction (no UserOperationEvent for ${sender})`;
+  return 'inner userOp reverted';
 }
 
 function detectInnerOpFailure(
@@ -8689,7 +8710,7 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
       }
       throw submitErr;
     }
-    const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
+    const inner = deployLanded(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0], sa as `0x${string}`);
     if (!inner.ok) {
       if (await deployedNow()) {
         return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: claimedName, alreadyDeployed: true });
@@ -8698,7 +8719,7 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
         {
           ok: false,
           error: 'userop_reverted',
-          detail: inner.revertReason ? `inner userOp reverted with ${inner.revertReason}` : 'inner userOp reverted',
+          detail: deployFailureDetail(inner, sa),
           transactionHash: receipt.transactionHash,
         },
         500,
@@ -8795,7 +8816,7 @@ app.post('/custody/oidc/bootstrap', async (c) => {
       }
       throw submitErr;
     }
-    const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
+    const inner = deployLanded(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0], sa as `0x${string}`);
     if (!inner.ok) {
       if (await deployedNow()) {
         return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), alreadyDeployed: true });
@@ -8804,7 +8825,7 @@ app.post('/custody/oidc/bootstrap', async (c) => {
         {
           ok: false,
           error: 'userop_reverted',
-          detail: inner.revertReason ? `inner userOp reverted with ${inner.revertReason}` : 'inner userOp reverted',
+          detail: deployFailureDetail(inner, sa),
           transactionHash: receipt.transactionHash,
         },
         500,
@@ -9077,10 +9098,10 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
     const signature = await sign(userOpHash); // C_sub signs (65-byte ECDSA)
     const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount);
-    const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
+    const inner = deployLanded(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0], orgSA as `0x${string}`);
     if (!inner.ok) {
       return c.json(
-        { ok: false, error: 'userop_reverted', detail: inner.revertReason ? `inner userOp reverted with ${inner.revertReason}` : 'inner userOp reverted', transactionHash: receipt.transactionHash },
+        { ok: false, error: 'userop_reverted', detail: deployFailureDetail(inner, orgSA), transactionHash: receipt.transactionHash },
         500,
       );
     }
@@ -9375,10 +9396,10 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
     const signature = await sign(userOpHash); // C_sub signs
     const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount);
-    const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
+    const inner = deployLanded(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0], childSA as `0x${string}`);
     if (!inner.ok) {
       return c.json(
-        { ok: false, error: 'userop_reverted', detail: inner.revertReason ? `inner userOp reverted with ${inner.revertReason}` : 'inner userOp reverted', transactionHash: receipt.transactionHash },
+        { ok: false, error: 'userop_reverted', detail: deployFailureDetail(inner, childSA), transactionHash: receipt.transactionHash },
         500,
       );
     }
