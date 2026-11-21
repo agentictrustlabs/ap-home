@@ -1,0 +1,51 @@
+# THE .estate NAME FOR AN ESTATE THAT IS ALREADY BUILT. New estates get it in the one-click build's estate-name step;
+# this is for one built before the root was handed to naming.svc (scripts/add-estate-name.mts says how it registers).
+#
+# It registers `<id>.estate` to the estate agent recorded in estates/<id>.estate.json on master, and nothing else. A name
+# that already exists is verified, never moved. `check_only` reads the chain and changes nothing.
+name: estate-name
+
+on:
+  workflow_dispatch:
+    inputs:
+      estate_id: { description: 'The estate''s short name (as on the createestate page)', required: true }
+      check_only: { description: 'Only check whether the name is registered', type: boolean, default: false }
+
+concurrency:
+  group: estate-oneclick-${{ inputs.estate_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  estate-name:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: estate-oneclick
+    steps:
+      - name: Check the input is an id and nothing else
+        env: { ESTATE_ID: '${{ inputs.estate_id }}' }
+        run: '[[ "$ESTATE_ID" =~ ^[a-z][a-z0-9-]{1,30}$ ]] || { echo "not an estate id"; exit 1; }'
+
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Install ap-home
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Register the name
+        env:
+          ESTATE_ID: ${{ inputs.estate_id }}
+          CHECK_ONLY: ${{ inputs.check_only }}
+          TOWN: ${{ vars.TOWN || 'faithchain' }}
+          TOWN_RPC_URL: ${{ secrets.TOWN_RPC_URL }}
+          NAMING_CLERK_PRIVATE_KEY: ${{ !inputs.check_only && secrets.NAMING_CLERK_PRIVATE_KEY || '' }}
+        run: |
+          DECL="estates/${ESTATE_ID}.estate.json"
+          test -f "$DECL" || { echo "no $DECL on master"; exit 1; }
+          AGENT=$(jq -r '.agents.estate // empty' "$DECL")
+          [[ "$AGENT" =~ ^0x[0-9a-fA-F]{40}$ ]] || { echo "$DECL records no estate agent"; exit 1; }
+          FLAGS=(); [ "$CHECK_ONLY" = "true" ] && FLAGS+=(--check)
+          npx tsx scripts/add-estate-name.mts --estate "$ESTATE_ID" --agent "$AGENT" "${FLAGS[@]}"
