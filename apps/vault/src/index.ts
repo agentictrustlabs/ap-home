@@ -903,7 +903,8 @@ app.post('/tools/get_profile', async (c) => {
   type Args = { args?: Record<string, unknown> };
   const handler = withDelegation<Args>(
     withProof(c.env, baseConfig(c.env), body.invocationProof),
-    async ({ principal }) => {
+    async ({ principal, recordScopes }) => {
+      if (!recordScopeAllows(c.env, recordScopes, RESOURCE_PROFILE, 'read')) return { ok: false, error: 'record_scope_denied', served_by: 'demo-mcp:get_profile' };
       // Profile lives in the encrypted vault (resource `profile`, pii.low). spec 278:
       // gated on the person's vault-key binding + authorization — no binding ⇒ fail closed.
       const gate = await authorizePersonVaultOp(c.env, principal, RESOURCE_PROFILE, 'read', 'pii.low');
@@ -960,7 +961,8 @@ app.post('/tools/get_pii', async (c) => {
   type Args = { args?: { fields?: string[]; purpose?: string } };
   const handler = withDelegation<Args>(
     withProof(c.env, baseConfig(c.env), body.invocationProof),
-    async ({ principal, args, grants }) => {
+    async ({ principal, args, grants, recordScopes }) => {
+      if (!recordScopeAllows(c.env, recordScopes, RESOURCE_PERSON_PII, 'read')) return { ok: false, error: 'record_scope_denied', served_by: 'demo-mcp:get_pii' };
       const r = await readSensitive(
         c.env,
         { principal, args, grants, correlationId: getCorrelationId(c), audience: c.env.MCP_AUDIENCE },
@@ -1014,7 +1016,8 @@ app.post('/tools/get_org_sensitive', async (c) => {
   type Args = { args?: { fields?: string[]; purpose?: string } };
   const handler = withDelegation<Args>(
     withProof(c.env, baseConfig(c.env), body.invocationProof),
-    async ({ principal, args, grants }) => {
+    async ({ principal, args, grants, recordScopes }) => {
+      if (!recordScopeAllows(c.env, recordScopes, RESOURCE_ORG_SENSITIVE, 'read')) return { ok: false, error: 'record_scope_denied', served_by: 'demo-mcp:get_org_sensitive' };
       const r = await readSensitive(
         c.env,
         { principal, args, grants, correlationId: getCorrelationId(c), audience: c.env.MCP_AUDIENCE },
@@ -1627,6 +1630,14 @@ app.post('/tools/list_vault_record', async (c) => {
 //     unexpired grant exists. demo-mcp wields the OWNER's KEK (the org's own vault-key binding) to
 //     decrypt; the member never holds the org's key.
 
+/** An entitlement ADMIN act (issue, revoke, list, group roster) is the principal's own act, never record access. A
+ *  delegation that carries a VAULT_RECORD_SCOPE caveat was signed to reach particular records, so it is refused here;
+ *  the principal's own unscoped authority still works. */
+function entitlementAdminRefused(tool: string): { ok: false; error: string; served_by: string } {
+  console.warn(`[entitlements] ${tool} refused: the delegation presented is record-scoped`);
+  return { ok: false, error: 'record_scoped_delegation_not_allowed', served_by: `demo-mcp:${tool}` };
+}
+
 const ENTITLEMENT_ADMIN_CLASSIFICATION = {
   '@sa-tool': 'delegation-verified',
   '@sa-auth': 'session-token',
@@ -1671,7 +1682,8 @@ app.post('/tools/issue_org_entitlement', async (c) => {
   try {
     const handler = withDelegation<Args>(
       withProof(c.env, vaultConfig(c.env, body.enforceBinding), body.invocationProof),
-      async ({ principal, args }) => {
+      async ({ principal, args, recordScopes }) => {
+        if (Array.isArray(recordScopes)) return entitlementAdminRefused('issue_org_entitlement');
         const org = principal; // the issuer — recovered from the org's presented (stewardship) authority
         const recordType = args?.recordType;
         if (!recordType) return { ok: false, error: 'recordType required' };
@@ -1732,7 +1744,8 @@ app.post('/tools/revoke_org_entitlement', async (c) => {
   try {
     const handler = withDelegation<Args>(
       withProof(c.env, vaultConfig(c.env, body.enforceBinding), body.invocationProof),
-      async ({ principal, args }) => {
+      async ({ principal, args, recordScopes }) => {
+        if (Array.isArray(recordScopes)) return entitlementAdminRefused('revoke_org_entitlement');
         const id = args?.id;
         if (!id) return { ok: false, error: 'id required' };
         // Only the issuing org may revoke its own grant (principal-scoped UPDATE).
@@ -1768,7 +1781,8 @@ app.post('/tools/list_org_entitlements', async (c) => {
   try {
     const handler = withDelegation<Args>(
       withProof(c.env, vaultConfig(c.env, body.enforceBinding), body.invocationProof),
-      async ({ principal }) => {
+      async ({ principal, recordScopes }) => {
+        if (Array.isArray(recordScopes)) return entitlementAdminRefused('list_org_entitlements');
         const rows = await c.env.DB.prepare(
           `SELECT id, actor, resource, valid_until, status, created_at FROM entitlements_issued WHERE principal = ? ORDER BY created_at DESC LIMIT 200`,
         ).bind(principal.toLowerCase()).all<{ id: string; actor: string; resource: string; valid_until: string | null; status: string; created_at: string }>();
@@ -1810,7 +1824,8 @@ app.post('/tools/manage_entitlement_group', async (c) => {
   try {
     const handler = withDelegation<Args>(
       withProof(c.env, vaultConfig(c.env, body.enforceBinding), body.invocationProof),
-      async ({ principal, args }) => {
+      async ({ principal, args, recordScopes }) => {
+        if (Array.isArray(recordScopes)) return entitlementAdminRefused('manage_entitlement_group');
         const owner = principal.toLowerCase();
         const groupId = typeof args?.groupId === 'string' ? args.groupId.trim().toLowerCase() : '';
         if (!groupId) return { ok: false, error: 'groupId required' };
@@ -2385,7 +2400,8 @@ app.post('/tools/update_profile', async (c) => {
   type Args = { args?: { full_name?: string; email?: string; phone?: string | null; notes?: string | null } };
   const handler = withDelegation<Args>(
     withProof(c.env, baseConfig(c.env), body.invocationProof),
-    async ({ principal, args }) => {
+    async ({ principal, args, recordScopes }) => {
+      if (!recordScopeAllows(c.env, recordScopes, RESOURCE_PROFILE, 'write')) return { ok: false, error: 'record_scope_denied', served_by: 'demo-mcp:update_profile' };
       const gate = await authorizePersonVaultOp(c.env, principal, RESOURCE_PROFILE, 'write', 'pii.low');
       if (!gate.ok) return { ok: false, error: gate.error, served_by: 'demo-mcp:update_profile' };
       const current = (await gate.pv.vault.read<Profile>({ owner: principal, resource: RESOURCE_PROFILE }))?.data ?? buildSeedProfile(principal);
