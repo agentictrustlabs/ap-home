@@ -83,6 +83,7 @@ import {
 } from './validate';
 import { chainFor, chainIdOf } from './chain';
 import { isInteractionsOp } from './interactions-op.js';
+import { rpcProxyCheck } from './rpc-proxy.js';
 import {
   AgentAccountClient,
   buildExecuteBatchCallData,
@@ -444,6 +445,10 @@ export interface Env {
 
   // Public config (wrangler.toml [vars])
   RPC_URL: string;
+  /** The chain gateway URL carrying this estate's BROWSER-scoped token (the one the website's bundle holds). The
+   *  session-less `/rpc` route forwards under it, so a visitor never borrows the server's credential, write budget
+   *  or rate bucket (rpc-proxy.ts). Unset: `/rpc` forwards under RPC_URL, with the route's own refusals only. */
+  RPC_URL_BROWSER?: string;
   CHAIN_ID: string;
   ALLOWED_ORIGINS: string;
   MCP_URL: string;
@@ -6148,11 +6153,19 @@ app.post('/rpc', async (c) => {
   // Allow CSRF middleware to bypass — it's a passthrough.
   // (Middleware already passed because the request arrived; the CSRF
   // gate is per-route, not global. /rpc deliberately doesn't gate.)
+  // No session reaches this route, so it forwards single reads only, and under the estate's BROWSER-scoped chain
+  // URL when one is set — never the server's own credential when it can be avoided (rpc-proxy.ts).
+  const checked = rpcProxyCheck(body);
+  if ('refused' in checked) {
+    console.warn(`[rpc-proxy] refused: ${checked.refused}`);
+    return c.json({ jsonrpc: '2.0', error: { code: -32601, message: checked.refused }, id: null }, 403);
+  }
+  const browserUrl = (c.env.RPC_URL_BROWSER ?? '').trim();
   try {
-    const upstream = await fetch(c.env.RPC_URL, {
+    const upstream = await fetch(browserUrl || c.env.RPC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body,
+      body: checked.forward,
     });
     const text = await upstream.text();
     return new Response(text, {
