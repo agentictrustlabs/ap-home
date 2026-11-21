@@ -82,6 +82,7 @@ import {
   parseUint48,
 } from './validate';
 import { chainFor, chainIdOf } from './chain';
+import { isInteractionsOp } from './interactions-op.js';
 import {
   AgentAccountClient,
   buildExecuteBatchCallData,
@@ -7018,6 +7019,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     // No internal marker: this is the same door a click comes through.
     interactionsOp: async (principal: Address, op: string, body: Record<string, unknown>) => {
       if (op.startsWith('internal.')) throw new Error('internal ops are not reachable this way');
+      if (!isInteractionsOp(op) || !/^0x[0-9a-fA-F]{40}$/.test(principal)) throw new Error('not an interactions op');
       const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(principal.toLowerCase()));
       const res = await stub.fetch(new Request(`https://do/interactions/${principal.toLowerCase()}/${op}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }));
       const out = (await res.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
@@ -9769,6 +9771,11 @@ app.all('/interactions/:principal/:op', async (c) => {
   const principal = (c.req.param('principal') ?? '').toLowerCase();
   if (!/^0x[0-9a-fA-F]{40}$/.test(principal)) return c.json({ ok: false, error: 'bad principal' }, 400);
   const op = c.req.param('op') ?? '';
+  // The op arrives percent-decoded and becomes part of the object's URL below: dot-separated words only (interactions-op.ts).
+  if (!isInteractionsOp(op)) {
+    console.warn(`[interactions] refused op for ${principal}: not an op name (${JSON.stringify(String(op).slice(0, 120))})`);
+    return c.json({ ok: false, error: 'bad op' }, 400);
+  }
   // `internal.*` ops are the in-Worker delivery channel (spec 322 W3f) — never routable from outside.
   if (op.startsWith('internal.')) return c.json({ ok: false, error: 'internal op' }, 403);
   const stub = c.env.INTERACTIONS.get(c.env.INTERACTIONS.idFromName(principal));

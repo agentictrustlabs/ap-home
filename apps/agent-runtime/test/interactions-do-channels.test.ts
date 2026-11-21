@@ -521,9 +521,10 @@ describe('a governed workspace admits members of its governing organization', ()
       salt: '7', signature: `0x${'ef'.repeat(65)}`,
     };
   };
-  const mkDo = (world: World, interactions: unknown) => {
+  // Each object holds ITS OWN principal's grant: an object holding someone else's is refused (isOwnPrincipal).
+  const mkDo = (world: World, interactions: unknown, principal: string = ORG) => {
     const m = new Map<string, unknown>();
-    m.set('state', { grant: grantWire });
+    m.set('state', { grant: { ...grantWire, delegator: principal } });
     return new InteractionsDO(
       { storage: {
         async get(k: string) { return m.get(k); },
@@ -545,7 +546,7 @@ describe('a governed workspace admits members of its governing organization', ()
     wsWorld = { records: new Map(), proofsValid: true };
     const orgDo = mkDo(orgWorld, undefined);
     const ns = { idFromName: (n: string) => n, get: (id: string) => ({ fetch: (r: Request) => (id === ORG.toLowerCase() ? orgDo.fetch(r) : Promise.resolve(new Response('{}', { status: 404 }))) }) };
-    wsDo = mkDo(wsWorld, ns);
+    wsDo = mkDo(wsWorld, ns, WS);
     wsWorld.records.set('workspace.governor', { governedBy: ORG });
   });
 
@@ -599,7 +600,7 @@ describe('a governed workspace admits members of its governing organization', ()
     const rebuild = () => {
       const orgDo = mkDo(orgWorld, undefined);
       const ns = { idFromName: (n: string) => n, get: (id: string) => ({ fetch: (r: Request) => (id === ORG.toLowerCase() ? orgDo.fetch(r) : Promise.resolve(new Response('{}', { status: 404 }))) }) };
-      wsDo = mkDo(wsWorld, ns);
+      wsDo = mkDo(wsWorld, ns, WS);
     };
 
     it('ADMITS a governor\'s member when the pointer carries a live grant from that governor', async () => {
