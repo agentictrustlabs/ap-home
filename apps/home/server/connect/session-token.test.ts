@@ -99,11 +99,15 @@ describe('/connect/session-token — spec 426 §5 production seam', () => {
     expect(res.status).toBe(403);
   });
 
-  it('accepts a registered relying app’s id_token as the session too (the runtime may hold one)', async () => {
+  // An app's token mints for that app only; a token for another app comes from the person's Home session.
+  it('accepts a registered relying app’s token as the session for THAT app, and refuses it for another', async () => {
     const appToken = await mint('skills-app');
-    const res = await post({ client_id: 'gc-platform' }, appToken);
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { aud: string }).aud).toBe('gc-platform');
+    const same = await post({ client_id: 'skills-app' }, appToken);
+    expect(same.status).toBe(200);
+    expect(((await same.json()) as { aud: string }).aud).toBe('skills-app');
+    const other = await post({ client_id: 'gc-platform' }, appToken);
+    expect(other.status).toBe(403);
+    expect(await other.json()).not.toHaveProperty('id_token');
   });
 
   it.each(['family-field', 'family-field-join'])('exchanges %s nonce-bound sign-in for a runtime-compatible bearer without creating an AgentSession', async (clientId) => {
