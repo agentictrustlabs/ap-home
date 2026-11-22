@@ -801,6 +801,17 @@ const steps: Record<string, Step> = {
 /** The town's half of `<label>.estate`. False (and an operator note) when the contract script or root key is absent. */
 function registerEstateName(agent: string, rpcUrl: string): boolean {
   const label = request.id;
+  // The town's own way: naming.svc is the root's delegate and the clerk signs through the town relayer
+  // (add-estate-name.mts). Exit 3 says that is not set up yet, and why, on stderr; anything else is a real failure and
+  // stops the build. Not `secret`: the script never prints the key, and a hidden reason helps nobody.
+  if (process.env.NAMING_CLERK_PRIVATE_KEY) {
+    try {
+      ctx.sh('npx', ['tsx', 'scripts/add-estate-name.mts', '--estate', label, '--agent', agent], { env: !process.env.TOWN_RPC_URL && rpcUrl ? { TOWN_RPC_URL: rpcUrl } : {} });
+      return true;
+    } catch (e) {
+      if ((e as { status?: number }).status !== 3) throw e;
+    }
+  }
   const contracts = process.env.AGENTIC_CONTRACTS_DIR;
   const rootKey = process.env.ESTATE_ROOT_OWNER_KEY;
   if (!contracts || !rootKey || !rpcUrl || !existsSync(join(contracts, 'script/AddEstateName.s.sol'))) {

@@ -184,6 +184,25 @@ public gate address; the town's finish step approves it. One gate per Home,
 revocable alone. The **domain rule** refuses any label whose `.com`/`.org` exists (`maya`, `mayafernandes`,
 `tomasvargas`…) unless a verified email at that domain is on the Home — hyphenated full names were free.
 
+### The estate's own name
+
+```
+npx tsx scripts/add-estate-name.mts --estate <estate> --agent 0x<estate agent>
+```
+
+Registers `<estate>.estate` to the estate agent (`agents.estate` in its declaration; `add-estate-agent.mts` makes it).
+Only the `.estate` root's owner or its subregistry delegate may register a child. Once that delegate is `naming.svc`,
+the clerk signs the registration through the town relayer and the one-click build does it in its `estate-name` step
+with the same `NAMING_CLERK_PRIVATE_KEY` the gate uses; no deployer key and no contracts checkout. Delegating is one
+call, once per chain generation, by the root's owner, who keeps the root and can undo it:
+`AgentNameRegistry.setSubregistry(namehashRoot("estate"), <naming.svc>)`. The delegate can register free names and
+nothing else; it cannot move a name or give the root away. Until then, or when the clerk key does not custody
+`naming.svc`, the script changes nothing, says why, and exits 3, and the build leaves the operator note it always did.
+A name that exists is verified and never moved. `--check` only reads, and prints the registry, the root's owner and
+delegate, `naming.svc` and whether the clerk key custodies it: read every address from that one output, because a
+checkout with an older contracts pin names an older registry. For an estate that is already built, run the
+`estate-name` workflow with its id.
+
 ## 8. Demo people, and proving the estate works
 
 ```

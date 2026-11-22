@@ -144,6 +144,7 @@ try {
 const after = await pc.readContract({ address: PROFILE_RESOLVER, abi: RESOLVER_ABI, functionName: 'getStringProperty', args: [agent, ATL_HOMEPAGE] }).catch(() => '');
 console.log(`  atl:homepage now: ${String(after) || '(unreadable — check the tx)'}`);
 console.log('');
-console.log(`>>> next, as the DEPLOYER (it owns the .estate root):`);
-console.log(`    ESTATE_LABEL=${estate} ESTATE_AGENT=${agent} forge script script/AddEstateName.s.sol:AddEstateName …`);
+console.log(`>>> next, as the town (naming.svc is the .estate root's delegate; the clerk signs):`);
+console.log(`    npx tsx scripts/add-estate-name.mts --estate ${estate} --agent ${agent}`);
+console.log(`    (before the root's owner delegates to naming.svc, the owner runs AddEstateName.s.sol instead)`);
 console.log(`>>> then set NEXT_PUBLIC_ESTATE_NAME=${estate}.estate on this estate's Home and redeploy it.`);
