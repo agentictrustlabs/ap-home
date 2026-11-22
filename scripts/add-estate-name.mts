@@ -1,14 +1,19 @@
 #!/usr/bin/env -S npx tsx
 /** Register `<estate>.<estate root>` to that estate's own agent, as the town.
  *
- * The estate root has no subregistry: its owner registers each child. When that owner is `naming.svc` (the town's
- * naming agent), the town clerk signs the registration through the town relayer, exactly as add-naming-gate.mts
- * approves a gate, so a build needs no deployer key and no contracts checkout. Until the root is handed to
- * `naming.svc` this script changes nothing and exits 3.
+ * Only a root's owner or its subregistry delegate may register a child. When the estate root's delegate is
+ * `naming.svc` (the town's naming agent), the town clerk signs the registration through the town relayer, exactly as
+ * add-naming-gate.mts approves a gate, so a build needs no deployer key and no contracts checkout. The root's owner
+ * delegates once with setSubregistry and keeps the root: the delegate can register children and nothing else, and
+ * the owner can take the delegation back. Until then, or when the clerk key does not custody naming.svc, this
+ * script changes nothing and exits 3.
  *
  * A name that already exists is never moved: it is verified to point at the given agent, or the script fails.
  * NAMING_CLERK_PRIVATE_KEY comes from the town's protected build environment, or --clerk-key-file from an operator.
  * The clerk key is never written or printed.
+ *
+ * --check only reads: it prints the registry it read, the root's owner and delegate, naming.svc, and (given the clerk
+ * key) whether that key custodies naming.svc. It never fails because the name is free.
  *
  *   npx tsx scripts/add-estate-name.mts --estate <id> --agent 0x<estate agent> [--check] [--clerk-key-file <file>]
  */
@@ -20,8 +25,8 @@ import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { getDeployments } from '@agenticprimitives/contracts/deployments';
 import { loadTown } from './estate-oneclick/town.mts';
 
-/** The root has not been handed to naming.svc: nothing was changed and an operator must act once. */
-const NOT_HANDED_OVER = 3;
+/** naming.svc may not register here, or the clerk cannot sign for it: nothing was changed and an operator must act. */
+const NOT_DELEGATED = 3;
 
 const arg = (n: string) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : undefined; };
 const estate = arg('--estate');
@@ -47,10 +52,11 @@ const registry = d.agentNameRegistry as Address;
 const abi = parseAbi([
   'function recordExists(bytes32) view returns (bool)',
   'function owner(bytes32) view returns (address)',
+  'function subregistry(bytes32) view returns (address)',
   'function register(bytes32 parentNode, string label, address newOwner, address resolverContract, uint64 expiry) returns (bytes32)',
   'function isCustodian(address) view returns (bool)',
 ]);
-const read = <T,>(functionName: 'recordExists' | 'owner', node: Hex) => pc.readContract({ address: registry, abi, functionName, args: [node] }) as Promise<T>;
+const read = <T,>(functionName: 'recordExists' | 'owner' | 'subregistry', node: Hex) => pc.readContract({ address: registry, abi, functionName, args: [node] }) as Promise<T>;
 // The registry's own derivation (namehashRoot, then parent + labelhash), not a precomputed value.
 const root = keccak256(encodePacked(['bytes32', 'bytes32'], [zeroHash, keccak256(toBytes(tld))]));
 const child = keccak256(encodePacked(['bytes32', 'bytes32'], [root, keccak256(toBytes(estate))]));
@@ -64,23 +70,40 @@ const registered = async (): Promise<true | null> => {
   if (owner.toLowerCase() !== agent.toLowerCase()) throw new Error(`${name} is already registered to ${owner}; an estate name is never moved`);
   return true;
 };
-console.log(JSON.stringify({ estate, name, agent, chainId: town.chain.id, generation: d.contractsGeneration }));
-if (await registered()) { console.log(`verified: ${name} -> ${agent}`); process.exit(0); }
-if (checkOnly) throw new Error(`${name} is not registered`);
-
 const naming = new AgentNamingClient({ rpcUrl: rpc, chainId: town.chain.id, registry, universalResolver: d.agentNameUniversalResolver });
 const governor = await naming.resolveName('naming.svc');
 if (!governor) throw new Error('naming.svc is not registered on this deployment');
+const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const rootOwner = await read<Address>('owner', root);
-if (rootOwner.toLowerCase() !== governor.toLowerCase()) {
-  console.error(`.${tld} is owned by ${rootOwner}, not naming.svc (${governor}). Its owner hands it over once with setOwner(${root}, ${governor}); until then each estate name is registered by that owner.`);
-  process.exit(NOT_HANDED_OVER);
-}
+const rootDelegate = await read<Address>('subregistry', root);
+const delegated = same(rootOwner, governor) || same(rootDelegate, governor);
 const keyFile = arg('--clerk-key-file');
 const key = process.env.NAMING_CLERK_PRIVATE_KEY || (keyFile ? JSON.parse(readFileSync(keyFile, 'utf8')).privateKey : '');
-if (!/^0x[0-9a-fA-F]{64}$/.test(key)) throw new Error('the town clerk key is required (NAMING_CLERK_PRIVATE_KEY or --clerk-key-file)');
-const clerk = privateKeyToAccount(key as Hex);
-if (!await pc.readContract({ address: governor, abi, functionName: 'isCustodian', args: [clerk.address] })) throw new Error('the supplied key does not custody naming.svc');
+if (key && !/^0x[0-9a-fA-F]{64}$/.test(key)) throw new Error('the town clerk key is malformed');
+const clerk = key ? privateKeyToAccount(key as Hex) : null;
+const clerkCustodies = clerk ? await pc.readContract({ address: governor, abi, functionName: 'isCustodian', args: [clerk.address] }) : null;
+const already = await registered();
+// Everything a person needs to act on, read from ONE deployment: the registry named here is the one every address
+// below was read from. A checkout with an older contracts pin names an older registry and an older naming.svc.
+console.log(JSON.stringify({
+  estate, name, agent, chainId: town.chain.id, generation: d.contractsGeneration, registry, root,
+  rootOwner, rootDelegate, namingSvc: governor, namingSvcMayRegister: delegated,
+  clerk: clerk?.address ?? null, clerkCustodiesNamingSvc: clerkCustodies, registered: already === true,
+}, null, 1));
+if (already) { console.log(`verified: ${name} -> ${agent}`); process.exit(0); }
+if (checkOnly) {
+  console.log(delegated && clerkCustodies ? `ready: ${name} is free and the clerk can register it` : `not ready: ${name} is free, but see namingSvcMayRegister and clerkCustodiesNamingSvc above`);
+  process.exit(0);
+}
+if (!delegated) {
+  console.error(`naming.svc (${governor}) may not register under .${tld}: the root's owner is ${rootOwner} and its delegate is ${rootDelegate}. The owner delegates once, on registry ${registry} (generation ${d.contractsGeneration}): setSubregistry(${root}, ${governor}). It keeps the root and can undo this. Until then each estate name is registered by the owner.`);
+  process.exit(NOT_DELEGATED);
+}
+if (!clerk) throw new Error('the town clerk key is required (NAMING_CLERK_PRIVATE_KEY or --clerk-key-file)');
+if (!clerkCustodies) {
+  console.error(`the supplied clerk key (${clerk.address}) does not custody naming.svc (${governor}), so the town cannot sign this registration.`);
+  process.exit(NOT_DELEGATED);
+}
 
 const home = town.namingGate.relayerHome.replace(/\/$/, '');
 const csrfRes = await fetch(`${home}/a2a/auth/csrf`, { headers: { origin: home } });

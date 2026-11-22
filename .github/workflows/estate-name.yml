@@ -1,8 +1,9 @@
 # THE .estate NAME FOR AN ESTATE THAT IS ALREADY BUILT. New estates get it in the one-click build's estate-name step;
-# this is for one built before the root was handed to naming.svc (scripts/add-estate-name.mts says how it registers).
+# this is for one built before the root's owner delegated to naming.svc (scripts/add-estate-name.mts says how it registers).
 #
 # It registers `<id>.estate` to the estate agent recorded in estates/<id>.estate.json on master, and nothing else. A name
-# that already exists is verified, never moved. `check_only` reads the chain and changes nothing.
+# that already exists is verified, never moved. `check_only` reads the chain and changes nothing: it prints the registry,
+# the root's owner and delegate, naming.svc, and whether the build's clerk key custodies naming.svc.
 name: estate-name
 
 on:
@@ -41,7 +42,8 @@ jobs:
           CHECK_ONLY: ${{ inputs.check_only }}
           TOWN: ${{ vars.TOWN || 'faithchain' }}
           TOWN_RPC_URL: ${{ secrets.TOWN_RPC_URL }}
-          NAMING_CLERK_PRIVATE_KEY: ${{ !inputs.check_only && secrets.NAMING_CLERK_PRIVATE_KEY || '' }}
+          # Also given to a check: the script derives the clerk's address to report its custody, and signs nothing.
+          NAMING_CLERK_PRIVATE_KEY: ${{ secrets.NAMING_CLERK_PRIVATE_KEY }}
         run: |
           DECL="estates/${ESTATE_ID}.estate.json"
           test -f "$DECL" || { echo "no $DECL on master"; exit 1; }
