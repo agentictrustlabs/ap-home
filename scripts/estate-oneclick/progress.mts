@@ -27,14 +27,16 @@ export interface Report {
   /** The town's own parts (no handover): notes for the town's operators, replacing the last set it sent. */
   operatorNotes?: string[];
   /** Only on the final report. `operatorNotes` is shown to town operators alone (it may carry a heartbeat token). */
-  result?: { homeOrigin: string; hosts: Record<string, string>; agents?: Record<string, string>; custody?: unknown; notes?: string[]; operatorNotes?: string[] };
+  result?: { homeOrigin: string; hosts: Record<string, string>; agents?: Record<string, string>; custody?: unknown; notes?: string[]; operatorNotes?: string[] }
+    /** A workspace build's result (scripts/workspace-oneclick/run.mts). */
+    | { web: string; a2a: string; repo: string; notes?: string[] };
 }
 
 export function sign(secret: string, timestamp: string, message: string): string {
   return `sha256=${createHmac('sha256', secret).update(`${timestamp}.${message}`).digest('hex')}`;
 }
 
-export function reporter(opts: { site?: string; id: string; secret?: string; signer?: Signer; fetchImpl?: typeof fetch; log?: (s: string) => void }) {
+export function reporter(opts: { site?: string; id: string; secret?: string; signer?: Signer; fetchImpl?: typeof fetch; log?: (s: string) => void; /** Where to report, when not the estate's own progress route (a workspace's). */ path?: string }) {
   const signer = opts.signer ?? (opts.secret ? hmacSigner(opts.secret) : undefined);
   const log = opts.log ?? ((s: string) => console.log(s));
   const f = opts.fetchImpl ?? fetch;
@@ -47,7 +49,7 @@ export function reporter(opts: { site?: string; id: string; secret?: string; sig
     for (let attempt = 0; attempt <= retries; attempt++) {
       lastTs = Math.max(Date.now(), lastTs + 1);
       const ts = String(lastTs);
-      const path = `/api/estates/${encodeURIComponent(opts.id)}/progress`;
+      const path = opts.path ?? `/api/estates/${encodeURIComponent(opts.id)}/progress`;
       try {
         const res = await f(`${opts.site.replace(/\/$/, '')}${path}`, {
           method: 'POST',

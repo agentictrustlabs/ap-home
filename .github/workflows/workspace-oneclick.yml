@@ -1,0 +1,109 @@
+# THE ONE-CLICK WORKSPACE BUILD: an app of an estate's own, from the createestate page's "Add a workspace".
+#
+# It writes the workspace's own repository (create-ap-workspace) and runs that repository's own estate commands as the
+# town: storage, the delegate key in the estate's key-vault tenant, the registration at the estate's Home, the deploy.
+# scripts/workspace-oneclick/run.mts says what each step does and what is left to the workspace's custodian.
+#
+# The dispatch carries only ids. The request is FETCHED from the site, signed, and the site returns one only for a
+# workspace its estate's owner asked for on a ready estate. So running this by hand, with any inputs, builds nothing
+# that was not asked for.
+#
+# Dependencies are installed BEFORE any secret is in the environment, and the secrets are given to the one step that
+# builds. The generated workspace's own dependencies are installed by that step, under pnpm's allow-list
+# (`pnpm.onlyBuiltDependencies` in the starter): esbuild, workerd and sharp only.
+name: workspace-oneclick
+
+on:
+  workflow_dispatch:
+    inputs:
+      estate_id: { description: 'The estate''s short name', required: true }
+      workspace: { description: 'The workspace''s name', required: true }
+      request_id: { description: 'createestate request id (req_…) — optional', required: false, default: '' }
+
+# One at a time: every workspace registers in the same Home config on the default branch, and the key vault's temporary
+# path is one shared resource.
+concurrency:
+  group: workspace-oneclick
+  cancel-in-progress: false
+
+permissions:
+  contents: write # commits the workspace's Home registration to the default branch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: estate-oneclick
+    steps:
+      - name: Check the inputs are ids and nothing else
+        env: { ESTATE_ID: '${{ inputs.estate_id }}', WORKSPACE: '${{ inputs.workspace }}', REQUEST_ID: '${{ inputs.request_id }}' }
+        run: |
+          [[ "$ESTATE_ID" =~ ^[a-z][a-z0-9-]{1,30}$ ]] || { echo "not an estate id"; exit 1; }
+          [[ "$WORKSPACE" =~ ^[a-z][a-z0-9-]{1,28}[a-z0-9]$ ]] || { echo "not a workspace name"; exit 1; }
+          [[ -z "$REQUEST_ID" || "$REQUEST_ID" =~ ^req_[A-Za-z0-9]{6,40}$ ]] || { echo "not a request id"; exit 1; }
+
+      - name: Check out ap-home
+        uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Check the estate is one this town built
+        env: { ESTATE_ID: '${{ inputs.estate_id }}' }
+        run: test -f "estates/${ESTATE_ID}.estate.json" || { echo "no estates/${ESTATE_ID}.estate.json on the default branch"; exit 1; }
+
+      - name: Check out the workspace starter
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.WORKSPACE_CLI_REPO || 'agentictrustlabs/create-ap-workspace' }}
+          path: .workspace-cli
+          token: ${{ secrets.WORKSPACE_REPO_TOKEN }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Install ap-home
+        run: pnpm install --frozen-lockfile=false
+
+      # The key step runs on the town's key-vault VM through `az vm run-command`, as the same operator identity the
+      # estate build uses: run-command on that VM and the temporary egress window, nothing else.
+      - name: Sign in to Azure as the KMS operator
+        id: azlogin
+        uses: azure/login@v2
+        with: { creds: '${{ secrets.AZURE_CREDENTIALS }}' }
+
+      - name: Build the workspace
+        env:
+          ESTATE_ID: ${{ inputs.estate_id }}
+          WORKSPACE: ${{ inputs.workspace }}
+          REQUEST_ID: ${{ inputs.request_id }}
+          AP_HOME_REF: ${{ github.event.repository.default_branch }}
+          WORKSPACE_CLI_DIR: ${{ github.workspace }}/.workspace-cli
+          WORKSPACE_DIR: ${{ runner.temp }}/workspace
+          WORKSPACE_REPO_OWNER: ${{ vars.WORKSPACE_REPO_OWNER || 'agentictrustlabs' }}
+          # Creates the workspace's repository, pushes to it and invites its owner. Nothing else uses it.
+          WORKSPACE_REPO_TOKEN: ${{ secrets.WORKSPACE_REPO_TOKEN }}
+          # Optional: a Cloudflare token made ONLY for workspaces to deploy themselves on push. When it is not set, no
+          # token is copied into a workspace's repository and an operator deploys its changes.
+          WORKSPACE_DEPLOY_TOKEN: ${{ secrets.WORKSPACE_DEPLOY_TOKEN }}
+          CREATE_ESTATE_SITE: ${{ vars.CREATE_ESTATE_SITE }}
+          BUILD_CALLBACK_SECRET: ${{ secrets.BUILD_CALLBACK_SECRET }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx tsx scripts/workspace-oneclick/run.mts --estate "$ESTATE_ID" --workspace "$WORKSPACE" ${REQUEST_ID:+--request-id "$REQUEST_ID"}
+
+      - name: Never leave the key custody open
+        # The workspace's key command opens a temporary NAT gateway for the key ceremony and always removes it; this
+        # catches a cancelled run. A no-op when nothing is there.
+        if: always() && steps.azlogin.outcome == 'success'
+        env: { TOWN: "${{ vars.TOWN || 'faithchain' }}" }
+        run: |
+          P="scripts/estate-oneclick/towns/${TOWN}.json"
+          RG=$(jq -r .kms.resourceGroup "$P"); VNET=$(jq -r '.kms.egress.vnet // empty' "$P"); SUBNET=$(jq -r '.kms.egress.subnet // empty' "$P")
+          [ -n "$VNET" ] || exit 0
+          if az network nat gateway show -g "$RG" -n nat-akcs-skr-workspace -o none 2>/dev/null; then
+            az network vnet subnet update -g "$RG" --vnet-name "$VNET" -n "$SUBNET" --remove natGateway -o none
+            az network nat gateway delete -g "$RG" -n nat-akcs-skr-workspace
+          fi
+          az network public-ip show -g "$RG" -n pip-akcs-skr-workspace -o none 2>/dev/null && az network public-ip delete -g "$RG" -n pip-akcs-skr-workspace || true
