@@ -4,7 +4,7 @@
 export interface AppRequest {
   /** A friend act, a profile change the app proposed (`/profile-update?p=…&from=<app>`), or the inviter's half of an
    *  email invitation the app just sent (`/friend-invitation?t=…&from=<app>`). */
-  act: 'add' | 'remove' | 'profile' | 'invitation' | 'membership';
+  act: 'add' | 'remove' | 'profile' | 'invitation' | 'membership' | 'household';
   /** How the app named the friend, when it did. */
   name: string | null;
   from: string;
@@ -16,6 +16,7 @@ export function appRequestOf(loc: Pick<Location, 'pathname' | 'search'> = window
   const q = new URLSearchParams(loc.search);
   const from = q.get('from');
   if (loc.pathname === '/organization-invitation') return from && q.get('org') ? { act: 'membership', name: null, from } : null;
+  if (loc.pathname === '/household-setup') return from && q.get('attempt') ? { act: 'household', name: q.get('name')?.trim() || null, from } : null;
   if (loc.pathname === '/profile-update') return from && q.get('p') ? { act: 'profile', name: null, from } : null;
   if (loc.pathname === '/friend-invitation') return from && q.get('t') ? { act: 'invitation', name: null, from } : null;
   const act = q.get('add') ? 'add' : q.get('remove') ? 'remove' : null;
@@ -35,7 +36,7 @@ export function takeAppRequestReturn(): string | null {
   try {
     const to = sessionStorage.getItem(RETURN_KEY);
     sessionStorage.removeItem(RETURN_KEY);
-    return to && (to.startsWith('/friends?') || to.startsWith('/contacts?') || to.startsWith('/profile-update?') || to.startsWith('/friend-invitation?') || to.startsWith('/organization-invitation?')) ? to : null;
+    return to && (to.startsWith('/friends?') || to.startsWith('/contacts?') || to.startsWith('/profile-update?') || to.startsWith('/friend-invitation?') || to.startsWith('/organization-invitation?') || to.startsWith('/household-setup?')) ? to : null;
   } catch {
     return null;
   }
