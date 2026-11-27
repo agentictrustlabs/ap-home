@@ -346,6 +346,14 @@
       "digest": "0x71c9e3c025d022e7f948e727b46fe8e340426e19fbedd7e79b0225e14a07c68a",
       "version": "1.0.0",
       "pinnedAt": "2026-11-11T13:18:48.755Z"
+    },
+    "wanderwell/wanderwell-household": {
+      "registry": "https://skills-a2a-production.richardpedersen3.workers.dev",
+      "context": "wanderwell",
+      "archetype": "wanderwell-household",
+      "digest": "0x3a142fdc5bb85404d799b33f9b2115d5d2b3b339215dd16fe55d51154e402278",
+      "version": "1.0.0",
+      "pinnedAt": "2026-11-27T15:54:56.789Z"
     }
   }
 }

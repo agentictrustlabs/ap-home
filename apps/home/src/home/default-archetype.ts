@@ -20,7 +20,8 @@ import { ensureCsrfToken, csrfHeaders } from '../csrf';
  *  playbook, so an unassigned treasury promises nothing and tells nobody when its money moves — which is
  *  exactly the incident that started spec 360, reappearing one agent at a time. An org is a payer too.
  *  Every kind that can hold or move value is born knowing what follows the act. */
-const DEFAULT_ARCHETYPE: Record<string, { context: string; archetype: string }> = {
+export type ArchetypeRef = { context: string; archetype: string };
+const DEFAULT_ARCHETYPE: Record<string, ArchetypeRef> = {
   household: { context: 'agentic-trust', archetype: 'household-steward' },
   person: { context: 'agentic-trust', archetype: 'person-steward' },
   treasury: { context: 'agentic-trust', archetype: 'treasury-steward' },
@@ -57,9 +58,13 @@ export async function assignDefaultArchetype(
   agent: string,
   kind: string,
   session: string,
+  /** A client's own archetype for this kind (e.g. Family Field's household), instead of the estate default.
+   *  Still held to `applicableAgentTypes`, and the runtime still runs it only if its digest is pinned in
+   *  `agentic.lock.json#definitions` (spec 445 RUN-14). */
+  override?: ArchetypeRef,
 ): Promise<{ ok: boolean; reason?: string; archetypeId?: string }> {
   const slug = typeSlugForCreatedKind(kind);
-  const target = DEFAULT_ARCHETYPE[slug];
+  const target = override ?? DEFAULT_ARCHETYPE[slug];
   if (!target) return { ok: false, reason: `no default archetype for ${kind}` };
   try {
     const base = SKILLS_REGISTRY_ORIGIN.replace(/\/$/, '');

@@ -40,12 +40,15 @@ export interface ClientDefaults {
    */
   treasury?: boolean;
   family?: boolean;
+  /** The archetype a household this client FOUNDS starts with, instead of the estate default (household-steward).
+   *  Its digest must also be pinned in `agentic.lock.json#definitions` or the runtime keeps the bare harness. */
+  householdArchetype?: { context: string; archetype: string };
   personalBirthright?: boolean;
 }
 
 /** By OIDC client id. The card room is the one app with default coaches today: Bob for hold'em, Carol for canasta. */
 export const CLIENT_DEFAULTS: Record<string, ClientDefaults> = {
-  'family-field': { coaches: [], family: true, personalBirthright: true },
+  'family-field': { coaches: [], family: true, personalBirthright: true, householdArchetype: { context: 'wanderwell', archetype: 'wanderwell-household' } },
   'family-field-join': { coaches: [], personalBirthright: true },
   pokernight: { coaches: [{ game: 'poker', service: 'bob-coach.svc' }, { game: 'canasta', service: 'carol-coach.svc' }], treasury: true },
 };
@@ -102,7 +105,13 @@ export async function applyClientDefaults(clientId: string, onStep?: (line: stri
         ready: async address => {
           const planes = await enableAgentPlanes(address, route, token, onStep);
           if (!planes.ok) throw new Error(planes.error);
-          const playbook = await assignDefaultArchetype(address, 'household', token);
+          // A client's own household playbook first; if the registry cannot serve it, the estate default —
+          // a household is never left less than it would have been without the override.
+          let playbook = await assignDefaultArchetype(address, 'household', token, d.householdArchetype);
+          if (!playbook.ok && d.householdArchetype) {
+            console.warn('[client-defaults] household archetype', d.householdArchetype, 'not assigned:', playbook.reason);
+            playbook = await assignDefaultArchetype(address, 'household', token);
+          }
           if (!playbook.ok) throw new Error(`household playbook: ${playbook.reason}`);
         },
         receipt: localStorage,
