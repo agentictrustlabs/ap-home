@@ -13,6 +13,7 @@ import { CLIENT_DEFAULTS } from '../../../src/lib/client-defaults';
 import { vaultReadWithDelegation, vaultWriteWithDelegation } from '../../../src/lib/vault-client';
 import type { DelegationWire } from '../../../src/lib/delegation';
 import { whitelabel } from '../../../src/whitelabel/config';
+import { finishApprovalWindow } from '../../../src/lib/approval-window';
 import {
   HOUSEHOLD_SETUP_MESSAGE, householdSetupRequestOf, householdSetupReturn, setUpHousehold,
   type HouseholdSetupOutcome, type HouseholdSetupRequest,
@@ -23,16 +24,24 @@ export default function HouseholdSetupPage() {
   const [request, setRequest] = useState<HouseholdSetupRequest | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [progress, setProgress] = useState(''), [slow, setSlow] = useState(false);
   const [done, setDone] = useState<HouseholdSetupOutcome | null>(null);
+  /** The approval is done and the window could not close itself (or was opened as a tab). */
+  const [stayed, setStayed] = useState(false);
   useEffect(() => {
     const read = householdSetupRequestOf(location.search, whitelabel.relyingApps, (client) => !!CLIENT_DEFAULTS[client]?.family);
     if (read.ok) setRequest(read.request); else setError(read.error);
   }, []);
   useEffect(() => { setSlow(false); if (!busy) return; const t = setTimeout(() => setSlow(true), 20000); return () => clearTimeout(t); }, [busy]);
   const wrongHome = !!request?.member && !!agentAddress && request.member !== agentAddress.toLowerCase();
+  // Tell the app (a hint: it confirms by reading the person's households) and CLOSE this window: the person goes back to
+  // the app with nothing left over it. A browser that refuses the close gets "You can close this window".
   const notify = (outcome: HouseholdSetupOutcome) => {
     if (!request) return;
-    // a hint for the app's window; the app confirms by reading the person's households
-    window.opener?.postMessage({ type: HOUSEHOLD_SETUP_MESSAGE, attempt: request.attempt, household: outcome.household, action: outcome.created ? 'created' : 'ready' }, new URL(request.returnTo).origin);
+    const told = finishApprovalWindow(window, {
+      targetOrigin: new URL(request.returnTo).origin,
+      message: { type: HOUSEHOLD_SETUP_MESSAGE, attempt: request.attempt, household: outcome.household, action: outcome.created ? 'created' : 'ready' },
+      onStillOpen: () => setStayed(true),
+    });
+    if (!told) setStayed(true);
   };
   const approve = async () => {
     if (!request || !session || !agentAddress || wrongHome || busy) return;
@@ -112,7 +121,7 @@ export default function HouseholdSetupPage() {
     </>}
     {error && <p role="alert">{error}</p>}
     {done && request && <>
-      <p role="status">{done.created ? 'Created and ready.' : 'Ready.'} Go back to {request.appName}; it checks your household and saves what you told it.</p>
+      <p role="status">{done.created ? 'Created and ready.' : 'Ready.'} {stayed ? `You can close this window. ${request.appName} checks your household and saves what you told it.` : `Taking you back to ${request.appName}…`}</p>
       <button type="button" className="btn primary" onClick={back}>Done — back to {request.appName}</button>
     </>}
   </section>;

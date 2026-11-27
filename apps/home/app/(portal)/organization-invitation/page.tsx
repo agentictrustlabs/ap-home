@@ -10,6 +10,7 @@ import { joinOrganization } from '../../../src/home/join-organization';
 import { issueOrganizationLibraryMemberAccessDelegation, toWire } from '../../../src/lib/delegation';
 import { MCP_SERVER_ID } from '../../../src/lib/inbox-delivery';
 import { whitelabel } from '../../../src/whitelabel/config';
+import { finishApprovalWindow } from '../../../src/lib/approval-window';
 import { hasRecordedFamilyMembership, organizationInvitationReturn } from '../../../src/lib/organization-invitation';
 
 const address = (s: string): s is Address => /^0x[0-9a-fA-F]{40}$/.test(s);
@@ -17,7 +18,7 @@ export default function OrganizationInvitationPage() {
   const { session, agentAddress, agentName, personName, profile } = useSession();
   const [request, setRequest] = useState<{org: Address; person?: Address; member?: Address; label: string; artifacts: string[]; appName: string; returnTo: string; join: boolean} | null>(null);
   const [busy,setBusy] = useState(false), [error,setError] = useState(''), [done,setDone] = useState(false);
-  const [checking,setChecking] = useState(false), [progress,setProgress] = useState(''), [slow,setSlow] = useState(false);
+  const [stayed,setStayed] = useState(false), [checking,setChecking] = useState(false), [progress,setProgress] = useState(''), [slow,setSlow] = useState(false);
   useEffect(()=>{
     const q=new URLSearchParams(location.search), org=q.get('org')??'',person=q.get('person')??'',client=q.get('from');
     const app=whitelabel.relyingApps.find(a=>a.client_id===client);
@@ -30,6 +31,16 @@ export default function OrganizationInvitationPage() {
     if (!request || !agentAddress) return;
     window.opener?.postMessage({type:'ap-organization-invitation',org:request.org,person:request.person??agentAddress,action:request.join?'joined':'invited'},new URL(request.returnTo).origin);
   };
+  // Done: tell the app (a hint — it confirms by reading membership) and close this window by itself.
+  useEffect(() => {
+    if (!done || !request || !agentAddress) return;
+    const told = finishApprovalWindow(window, {
+      targetOrigin: new URL(request.returnTo).origin,
+      message: {type:'ap-organization-invitation',org:request.org,person:request.person??agentAddress,action:request.join?'joined':'invited'},
+      delayMs: 1500, onStillOpen: () => setStayed(true),
+    });
+    if (!told) setStayed(true);
+  }, [done]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!request) return;
     setDone(false); setChecking(false); setError('');
@@ -83,6 +94,6 @@ export default function OrganizationInvitationPage() {
       <button className="btn" disabled={busy} onClick={()=>window.close()}>Not now</button>
     </>}
     {error&&<p role="alert">{error}</p>}
-    {done&&request&&<><p role="status">{request.join?'Membership recorded. You can open the family plan; there is no need to accept again.':'Invitation and shared-plan permission recorded. The invitee must accept to join.'}</p><button type="button" className="btn primary" onClick={()=>{notify();if(window.opener&&!window.opener.closed){window.opener.focus();window.close();}setTimeout(()=>location.assign(organizationInvitationReturn(request.returnTo,request.org,request.join)),150);}}>Done — back to the app</button><p><a href={organizationInvitationReturn(request.returnTo,request.org,request.join)}>{request.join?'Open family plan':`Open ${request.appName}`}</a></p></>}
+    {done&&request&&<><p role="status">{request.join?'Membership recorded. You can open the family plan; there is no need to accept again.':'Invitation and shared-plan permission recorded. The invitee must accept to join.'} {stayed?'You can close this window.':'Taking you back…'}</p><button type="button" className="btn primary" onClick={()=>{notify();if(window.opener&&!window.opener.closed){window.opener.focus();window.close();}setTimeout(()=>location.assign(organizationInvitationReturn(request.returnTo,request.org,request.join)),150);}}>Done — back to the app</button><p><a href={organizationInvitationReturn(request.returnTo,request.org,request.join)}>{request.join?'Open family plan':`Open ${request.appName}`}</a></p></>}
   </section>;
 }

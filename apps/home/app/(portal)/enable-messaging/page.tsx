@@ -14,6 +14,7 @@ import { useSession } from '../../../src/context/session';
 import { useManagedAgents } from '../../../src/components/portal/ManagedAgents';
 import { activateInteractionsIfNeeded, activateInboxDeliveryIfNeeded, type Via } from '../../../src/home/onboarding';
 import { isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
+import { finishApprovalWindow } from '../../../src/lib/approval-window';
 import { agentClassOf } from '../../../src/lib/agent-class';
 
 export default function EnableMessagingPage() {
@@ -22,6 +23,7 @@ export default function EnableMessagingPage() {
   const [state, setState] = useState<'working' | 'done' | 'error'>('working');
   const [msg, setMsg] = useState('Turning on messaging…');
   const [ret, setRet] = useState<string>('');
+  const [stayed, setStayed] = useState(false);
 
   useEffect(() => {
     if (phase === 'restoring') return;
@@ -82,7 +84,11 @@ export default function EnableMessagingPage() {
         `Messaging is on for you${enabledOrgs > 0 ? ` and ${enabledOrgs} organization${enabledOrgs === 1 ? '' : 's'}` : ''}.` +
         (skippedOrgs > 0 ? ` ${skippedOrgs} stewarded org${skippedOrgs === 1 ? '' : 's'} skipped — its custodian enables its own messaging.` : ''),
       );
-      if (r && isAllowedRelyingOrigin(r)) setTimeout(() => { window.location.href = r; }, 1200);
+      // Opened as a small window by the app: tell it and close, never load the app inside the window. As a tab: go back.
+      if (r && isAllowedRelyingOrigin(r)) {
+        const told = finishApprovalWindow(window, { targetOrigin: new URL(r).origin, message: { type: 'ap-enable-messaging', action: 'done' }, delayMs: 1200, onStillOpen: () => setStayed(true) });
+        if (!told) setTimeout(() => { window.location.href = r; }, 1200);
+      }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -95,7 +101,7 @@ export default function EnableMessagingPage() {
       {state === 'done' && (
         <>
           <p style={{ color: 'var(--color-success, #178a4c)' }}>{msg}</p>
-          <p style={{ opacity: 0.8, marginTop: 8 }}>{ret ? 'Returning to the app…' : 'You can return to the app now.'}</p>
+          <p style={{ opacity: 0.8, marginTop: 8 }}>{stayed ? 'You can close this window.' : ret ? 'Returning to the app…' : 'You can return to the app now.'}</p>
         </>
       )}
       {state === 'error' && (
