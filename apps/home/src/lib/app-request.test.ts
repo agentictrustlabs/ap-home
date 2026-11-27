@@ -24,4 +24,6 @@ describe('an app\'s one request', () => {
 it('keeps an app membership approval focused through sign-in',()=>{
  expect(appRequestOf({pathname:'/organization-invitation',search:'?org=0xabc&from=family-field-join'})).toEqual({act:'membership',name:null,from:'family-field-join'});
  expect(appRequestOf({pathname:'/organization-invitation',search:'?org=0xabc'})).toBeNull();
+ expect(appRequestOf({pathname:'/household-setup',search:'?from=family-field&attempt=abc&name=The%20Rivera%20family'})).toEqual({act:'household',name:'The Rivera family',from:'family-field'});
+ expect(appRequestOf({pathname:'/household-setup',search:'?from=family-field'})).toBeNull();
 });
