@@ -13,14 +13,14 @@ const deps = { readSubjectRecord: async (subject: string, key: string) => { if (
 
 describe('the owner\'s Library read by the owner\'s agent (spec 405)', () => {
   it('lists documents (folders excluded, bodies stripped), narrowed by folder and words', async () => {
-    const inv = libraryInvoker(deps, ME);
+    const inv = libraryInvoker(deps, ME, ME); // the owner's own run: the verified asker IS the addressee
     const all = (await inv(LIBRARY_FILES_LIST, {}, {} as never)) as { count: number; files: Array<{ path: string; text: boolean; bytesB64?: string }> };
     expect(all.count).toBe(3); expect(all.files.map((f) => f.path)).toEqual(['bulletin.png', 'retreat/Retreat budget.md', 'retreat/Retreat notes.md']); expect(all.files[0]!.text).toBe(false); expect(JSON.stringify(all)).not.toContain('bytesB64');
     const some = (await inv(LIBRARY_FILES_LIST, { folder: 'retreat', q: 'budget' }, {} as never)) as { files: Array<{ id: string }> };
     expect(some.files.map((f) => f.id)).toEqual(['f1']);
   });
   it('reads a text document by name words as untrusted evidence; names an image; asks which when two match; says what is there when none', async () => {
-    const inv = libraryInvoker(deps, ME);
+    const inv = libraryInvoker(deps, ME, ME); // the owner's own run: the verified asker IS the addressee
     const r = (await inv(LIBRARY_FILE_READ, { name: 'retreat budget' }, {} as never)) as { read: boolean; text: string; untrusted: boolean; file: { id: string } };
     expect(r.read).toBe(true); expect(r.text).toContain('venue 1200'); expect(r.untrusted).toBe(true); expect(r.file.id).toBe('f1');
     const img = (await inv(LIBRARY_FILE_READ, { name: 'bulletin' }, {} as never)) as { read: boolean; named: boolean; note: string; text?: string };
@@ -31,8 +31,15 @@ describe('the owner\'s Library read by the owner\'s agent (spec 405)', () => {
     expect(none.read).toBe(false); expect(none.refused).toMatch(/no document named "agenda"/); expect(none.refused).toContain('retreat/Retreat budget.md');
   });
   it('another owner\'s Library is not this agent\'s: the read is bound to the addressee', async () => {
-    const other = libraryInvoker(deps, '0x' + 'b'.repeat(40));
+    const other = libraryInvoker(deps, '0x' + 'b'.repeat(40), '0x' + 'b'.repeat(40)); // that owner's own run, over a vault this fixture does not hold
     expect(((await other(LIBRARY_FILE_READ, { name: 'retreat budget' }, {} as never)) as { read: boolean; refused: string }).refused).toMatch(/holds no documents/);
     expect(findEntries(cat.filter((e) => !e.isFolder), { name: 'retreat notes', folder: 'retreat' }).map((e) => e.id)).toEqual(['f3']);
+  });
+  it('a read with no verified caller sees the public shelf only (none of these documents is public)', async () => {
+    const nobody = libraryInvoker(deps, ME);
+    const list = (await nobody(LIBRARY_FILES_LIST, {}, {} as never)) as { count: number; publicOnly?: boolean };
+    expect(list.count).toBe(0); expect(list.publicOnly).toBe(true);
+    const read = (await nobody(LIBRARY_FILE_READ, { name: 'retreat budget' }, {} as never)) as { read: boolean; refused: string };
+    expect(read.read).toBe(false); expect(read.refused).not.toContain('Retreat budget.md'); expect(JSON.stringify(read)).not.toContain('venue 1200');
   });
 });

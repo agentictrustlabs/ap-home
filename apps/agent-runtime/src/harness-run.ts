@@ -2467,6 +2467,10 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
   // redeems the one whose caveat names the step's payee — the same selection the verifier used, so what
   // is redeemed is exactly what was judged.
   const presented: MandatePresentation | null = presentedAll[0] ?? null;
+  // ONE RUN, ONE ANSWER about the caller's stewardship of a Library: every Library step asks (a paged read is many steps),
+  // and each derivation is the caller's links plus chain reads. Held for THIS run only — never across requests, so a
+  // revoked wire is seen by the next ask — and a derivation that failed is not kept (the step fails closed, the next asks again).
+  const libraryStewardship = new Map<string, Promise<{ steward: boolean; because: string }>>();
   const raw: ToolInvoker = async (toolId, args, ctx) => {
     // Spec 396 W3 — the DO calls this step makes are charged to it on the run's bill.
     setBillStep(ctx.step.id ?? `s${ctx.index}`);
@@ -2610,7 +2614,16 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       const grantAct = LIBRARY_GRANT_ACTS.has(toolId) && presented ? presented : null;
       const ts = grantAct ? (grantAct.wire as Delegation).caveats.find((c) => c.enforcer.toLowerCase() === harnessEnforcers(env).timestamp.toLowerCase()) : undefined;
       return libraryInvoker({
-        readSubjectRecord: deps.readSubjectRecord, ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}), ...(deps.signAsAgent ? { signAsOwner: deps.signAsAgent } : {}), ...(deps.announceShelf ? { announce: deps.announceShelf } : {}), ...(deps.holdCatalog ? { holdCatalog: deps.holdCatalog } : {}), ...(deps.libraryCatalogStore ? { catalogStore: deps.libraryCatalogStore } : {}), ...(deps.readSubjectRecordStatus ? { readSubjectRecordStatus: deps.readSubjectRecordStatus } : {}), grantChecks: libraryGrantChecks(env, deps), stewardOf: (who, owner) => stewardshipOver({ readSubjectRecord: deps.readSubjectRecord!, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}) }, who, owner),
+        readSubjectRecord: deps.readSubjectRecord, ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}), ...(deps.signAsAgent ? { signAsOwner: deps.signAsAgent } : {}), ...(deps.announceShelf ? { announce: deps.announceShelf } : {}), ...(deps.holdCatalog ? { holdCatalog: deps.holdCatalog } : {}), ...(deps.libraryCatalogStore ? { catalogStore: deps.libraryCatalogStore } : {}), ...(deps.readSubjectRecordStatus ? { readSubjectRecordStatus: deps.readSubjectRecordStatus } : {}), grantChecks: libraryGrantChecks(env, deps), stewardOf: (who, owner) => {
+          const key = `${who.toLowerCase()}:${owner.toLowerCase()}`;
+          let once = libraryStewardship.get(key);
+          if (!once) {
+            once = stewardshipOver({ readSubjectRecord: deps.readSubjectRecord!, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}) }, who, owner);
+            libraryStewardship.set(key, once);
+            once.catch(() => { libraryStewardship.delete(key); });
+          }
+          return once;
+        },
         ...(grantAct && ts ? { mandate: { delegator: (grantAct.wire as Delegation).delegator, validAfter: Number(decodeTimestampTerms(ts.terms as Hex).validAfter) } } : {}),
         approvedHash: (owner, digest) => verifyAllowingSettle(async () => (await deps.readContract({ address: owner as Address, abi: ERC1271_IS_VALID_ABI, functionName: 'isValidSignature', args: [digest, '0x03'] }).catch(() => null)) === '0x1626ba7e', '0x03'),
         ...(grantAct ? { revokeOnChain: (grant: LibraryGrantWire, a: Record<string, unknown>, c: Parameters<ToolInvoker>[2]) => revokeByOwnerUnderMandate(deps, env, grantAct, grant, a, c) } : {}),
