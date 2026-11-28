@@ -474,7 +474,7 @@ const faithImpact: WhiteLabelConfig = {
       // the name/photo via /connect/profile; it receives no profile write or payment authority.
       read_grant: { resources: ['vault:impact-profile'] },
       setup_notice: client_id === 'family-field'
-        ? 'Home will prepare your family household if you do not already have one, and your personal treasury using the existing SHEQL starter flow. No spending permission is granted.'
+        ? 'Home will prepare your personal treasury using the existing SHEQL starter flow. Your household is set up in Family Field, with one approval here, when you ask for it. No spending permission is granted.'
         : 'Home will prepare your personal treasury using the existing SHEQL starter flow. Accept the invitation to join your family; this connection does not create another household or grant spending permission.',
     })),
     // field-app — Field Circles / Field Workspace (agentictrustlabs/engage apps/field-*).
