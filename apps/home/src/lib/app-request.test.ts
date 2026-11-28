@@ -27,3 +27,9 @@ it('keeps an app membership approval focused through sign-in',()=>{
  expect(appRequestOf({pathname:'/household-setup',search:'?from=family-field&attempt=abc&name=The%20Rivera%20family'})).toEqual({act:'household',name:'The Rivera family',from:'family-field'});
  expect(appRequestOf({pathname:'/household-setup',search:'?from=family-field'})).toBeNull();
 });
+
+describe('the household steward invitation is an app request', () => {
+  it('names the act and comes back to the page after sign-in', () => {
+    expect(appRequestOf({ pathname: '/household-steward-invitation', search: '?household=0x1&person=0x2&name=Barbara&from=family-field' })).toEqual({ act: 'steward', name: 'Barbara', from: 'family-field' });
+  });
+});

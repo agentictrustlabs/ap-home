@@ -466,6 +466,8 @@ const faithImpact: WhiteLabelConfig = {
       ask_with_login: true,
       ask_delegate: '0x31c1307aa8529096ec1fa38226c708bc558ffc4b' as const,
       member_library_artifacts: ['family-field-plan-v1'],
+      // A household's second steward (a leader who may decide): the steward approves at Home, the invitee accepts at theirs.
+      steward_invitations: true,
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0' as const,
       socialCustody: true,
       // Home approves a revocable, read-only profile grant at connect. Family Field displays

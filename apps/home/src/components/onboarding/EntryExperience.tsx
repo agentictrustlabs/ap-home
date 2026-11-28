@@ -848,6 +848,8 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
             ? 'Sign in the way you usually do to save your profile change. You will see it before anything is saved.'
             : appRequest.act === 'invitation'
             ? 'Sign in the way you usually do to finish your friend invitation. You will see what it does before you say yes.'
+            : appRequest.act === 'steward'
+            ? 'Sign in the way you usually do to review the household steward invitation. Nothing changes until you approve.'
             : appRequest.act === 'household'
             ? 'Sign in the way you usually do to approve your new household. You will see what it does before anything is created.'
             : `Sign in the way you usually do to ${appRequest.act} ${appRequest.name ?? 'your friend'}${appRequest.act === 'add' ? ' as a friend' : ''}. Then this window closes by itself.`
