@@ -18,7 +18,9 @@ let store: Map<string, string>;
 let revoked: Set<string>;
 const verify = async (org: string, person: string, w: unknown) => org === ORG && (w as { delegate?: string })?.delegate === person && !revoked.has(person);
 const merged: unknown[] = [];
-const deps = { verify, now: () => 100, merge: async (_e: unknown, _p: string, _t: string, entry: unknown) => { merged.push(entry); } };
+// a member-access grant verifies when the household signed it to that person (the test's stand-in for the ERC-1271 read)
+const verifyMember = async (g: { delegator?: string; delegate?: string; signature?: string }) => g?.delegator === ORG && !!g?.signature && !revoked.has(String(g.delegate));
+const deps = { verify, verifyMember, now: () => 100, merge: async (_e: unknown, _p: string, _t: string, entry: unknown) => { merged.push(entry); } };
 const env = () => ({ AUTH_CODES: { async get(k: string) { return store.get(k) ?? null; }, async put(k: string, v: string) { store.set(k, v); }, async delete(k: string) { store.delete(k); } } }) as never;
 const get = async () => { const r = await handleGet({ request: new Request(`https://home.test/connect/household-stewards?org=${ORG}`, { headers: { authorization: 'Bearer t' } }), env: env() }, deps); return { status: r.status, body: await r.json() as Record<string, any> }; };
 const post = async (body: unknown) => { const r = await handlePost({ request: new Request('https://home.test/connect/household-stewards', { method: 'POST', headers: { authorization: 'Bearer t', 'content-type': 'application/json' }, body: JSON.stringify(body) }), env: env() }, deps); return { status: r.status, body: await r.json() as Record<string, any> }; };
@@ -28,7 +30,7 @@ beforeEach(() => {
   revoked = new Set(); merged.length = 0;
   store = new Map([
     [`related:${A}:${ORG}`, JSON.stringify({ orgAgent: ORG, orgName: 'Pedersen household', kind: 'household', relationship: 'steward', stewardshipDelegation: wire(A) })],
-    [`related:${B}:${ORG}`, JSON.stringify({ orgAgent: ORG, orgName: 'Pedersen household', kind: 'household', relationship: 'member', memberAccessDelegation: {}, requestedBy: 'family-field-join' })],
+    [`related:${B}:${ORG}`, JSON.stringify({ orgAgent: ORG, orgName: 'Pedersen household', kind: 'household', relationship: 'member', memberAccessDelegation: wire(B), requestedBy: 'family-field-join' })],
     [`delegated-idx:${ORG}`, JSON.stringify([{ orgAgent: B, orgName: 'Barbara' }])],
   ]);
 });
@@ -99,5 +101,29 @@ describe('the steward invitation', () => {
   it('a pending invitation is cancelled by a steward', async () => {
     as(A); await post({ action: 'invite', org: ORG, invitee: C, delegation: wire(C) });
     expect((await post({ action: 'cancel', org: ORG, invitee: C })).body.invitation.state).toBe('cancelled');
+  });
+});
+
+describe('membership is the household\'s grant, never the person\'s own note (RUNC-2)', () => {
+  beforeEach(() => { store = new Map(); revoked = new Set(); caller = { person: C, via: 'session' }; });
+  it('a self-written member link with no household grant reads nothing', async () => {
+    store.set(`related:${C}:${ORG}`, JSON.stringify({ orgAgent: ORG, relationship: 'member' }));
+    const r = await handleGet({ request: new Request(`https://home.test/connect/household-stewards?org=${ORG}`, { headers: { authorization: 'Bearer t' } }), env: env() }, deps);
+    expect(r.status).toBe(403);
+  });
+  it('self-appending to the household member index reads nothing', async () => {
+    store.set(`delegated-idx:${ORG}`, JSON.stringify([{ orgAgent: C, orgName: 'me', delegation: { delegator: C, delegate: ORG, signature: '0x1', caveats: [] } }]));
+    const r = await handleGet({ request: new Request(`https://home.test/connect/household-stewards?org=${ORG}`, { headers: { authorization: 'Bearer t' } }), env: env() }, deps);
+    expect(r.status).toBe(403);
+  });
+  it('a grant the person signed themselves is not a member grant', async () => {
+    store.set(`related:${C}:${ORG}`, JSON.stringify({ orgAgent: ORG, relationship: 'member', memberAccessDelegation: { delegator: C, delegate: C, signature: '0x1', caveats: [] } }));
+    const r = await handleGet({ request: new Request(`https://home.test/connect/household-stewards?org=${ORG}`, { headers: { authorization: 'Bearer t' } }), env: env() }, deps);
+    expect(r.status).toBe(403);
+  });
+  it('the household\'s member-access grant to them reads the roster', async () => {
+    store.set(`related:${C}:${ORG}`, JSON.stringify({ orgAgent: ORG, relationship: 'member', memberAccessDelegation: wire(C) }));
+    const r = await handleGet({ request: new Request(`https://home.test/connect/household-stewards?org=${ORG}`, { headers: { authorization: 'Bearer t' } }), env: env() }, deps);
+    expect(r.status).toBe(200);
   });
 });

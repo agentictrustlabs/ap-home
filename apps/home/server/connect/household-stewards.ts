@@ -16,7 +16,7 @@
 import type { FnContext } from '../_lib/server-broker';
 import { personFromBearer } from '../_lib/person-bearer';
 import { verifyStewardship } from '../_lib/verify-stewardship';
-import type { IncomingDelegation } from '../_lib/verify-delegation';
+import { verifyDelegation, type IncomingDelegation } from '../_lib/verify-delegation';
 import { mergeRelationshipEntry } from '../lib/relationships-doc';
 import {
   KEYS, StewardInvitationError, accept, assembleRoster, cancel, invite, isAgent, viewOf, withSteward,
@@ -31,7 +31,7 @@ export const onRequestOptions = async (): Promise<Response> => new Response(null
 
 type Env = FnContext['env'];
 /** Seams for tests. Production passes none. */
-export interface Deps { verify?: Verify; now?: () => number; merge?: typeof mergeRelationshipEntry }
+export interface Deps { verify?: Verify; verifyMember?: (grant: IncomingDelegation) => Promise<boolean>; now?: () => number; merge?: typeof mergeRelationshipEntry }
 
 const getJson = async <T,>(env: Env, key: string, dflt: T): Promise<T> => {
   const raw = await env.AUTH_CODES.get(key);
@@ -42,13 +42,22 @@ const verifierOf = (env: Env, deps: Deps): Verify => deps.verify ?? ((org, perso
 
 /** The caller's own standing, from their link: a household grant that verifies is a steward; a member link, or a row
  *  in the household's member index, is a member. */
-async function standingOf(env: Env, person: string, org: string, verify: Verify): Promise<{ you: 'steward' | 'member' | null; wire: unknown }> {
-  const link = await getJson<{ relationship?: string; stewardshipDelegation?: unknown; status?: string } | null>(env, `related:${person}:${org}`, null);
+async function standingOf(env: Env, person: string, org: string, verify: Verify, verifyMember?: (grant: IncomingDelegation) => Promise<boolean>): Promise<{ you: 'steward' | 'member' | null; wire: unknown }> {
+  const link = await getJson<{ relationship?: string; stewardshipDelegation?: unknown; memberAccessDelegation?: IncomingDelegation | null; status?: string } | null>(env, `related:${person}:${org}`, null);
   if (link?.stewardshipDelegation && (await verify(org, person, link.stewardshipDelegation).catch(() => false))) return { you: 'steward', wire: link.stewardshipDelegation };
-  const members = await getJson<Array<{ orgAgent?: string }>>(env, `delegated-idx:${org}`, []);
-  const listed = members.some((m) => String(m.orgAgent ?? '').toLowerCase() === person);
-  if ((link?.relationship === 'member' && (!link.status || link.status === 'active')) || listed) return { you: 'member', wire: null };
+  // MEMBERSHIP IS THE HOUSEHOLD'S GRANT, NOT THE PERSON'S OWN NOTE (spec 445 RUNC-2). A person can write their own
+  // `related:` link (relationship 'member') and can append themselves to `delegated-idx:<org>` with a delegation THEY
+  // signed — so neither proves the household admitted them, and either would let anyone read any household's roster.
+  // A member is someone holding a member-access grant the HOUSEHOLD signed to them (ERC-1271 by the household, in its
+  // time window), exactly as the steward above holds the household's stewardship grant.
+  const mad = link?.memberAccessDelegation;
+  if (mad && (!link?.status || link.status === 'active')
+      && String(mad.delegator ?? '').toLowerCase() === org && String(mad.delegate ?? '').toLowerCase() === person
+      && (await (verifyMember ?? ((g: IncomingDelegation) => verifyMemberGrant(env, g)))(mad).catch(() => false))) return { you: 'member', wire: null };
   return { you: null, wire: null };
+}
+async function verifyMemberGrant(env: Env, grant: IncomingDelegation): Promise<boolean> {
+  try { return (await verifyDelegation(env as { RPC_URL?: string }, grant)).ok; } catch { return false; }
 }
 async function invitationsOf(env: Env, org: string): Promise<StewardInvitation[]> {
   const idx = await getJson<string[]>(env, KEYS.invites(org), []);
@@ -73,7 +82,7 @@ export async function handleGet({ request, env }: FnContext, deps: Deps = {}): P
   if (!isAgent(org)) return refusal('invalid_request', 'org (the household agent address) is required.', 400);
   const verify = verifierOf(env, deps);
   const now = deps.now?.() ?? Date.now();
-  const mine = await standingOf(env, who.person, org, verify);
+  const mine = await standingOf(env, who.person, org, verify, deps.verifyMember);
   if (!mine.you) {
     const own = await getJson<StewardInvitation | null>(env, KEYS.invite(org, who.person), null);
     if (own && own.state === 'pending') return json({ ok: true, org, you: 'invited', people: [], lapsed: [], invitations: [viewOf(own)] });
@@ -98,7 +107,7 @@ export async function handlePost({ request, env }: FnContext, deps: Deps = {}): 
   const now = deps.now?.() ?? Date.now();
   try {
     if (body?.action === 'invite') {
-      const mine = await standingOf(env, who.person, org, verify);
+      const mine = await standingOf(env, who.person, org, verify, deps.verifyMember);
       const invitee = String(body.invitee ?? '').toLowerCase();
       const roster = await getJson<StewardEntry[]>(env, KEYS.roster(org), []);
       const onRoster = roster.find((s) => s.agent === invitee);
@@ -142,7 +151,7 @@ export async function handlePost({ request, env }: FnContext, deps: Deps = {}): 
       return json({ ok: true, relationship: 'steward', invitation: viewOf(done) });
     }
     if (body?.action === 'cancel') {
-      const mine = await standingOf(env, who.person, org, verify);
+      const mine = await standingOf(env, who.person, org, verify, deps.verifyMember);
       const invitee = String(body.invitee ?? '').toLowerCase();
       const invitation = isAgent(invitee) ? await getJson<StewardInvitation | null>(env, KEYS.invite(org, invitee), null) : null;
       const out = cancel({ callerIsSteward: mine.you === 'steward', invitation, now });
