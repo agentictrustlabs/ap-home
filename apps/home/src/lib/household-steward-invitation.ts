@@ -26,6 +26,9 @@ export interface StewardInvitation {
   invitee: string;
   /** What the inviting steward called them (the app's label). Words only. */
   label: string;
+  /** The household's name as the app showed it to the inviting steward (words only; never authority). The invitee's
+   *  link takes it when their own link names the household by its address. */
+  householdName?: string;
   invitedBy: string;
   delegation: Wire;
   state: InvitationState;
@@ -50,8 +53,17 @@ export const isAgent = (s: unknown): s is string => ADDR.test(lc(s));
 // ── the page's request ─────────────────────────────────────────────────────────────────────────────────────
 export interface RelyingAppLike { client_id: string; name?: string; redirect_uris: string[]; steward_invitations?: boolean }
 export type PageRequest =
-  | { mode: 'invite'; household: string; person: string; label: string; appName: string; returnTo: string }
-  | { mode: 'accept'; household: string; member?: string; appName: string; returnTo: string };
+  | { mode: 'invite'; household: string; person: string; label: string; appName: string; returnTo: string; householdName?: string }
+  | { mode: 'accept'; household: string; member?: string; appName: string; returnTo: string; householdName?: string };
+
+/** The household's name an app passes (`householdName`): words a person typed, shown on the page beside the address.
+ *  1 to 60 characters, no control characters, never an address (that is not a name). Anything else is ignored, so the
+ *  page falls back to the address — a bad name never makes a request invalid. */
+export function householdNameOf(raw: unknown): string | undefined {
+  const name = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  if (!name || name.length > 60 || /[\u0000-\u001f\u007f]/.test(String(raw)) || /^0x[0-9a-f]{6,}/i.test(name)) return undefined;
+  return name;
+}
 
 /** `/household-steward-invitation?household&person&name&from&return` (a steward invites) or `…?action=accept&household&member&from&return`
  *  (the invitee accepts). Refused unless the app is registered for steward invitations and the return is one of its own. */
@@ -65,15 +77,17 @@ export function parsePageRequest(search: string, apps: readonly RelyingAppLike[]
   const household = lc(q.get('household'));
   if (!isAgent(household)) return bad;
   const appName = app.name ?? app.client_id;
+  const householdName = householdNameOf(q.get('householdName'));
+  const named = householdName ? { householdName } : {};
   if (q.get('action') === 'accept') {
     const member = q.get('member');
     if (member !== null && !isAgent(member)) return bad;
-    return { ok: true, request: { mode: 'accept', household, ...(member ? { member: lc(member) } : {}), appName, returnTo } };
+    return { ok: true, request: { mode: 'accept', household, ...(member ? { member: lc(member) } : {}), appName, returnTo, ...named } };
   }
   const person = lc(q.get('person'));
   if (!isAgent(person)) return bad;
   const label = (q.get('name') ?? '').trim().slice(0, 100) || person;
-  return { ok: true, request: { mode: 'invite', household, person, label, appName, returnTo } };
+  return { ok: true, request: { mode: 'invite', household, person, label, appName, returnTo, ...named } };
 }
 
 // ── transitions ───────────────────────────────────────────────────────────────────────────────────────────
@@ -88,7 +102,7 @@ const refuse = (code: string, message: string, status: number): never => { throw
 /** A steward invites. `callerIsSteward` is the caller's own verified stewardship; `alreadySteward` whether the invitee
  *  already holds a verified grant on Home's roster. The wire must BE the household's oversight grant to the invitee. */
 export async function invite(input: {
-  org: string; caller: string; invitee: unknown; label?: unknown; delegation: unknown;
+  org: string; caller: string; invitee: unknown; label?: unknown; householdName?: unknown; delegation: unknown;
   callerIsSteward: boolean; alreadySteward: boolean; existing: StewardInvitation | null; now: number; verify: Verify;
 }): Promise<StewardInvitation> {
   const org = lc(input.org), caller = lc(input.caller), invitee = lc(input.invitee);
@@ -102,7 +116,8 @@ export async function invite(input: {
     refuse('not_a_stewardship_grant', 'That is not a live stewardship grant from this household to them.', 400);
   if (input.existing?.state === 'accepted') refuse('already_steward', 'They already accepted a steward invitation for this household.', 409);
   const label = typeof input.label === 'string' && input.label.trim() ? input.label.trim().slice(0, 100) : invitee;
-  return { org, invitee, label, invitedBy: caller, delegation: wire!, state: 'pending', createdAt: input.now };
+  const householdName = householdNameOf(input.householdName);
+  return { org, invitee, label, ...(householdName ? { householdName } : {}), invitedBy: caller, delegation: wire!, state: 'pending', createdAt: input.now };
 }
 
 /** The invitee accepts: the household's grant must still verify. */

@@ -68,7 +68,7 @@ import { WEB_TOOLS, webReadInvoker } from './web-read.js';
 import { WEB_SEARCH_TOOLS, webSearchInvoker } from './web-search.js';
 import { BUILD_TOOLS, BUILD_ACTS, buildInvoker } from './build-tools.js';
 import { executorInvokeInvoker, readExecutors, type ExecutorSessionSeam } from './executor-invoke.js';
-import { LIBRARY_TOOLS, LIBRARY_ACTS, LIBRARY_GRANT_ACTS, LIBRARY_GRANT_ISSUE, LIBRARY_GRANT_REVOKE, LIBRARY_GRANTS_LIST, LIBRARY_GRANTED_FETCH, libraryInvoker, libraryGrantPlan, libraryGrantFor, stewardshipOver, type GrantedReadSender, type LibraryGrantChecks, type LibraryGrantWire } from './library-tools.js';
+import { LIBRARY_TOOLS, LIBRARY_ACTS, LIBRARY_GRANT_ACTS, LIBRARY_GRANT_ISSUE, LIBRARY_GRANT_REVOKE, LIBRARY_GRANTS_LIST, LIBRARY_GRANTED_FETCH, LIBRARY_GRANTED_READ, libraryInvoker, libraryGrantPlan, libraryGrantFor, stewardshipOver, type GrantedReadSender, type LibraryGrantChecks, type LibraryGrantWire } from './library-tools.js';
 import { PUBLISHER_TOOLS, publisherRead } from './publisher-contract.js';
 import { MCP_CONNECTOR_PREFIX, MCP_CONNECTORS_LIST, MCP_CONNECTORS_LIST_TOOL, isMcpTool, isMcpConnectorRecord, mcpConnectorTools, mcpConnectorInvoker, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
 import { PREFERENCES_TOOLS, PREFERENCES_ACTS, PREFERENCES_GET, preferencesInvoker } from './preferences-tools.js';
@@ -6184,10 +6184,15 @@ step is then handed to that agent under authority the person grants; leave it ou
     // Spec 405 — the addressee's own Library, read as evidence, wherever the playbook carries the contracts.
     // The W5 acts (save / visibility / publish) are ACTION tools above — listed here too they reached the planner twice,
     // and Gemini refused the whole offer ("Duplicate function declaration found: library_file_save", live 2026-09-21).
-    ...(deps.readSubjectRecord ? LIBRARY_TOOLS.filter((t) => !LIBRARY_ACTS.has(t.id) && !LIBRARY_GRANT_ACTS.has(t.id) && t.id !== LIBRARY_GRANTS_LIST && t.id !== LIBRARY_GRANTED_FETCH).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])) : []),
+    ...(deps.readSubjectRecord ? LIBRARY_TOOLS.filter((t) => !LIBRARY_ACTS.has(t.id) && !LIBRARY_GRANT_ACTS.has(t.id) && t.id !== LIBRARY_GRANTS_LIST && t.id !== LIBRARY_GRANTED_FETCH && t.id !== LIBRARY_GRANTED_READ).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])) : []),
     // Slice S4 — the grants a Library issued, read by its owner (or a steward): offered wherever the private tier is, because
     // the app that asked for a grant reads it back from here once the owner approved at Home (no playbook names it yet).
     ...(deps.readSubjectRecord ? LIBRARY_TOOLS.filter((t) => t.id === LIBRARY_GRANTS_LIST).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
+    // Slice S2 — a read under a grant the owner signed TO THE ASKER: offered wherever the private tier is, as the A2A task
+    // rail registers it on every agent. The presented grant is its whole authority (admitted in `grantedLibraryRead`), so a
+    // playbook that does not name it takes nothing away from the owner: a household's MEMBER reads the shared plan under
+    // the household's member-access grant this way, and the household's playbook needs no new contract for it.
+    ...(deps.readSubjectRecord ? LIBRARY_TOOLS.filter((t) => t.id === LIBRARY_GRANTED_READ).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     // Slice S5 — a workspace's granted read, fetched from the publisher by the workspace's own agent: offered the same way
     // (a read, admitted only for the workspace or its steward), because the gateway asks for it in a supplied plan and no
     // playbook names it. Only where this deployment can send it.

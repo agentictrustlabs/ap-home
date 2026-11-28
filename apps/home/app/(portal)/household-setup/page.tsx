@@ -19,6 +19,10 @@ import {
   type HouseholdSetupOutcome, type HouseholdSetupRequest,
 } from '../../../src/lib/household-setup';
 
+// Setting up a household is a deploy, its planes and a playbook: about two minutes is normal (roles walk 2026-11-28), so
+// "longer than usual" is said only past three.
+const SETUP_SLOW_AFTER_MS = 3 * 60_000;
+
 export default function HouseholdSetupPage() {
   const { session, agentAddress, agentName, personName, profile } = useSession();
   const [request, setRequest] = useState<HouseholdSetupRequest | null>(null);
@@ -30,7 +34,7 @@ export default function HouseholdSetupPage() {
     const read = householdSetupRequestOf(location.search, whitelabel.relyingApps, (client) => !!CLIENT_DEFAULTS[client]?.family);
     if (read.ok) setRequest(read.request); else setError(read.error);
   }, []);
-  useEffect(() => { setSlow(false); if (!busy) return; const t = setTimeout(() => setSlow(true), 20000); return () => clearTimeout(t); }, [busy]);
+  useEffect(() => { setSlow(false); if (!busy) return; const t = setTimeout(() => setSlow(true), SETUP_SLOW_AFTER_MS); return () => clearTimeout(t); }, [busy]);
   const wrongHome = !!request?.member && !!agentAddress && request.member !== agentAddress.toLowerCase();
   // Tell the app (a hint: it confirms by reading the person's households) and CLOSE this window: the person goes back to
   // the app with nothing left over it. A browser that refuses the close gets "You can close this window".
@@ -115,6 +119,7 @@ export default function HouseholdSetupPage() {
       <p>{request.appName} then saves your household’s people and plans to the household’s own agent. Nothing about your children is sent here.</p>
       {wrongHome && <p role="alert">This Home is signed in as a different person from {request.appName}. Sign in to the same account in both windows, then try again.</p>}
       {busy && <p role="status">{progress || 'Saving your approval…'}</p>}
+      {busy && !slow && <p>This usually takes about two minutes. Keep this window open.</p>}
       {slow && busy && <p>This is taking longer than usual. Keep this window open; you do not need to approve again.</p>}
       <button type="button" className="btn primary" disabled={busy || wrongHome || !session} onClick={() => void approve()}>{busy ? 'Setting up…' : request.household ? 'Approve and finish' : 'Approve and create'}</button>
       <button type="button" className="btn" disabled={busy} onClick={() => window.close()}>Not now</button>

@@ -210,3 +210,53 @@ describe('on the A2A task rail', () => {
     expect(await skill.handle(ctxOf(g.delegation, WORKSPACE, { id: 'art-diary', grant: other.wire }).ctx)).toMatchObject({ state: 'failed', error: expect.stringContaining('ONE grant') });
   });
 });
+
+// A HOUSEHOLD'S MEMBER READS THE SHARED PLAN under the member-access grant the household signed at invitation (Home's
+// `issueOrganizationLibraryMemberAccessDelegation`): no allowedTargets, no allowedMethods — a window, value 0 and a
+// VAULT_RECORD_SCOPE naming the documents by id (with the profile and the catalog beside them, read and write).
+describe('a member-access grant (the organization → member shape)', () => {
+  async function memberGrantOf(o: { resources?: string[]; delegate?: Address; signer?: Hex; window?: [number, number]; server?: string } = {}) {
+    const win = o.window ?? [0, NOW + 3600];
+    const caveats: Caveat[] = [
+      buildVaultRecordScopeCaveat([
+        { server: o.server ?? VAULT, resources: ['vault:org.profile'], ops: ['read'] },
+        { server: o.server ?? VAULT, resources: o.resources ?? ['vault:content.catalog', libraryEntryScope('art-parts')], ops: ['read', 'write'] },
+      ]),
+      buildCaveat(E.timestamp, encodeTimestampTerms(win[0], win[1])),
+      buildCaveat(E.value, '0x0000000000000000000000000000000000000000000000000000000000000000'),
+    ];
+    const unsigned: Delegation = { delegator: OWNER, delegate: o.delegate ?? WORKSPACE, authority: `0x${'f'.repeat(64)}` as Hex, caveats, salt: 9n, signature: '0x' };
+    const digest = hashDelegation(unsigned, CHAIN, DM);
+    const signature = await sign({ hash: digest, privateKey: o.signer ?? OWNER_PK, to: 'hex' });
+    return { wire: { ...unsigned, signature, salt: unsigned.salt.toString() }, digest };
+  }
+
+  it('reads exactly the document it names, citing the grant as member access', async () => {
+    const g = await memberGrantOf();
+    expect(await read({ id: 'art-parts', grant: g.wire })).toMatchObject({ read: true, text: '{"parts":[1,2,3]}', grant: { delegationHash: g.digest, shape: 'member-access' } });
+  });
+  it('a document it does not name reads as one that does not exist', async () => {
+    const g = await memberGrantOf();
+    expect(await read({ id: 'art-diary', grant: g.wire })).toMatchObject({ read: false, refused: 'no document by that id is readable under this grant' });
+    expect(await read({ id: 'art-restricted', grant: g.wire })).toMatchObject({ read: false, refused: 'no document by that id is readable under this grant' });
+  });
+  it('a folder in its scope reaches nothing (a member-access grant names documents)', async () => {
+    const g = await memberGrantOf({ resources: [libraryFolderScope('works/restricted')] });
+    const r = await read({ id: 'art-parts', grant: g.wire });
+    expect(r.read).toBe(false);
+    expect(String(r.refused)).toMatch(/member-access grant.*names no document .* by id/);
+  });
+  it('refused for another person, past its window, signed by someone else, or revoked', async () => {
+    expect(String((await read({ id: 'art-parts', grant: (await memberGrantOf({ delegate: STRANGER })).wire })).refused)).toMatch(/names 0xb2/);
+    expect(String((await read({ id: 'art-parts', grant: (await memberGrantOf({ window: [0, NOW - 1] })).wire })).refused)).toMatch(/expired/);
+    expect(String((await read({ id: 'art-parts', grant: (await memberGrantOf({ signer: OTHER_PK })).wire })).refused)).toMatch(/not signed by/);
+    const g = await memberGrantOf();
+    expect(String((await read({ id: 'art-parts', grant: g.wire }, WORKSPACE, checks({ revoked: new Set([g.digest]) }))).refused)).toMatch(/revoked/);
+  });
+  it('through the Library invoker, as the run\'s principal; a member still writes nothing', async () => {
+    const g = await memberGrantOf();
+    const inv = libraryInvoker({ ...deps(), stewardOf: async () => ({ steward: false, because: 'you are a member there, but not a steward' }) }, OWNER, WORKSPACE);
+    expect(await inv(LIBRARY_GRANTED_READ, { id: 'art-parts', grant: g.wire }, {} as never)).toMatchObject({ read: true });
+    expect(await inv('library.file.save', { id: 'art-parts', name: 'work.parts.json', text: 'x', grant: g.wire }, {} as never)).toMatchObject({ refused: expect.stringMatching(/written by its own agent or by a steward/) });
+  });
+});

@@ -9,7 +9,7 @@ const ORG = '0x' + '1'.repeat(40), A = '0x' + 'a'.repeat(40), B = '0x' + 'b'.rep
 let caller = { person: A, via: 'session' as 'session' | 'app' };
 vi.mock('../_lib/person-bearer', () => ({ personFromBearer: async () => ({ ...caller, token: 't' }) }));
 vi.mock('../_lib/verify-stewardship', () => ({ verifyStewardship: async () => false }));
-vi.mock('../lib/relationships-doc', () => ({ mergeRelationshipEntry: async () => {} }));
+vi.mock('../lib/relationships-doc', () => ({ mergeRelationshipEntry: async () => {}, readRelationshipsDoc: async () => null }));
 
 import { handleGet, handlePost } from './household-stewards';
 
@@ -20,14 +20,16 @@ const verify = async (org: string, person: string, w: unknown) => org === ORG &&
 const merged: unknown[] = [];
 // a member-access grant verifies when the household signed it to that person (the test's stand-in for the ERC-1271 read)
 const verifyMember = async (g: { delegator?: string; delegate?: string; signature?: string }) => g?.delegator === ORG && !!g?.signature && !revoked.has(String(g.delegate));
-const deps = { verify, verifyMember, now: () => 100, merge: async (_e: unknown, _p: string, _t: string, entry: unknown) => { merged.push(entry); } };
+// the person's own record as the fixed runtime keeps it: a steward merge's grant leads (relationship-wires.ts)
+let docOf: (person: string) => unknown = () => null;
+const deps = { verify, verifyMember, now: () => 100, merge: async (_e: unknown, _p: string, _t: string, entry: unknown) => { merged.push(entry); }, readDoc: (async (_e: unknown, person: string) => docOf(person)) as never };
 const env = () => ({ AUTH_CODES: { async get(k: string) { return store.get(k) ?? null; }, async put(k: string, v: string) { store.set(k, v); }, async delete(k: string) { store.delete(k); } } }) as never;
 const get = async () => { const r = await handleGet({ request: new Request(`https://home.test/connect/household-stewards?org=${ORG}`, { headers: { authorization: 'Bearer t' } }), env: env() }, deps); return { status: r.status, body: await r.json() as Record<string, any> }; };
 const post = async (body: unknown) => { const r = await handlePost({ request: new Request('https://home.test/connect/household-stewards', { method: 'POST', headers: { authorization: 'Bearer t', 'content-type': 'application/json' }, body: JSON.stringify(body) }), env: env() }, deps); return { status: r.status, body: await r.json() as Record<string, any> }; };
 const as = (person: string, via: 'session' | 'app' = 'session') => { caller = { person, via }; };
 
 beforeEach(() => {
-  revoked = new Set(); merged.length = 0;
+  revoked = new Set(); merged.length = 0; docOf = () => null;
   store = new Map([
     [`related:${A}:${ORG}`, JSON.stringify({ orgAgent: ORG, orgName: 'Pedersen household', kind: 'household', relationship: 'steward', stewardshipDelegation: wire(A) })],
     [`related:${B}:${ORG}`, JSON.stringify({ orgAgent: ORG, orgName: 'Pedersen household', kind: 'household', relationship: 'member', memberAccessDelegation: wire(B), requestedBy: 'family-field-join' })],
@@ -125,5 +127,45 @@ describe('membership is the household\'s grant, never the person\'s own note (RU
     store.set(`related:${C}:${ORG}`, JSON.stringify({ orgAgent: ORG, relationship: 'member', memberAccessDelegation: wire(C) }));
     const r = await handleGet({ request: new Request(`https://home.test/connect/household-stewards?org=${ORG}`, { headers: { authorization: 'Bearer t' } }), env: env() }, deps);
     expect(r.status).toBe(200);
+  });
+});
+
+describe('the accept says what the person\'s OWN record holds (the household agent reads that, not Home\'s link)', () => {
+  const memberGrant = { delegator: ORG, delegate: B, signature: '0xmember', caveats: [] };
+  const invited = async (householdName?: string) => { as(A); await post({ action: 'invite', org: ORG, invitee: B, label: 'bob.me', ...(householdName ? { householdName } : {}), delegation: wire(B) }); as(B); };
+  it('recorded: the link says steward and leads with the household\'s grant', async () => {
+    await invited();
+    docOf = () => ({ orgs: { [ORG]: { org: ORG, relationship: 'steward', delegations: [wire(B), memberGrant] } } });
+    expect((await post({ action: 'accept', org: ORG })).body).toMatchObject({ ok: true, relationship: 'steward', vaultStanding: 'recorded' });
+  });
+  it('not-recorded: the grant landed behind the member grant (what the demo household\'s second steward hit)', async () => {
+    await invited();
+    docOf = () => ({ orgs: { [ORG]: { org: ORG, relationship: 'steward', delegations: [memberGrant, wire(B)] } } });
+    expect((await post({ action: 'accept', org: ORG })).body.vaultStanding).toBe('not-recorded');
+  });
+  it('unreadable: the person\'s record could not be read', async () => {
+    await invited();
+    expect((await post({ action: 'accept', org: ORG })).body.vaultStanding).toBe('unreadable');
+  });
+  it('accepting again re-merges the grant (the repair for a link recorded before the fix)', async () => {
+    await invited();
+    await post({ action: 'accept', org: ORG });
+    await post({ action: 'accept', org: ORG });
+    expect(merged).toHaveLength(2);
+    expect(merged[1]).toMatchObject({ relationship: 'steward', delegations: [wire(B)] });
+  });
+  it('the link takes the household\'s name the app showed, never the invitee\'s label or an address', async () => {
+    store.set(`related:${B}:${ORG}`, JSON.stringify({ orgAgent: ORG, orgName: ORG, kind: 'household', relationship: 'member', memberAccessDelegation: wire(B) }));
+    await invited('The Meadow family');
+    await post({ action: 'accept', org: ORG });
+    expect(JSON.parse(store.get(`related:${B}:${ORG}`)!).orgName).toBe('The Meadow family');
+    expect(merged[0]).toMatchObject({ orgName: 'The Meadow family' });
+  });
+  it('an address or an over-long name from the app is not a name', async () => {
+    store.set(`related:${B}:${ORG}`, JSON.stringify({ orgAgent: ORG, kind: 'household', relationship: 'member', memberAccessDelegation: wire(B) }));
+    await invited(ORG);
+    await post({ action: 'accept', org: ORG });
+    expect(JSON.parse(store.get(`related:${B}:${ORG}`)!).orgName).toBe(ORG);
+    expect(merged[0]).not.toHaveProperty('orgName');
   });
 });
