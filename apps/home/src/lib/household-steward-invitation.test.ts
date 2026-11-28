@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { accept, assembleRoster, cancel, invite, parsePageRequest, viewOf, withSteward, StewardInvitationError, type StewardInvitation } from './household-steward-invitation';
+import { accept, assembleRoster, cancel, householdNameOf, invite, parsePageRequest, viewOf, withSteward, StewardInvitationError, type StewardInvitation } from './household-steward-invitation';
 
 const ORG = '0x' + '1'.repeat(40), A = '0x' + 'a'.repeat(40), B = '0x' + 'b'.repeat(40), C = '0x' + 'c'.repeat(40);
 const wire = (to: string, sig = '0xs') => ({ delegator: ORG, delegate: to, signature: sig, caveats: [] });
@@ -11,6 +11,17 @@ describe('the page request', () => {
   it('reads an invite and an accept, for an app registered for steward invitations', () => {
     expect(parsePageRequest(`?household=${ORG}&person=${B}&name=Barbara&from=family-field&return=https://ap-family.faithnet.io/`, APPS)).toEqual({ ok: true, request: { mode: 'invite', household: ORG, person: B, label: 'Barbara', appName: 'Family Field', returnTo: 'https://ap-family.faithnet.io/' } });
     expect(parsePageRequest(`?action=accept&household=${ORG}&member=${B}&from=family-field&return=https://ap-family.faithnet.io/`, APPS)).toMatchObject({ ok: true, request: { mode: 'accept', member: B } });
+  });
+  it('carries the household\'s name the app passes, and ignores one that is not a name', () => {
+    const q = (n: string) => parsePageRequest(`?household=${ORG}&person=${B}&name=Barbara&householdName=${encodeURIComponent(n)}&from=family-field&return=https://ap-family.faithnet.io/`, APPS);
+    expect(q('The Meadow family')).toMatchObject({ ok: true, request: { householdName: 'The Meadow family' } });
+    expect(parsePageRequest(`?action=accept&household=${ORG}&householdName=The%20Meadows&from=family-field&return=https://ap-family.faithnet.io/`, APPS)).toMatchObject({ ok: true, request: { mode: 'accept', householdName: 'The Meadows' } });
+    for (const bad of [ORG, 'x'.repeat(61), 'a\u0007b', '   ']) {
+      const r = q(bad);
+      expect(r.ok).toBe(true);
+      expect((r as { request: object }).request).not.toHaveProperty('householdName');
+    }
+    expect(householdNameOf('  The   Meadow  family ')).toBe('The Meadow family');
   });
   it('refuses an app not registered for it, a foreign return, a bad address', () => {
     expect(parsePageRequest(`?household=${ORG}&person=${B}&from=other&return=https://x.test/`, APPS).ok).toBe(false);

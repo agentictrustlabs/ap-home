@@ -17,9 +17,9 @@ import type { FnContext } from '../_lib/server-broker';
 import { personFromBearer } from '../_lib/person-bearer';
 import { verifyStewardship } from '../_lib/verify-stewardship';
 import { verifyDelegation, type IncomingDelegation } from '../_lib/verify-delegation';
-import { mergeRelationshipEntry } from '../lib/relationships-doc';
+import { mergeRelationshipEntry, readRelationshipsDoc } from '../lib/relationships-doc';
 import {
-  KEYS, StewardInvitationError, accept, assembleRoster, cancel, invite, isAgent, viewOf, withSteward,
+  KEYS, StewardInvitationError, accept, assembleRoster, cancel, householdNameOf, invite, isAgent, viewOf, withSteward,
   type StewardEntry, type StewardInvitation, type Verify,
 } from '../../src/lib/household-steward-invitation';
 
@@ -31,7 +31,25 @@ export const onRequestOptions = async (): Promise<Response> => new Response(null
 
 type Env = FnContext['env'];
 /** Seams for tests. Production passes none. */
-export interface Deps { verify?: Verify; verifyMember?: (grant: IncomingDelegation) => Promise<boolean>; now?: () => number; merge?: typeof mergeRelationshipEntry }
+export interface Deps { verify?: Verify; verifyMember?: (grant: IncomingDelegation) => Promise<boolean>; now?: () => number; merge?: typeof mergeRelationshipEntry; readDoc?: typeof readRelationshipsDoc }
+
+/**
+ * WHAT THE PERSON'S OWN RECORD SAYS AFTER THE ACCEPT. The household's agent decides standing from the person's own
+ * `relationships.data` and verifies the FIRST wire on their link to the household (`relationshipRows`). Home's KV link
+ * is only a projection, so "accepted" is said only when that record was read back carrying the household's grant first:
+ *   recorded      — the link says steward and its first wire is this grant (the agent will see a steward);
+ *   not-recorded  — the record was read and does not (the merge did not land, or an older runtime appended the grant);
+ *   unreadable    — the record could not be read (the person's storage is not on, or the session leaf has lapsed).
+ */
+export type VaultStanding = 'recorded' | 'not-recorded' | 'unreadable';
+export function vaultStandingOf(doc: { orgs?: Record<string, { relationship?: string; delegations?: unknown[] }> } | null, org: string, grant: { signature?: string }): VaultStanding {
+  if (!doc) return 'unreadable';
+  const row = Object.entries(doc.orgs ?? {}).find(([k]) => k.toLowerCase() === org)?.[1];
+  const first = Array.isArray(row?.delegations) ? (row!.delegations[0] as { signature?: string } | undefined) : undefined;
+  return row?.relationship === 'steward' && !!first?.signature && first.signature.toLowerCase() === String(grant.signature ?? '').toLowerCase() ? 'recorded' : 'not-recorded';
+}
+/** A link's household name, unless it is only the household's address. */
+const realName = (s: unknown): string | undefined => (typeof s === 'string' && s.trim() && !isAgent(s.trim()) ? s.trim() : undefined);
 
 const getJson = async <T,>(env: Env, key: string, dflt: T): Promise<T> => {
   const raw = await env.AUTH_CODES.get(key);
@@ -100,7 +118,7 @@ export async function handlePost({ request, env }: FnContext, deps: Deps = {}): 
   const who = await personFromBearer(request, env);
   if (!who) return refusal('sign_in_required', 'Sign in with Home first.', 401);
   if (who.via !== 'session') return refusal('session_required', 'Steward invitations are approved and accepted at Home, in your own Home session.', 403);
-  const body = (await request.json().catch(() => null)) as { action?: string; org?: string; invitee?: string; label?: string; delegation?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as { action?: string; org?: string; invitee?: string; label?: string; householdName?: string; delegation?: unknown } | null;
   const org = String(body?.org ?? '').toLowerCase();
   if (!isAgent(org)) return refusal('invalid_request', 'org (the household agent address) is required.', 400);
   const verify = verifierOf(env, deps);
@@ -115,7 +133,7 @@ export async function handlePost({ request, env }: FnContext, deps: Deps = {}): 
       const alreadySteward = (!!onRoster && (await verify(org, invitee, onRoster.delegation).catch(() => false)))
         || (!!inviteeLink?.stewardshipDelegation && (await verify(org, invitee, inviteeLink.stewardshipDelegation).catch(() => false)));
       const existing = isAgent(invitee) ? await getJson<StewardInvitation | null>(env, KEYS.invite(org, invitee), null) : null;
-      const inv = await invite({ org, caller: who.person, invitee, label: body.label, delegation: body.delegation, callerIsSteward: mine.you === 'steward', alreadySteward, existing: existing?.state === 'accepted' && !alreadySteward ? null : existing, now, verify });
+      const inv = await invite({ org, caller: who.person, invitee, label: body.label, householdName: householdNameOf(body.householdName), delegation: body.delegation, callerIsSteward: mine.you === 'steward', alreadySteward, existing: existing?.state === 'accepted' && !alreadySteward ? null : existing, now, verify });
       if (mine.you === 'steward') await addToRoster(env, org, { agent: who.person, delegation: mine.wire as StewardEntry['delegation'], since: now, via: 'founder' });
       await putInvitation(env, inv);
       return json({ ok: true, invitation: viewOf(inv) });
@@ -130,7 +148,9 @@ export async function handlePost({ request, env }: FnContext, deps: Deps = {}): 
       const link = {
         ...existing,
         orgAgent: org,
-        orgName: (existing.orgName as string) || done.label,
+        // the household's name: the link's own, else the name the inviting steward's app showed — never the INVITEE's
+        // label (that names the person, and an address is not a name)
+        orgName: realName(existing.orgName) ?? done.householdName ?? (existing.orgName as string) ?? org,
         purpose: (existing.purpose as string) ?? 'household-steward-invitation',
         requestedBy: (existing.requestedBy as string) ?? '',
         siteDelegation: existing.siteDelegation ?? null,
@@ -145,10 +165,12 @@ export async function handlePost({ request, env }: FnContext, deps: Deps = {}): 
       const idx = await getJson<string[]>(env, `related-idx:${who.person}`, []);
       if (!idx.some((a) => a.toLowerCase() === org)) await env.AUTH_CODES.put(`related-idx:${who.person}`, JSON.stringify([...idx, org]));
       // the person's authoritative relationships doc (what their agent's standing check reads); best-effort as elsewhere
-      await (deps.merge ?? mergeRelationshipEntry)(env, who.person, who.token, { org, relationship: 'steward', orgName: String(link.orgName), kind: String(link.kind), parent: String(link.parent), delegations: [done.delegation] });
+      await (deps.merge ?? mergeRelationshipEntry)(env, who.person, who.token, { org, relationship: 'steward', ...(realName(link.orgName) ? { orgName: String(link.orgName) } : {}), kind: String(link.kind), parent: String(link.parent), delegations: [done.delegation] });
       await addToRoster(env, org, { agent: who.person, delegation: done.delegation, since: now, via: 'invitation' });
       if (done !== invitation) await putInvitation(env, done);
-      return json({ ok: true, relationship: 'steward', invitation: viewOf(done) });
+      // READ IT BACK: the merge is best-effort and answers nothing, so the accept says what the person's own record holds
+      const vaultStanding = vaultStandingOf(await (deps.readDoc ?? readRelationshipsDoc)(env, who.person, who.token).catch(() => null), org, done.delegation);
+      return json({ ok: true, relationship: 'steward', vaultStanding, invitation: viewOf(done) });
     }
     if (body?.action === 'cancel') {
       const mine = await standingOf(env, who.person, org, verify, deps.verifyMember);

@@ -17,6 +17,7 @@
 //   replay    = monotonic publishedAt per subject + tombstones honored by the gate.
 // The VAULT enforces scopes only — never membership (stated so nobody optimizes this gate away).
 // Audit: D1 (spec 322 §7), before commit.
+import { mergeRelationshipWires } from './relationship-wires.js';
 import { CATALOG_RECORD, compactCatalog, expandCatalog } from './catalog-codec.js';
 import { CATALOG_PAGE_COUNT, CATALOG_ROOT_RECORD, applyCatalogEdit, assembleCatalog, buildPagedCatalog, catalogDigest, compareCatalog, isPageMissing, isPagedCatalogRecord, newGeneration, pageHash, pageRecordOf, pageRows, pagesDigest, planPagedWrite, readCatalogPages, rootState, PAGE_READ_BATCH, type CatalogRoot, type PagedWrite, type StoredRecord } from './catalog-pages.js';
 import { CONTACT_FIELD_ARGS, contactField, precisionOf } from '@agenticprimitives/ontology';
@@ -6555,6 +6556,13 @@ export class InteractionsDO {
           if (body.remove === true) delete doc.orgs[org];
           else {
             const prev = doc.orgs[org];
+            const relationship: RelationshipEntryV1['relationship'] =
+              entry?.relationship === 'self' || prev?.relationship === 'self' ? 'self'
+              : entry?.relationship === 'steward' || prev?.relationship === 'steward' ? 'steward'
+              : 'member';
+            // THE ORDER OF THE WIRES IS PART OF THE RECORD (relationship-wires.ts): every standing check verifies the
+            // FIRST wire, so a steward merge leads with the grant that made them a steward.
+            const wires = mergeRelationshipWires({ prev: prev?.delegations, incoming: entry?.delegations as unknown[] | undefined, entryRelationship: entry?.relationship, resultRelationship: relationship });
             doc.orgs[org] = {
               org,
               // steward ⊇ member: a subsequent 'member' merge must NEVER downgrade an existing steward (spec
@@ -6567,10 +6575,7 @@ export class InteractionsDO {
               // agent is this person, no later merge that merely forgot to say so turns it into a
               // relationship with somebody else. Without this the coercion below read 'self' as
               // 'member', and a persona came back as an org the person is a member of.
-              relationship:
-                entry?.relationship === 'self' || prev?.relationship === 'self' ? 'self'
-                : entry?.relationship === 'steward' || prev?.relationship === 'steward' ? 'steward'
-                : 'member',
+              relationship,
               ...(entry?.orgName ? { orgName: String(entry.orgName) } : {}),
               ...(entry?.kind ? { kind: String(entry.kind) } : prev?.kind ? { kind: prev.kind } : {}),
               ...(entry?.parent ? { parent: String(entry.parent).toLowerCase() } : prev?.parent ? { parent: prev.parent } : {}),
@@ -6579,11 +6584,9 @@ export class InteractionsDO {
               ...(entry?.membershipSituationHash ? { membershipSituationHash: String(entry.membershipSituationHash) } : prev?.membershipSituationHash ? { membershipSituationHash: prev.membershipSituationHash } : {}),
               ...(entry?.enrollmentDecisionRef ? { enrollmentDecisionRef: String(entry.enrollmentDecisionRef) } : prev?.enrollmentDecisionRef ? { enrollmentDecisionRef: prev.enrollmentDecisionRef } : {}),
               ...(entry?.delegationHash ? { delegationHash: String(entry.delegationHash) } : {}),
-              // Wires accumulate (a member-access grant may arrive after the membership entry);
-              // self-gated op — only the person can place credentials in their own doc.
-              ...(Array.isArray(entry?.delegations) || prev?.delegations
-                ? { delegations: [...(prev?.delegations ?? []), ...((entry?.delegations as IncomingDelegation[] | undefined) ?? [])].slice(-8) }
-                : {}),
+              // Wires accumulate (a member-access grant may arrive after the membership entry), a steward's
+              // grant leading; self-gated op — only the person can place credentials in their own doc.
+              ...(wires ? { delegations: wires as IncomingDelegation[] } : {}),
               updatedAt: new Date().toISOString(),
             };
           }

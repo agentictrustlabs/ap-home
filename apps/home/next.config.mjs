@@ -1,6 +1,7 @@
 import { readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { approvalWindowHeaders } from './src/lib/approval-window-headers.mjs';
 
 /** @type {import('next').NextConfig} */
 const DEMO_A2A_URL = process.env.DEMO_A2A_URL || 'https://demo-a2a-production.richardpedersen3.workers.dev';
@@ -135,6 +136,8 @@ const nextConfig = {
         has: [{ type: 'query', key: 'signer', value: 'remote' }],
         headers: [{ key: 'Cross-Origin-Opener-Policy', value: 'unsafe-none' }],
       },
+      // The approval windows an app opens keep their opener, so they can close themselves (src/lib/approval-window-headers.mjs).
+      ...approvalWindowHeaders,
     ];
   },
 };
