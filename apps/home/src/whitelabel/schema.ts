@@ -106,6 +106,10 @@ export interface RelyingApp {
   ask_with_login?: boolean;
   /** Exact Library artifacts a steward may share in a focused member invitation. Never supplied by a URL. */
   member_library_artifacts?: string[];
+  /** May this app open Home's household steward invitation (`/household-steward-invitation`): a steward whose sign-in
+   *  holds the household's keys signs the household's oversight grant to a person the app names, and that person accepts
+   *  in their own Home. The app never invites or accepts itself. Turns something ON — review it hardest. */
+  steward_invitations?: boolean;
   /** Spec 412 — the top-level Library folders THIS app writes into a person's vault (`publishing/…`, `field/…`), so the
    *  Library can say which app a folder belongs to instead of leaving a bare word. Declared by the app's registration —
    *  the app knows where it writes — never inferred from a name. */
