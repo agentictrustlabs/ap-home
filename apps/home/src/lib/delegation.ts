@@ -888,6 +888,38 @@ export async function issueServiceAgentWireDelegation(
   return d;
 }
 
+/**
+ * The PEER SESSION (2026-11-27): what lets a service call ONE OTHER named agent AS the identity it serves. The
+ * service-agent wire above is deliberately `allowedTargets = [the identity]` — usable only to act as the identity toward
+ * itself — so it can never reach a peer. A peer session is the same custodian-signed artifact pointed at exactly one
+ * peer, and nothing wider:
+ *   allowedTargets = [the peer]        never a list, never the identity itself,
+ *   allowedMethods = [harness.ask]     the A2A conversation method, nothing else,
+ *   timestamp-bounded (90 days), on-chain revocable by the custodian.
+ * The peer still decides what the identity may do there (its own method delegation, checked on every call).
+ */
+export async function issueServicePeerSessionDelegation(
+  identity: Address,
+  delegateKey: Address,
+  peer: Address,
+  signHash: SignHash,
+  validitySeconds = SERVICE_AGENT_WIRE_VALIDITY_SECONDS,
+): Promise<Delegation> {
+  if (peer.toLowerCase() === identity.toLowerCase()) throw new Error('a peer session names another agent, not the identity itself');
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([peer])),
+    buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms([a2aSkillSelector('harness.ask')])),
+  ];
+  const d: Delegation = { delegator: identity, delegate: delegateKey, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  d.signature = await signHash(hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager)); // the identity's custodian authorizes it
+  return d;
+}
+
 /** The A2A skills an Operational Intent grant may carry. Named here so the minting side and the
  *  org's gate derive the SAME selectors from the SAME strings — a selector computed from a drifting
  *  string list is a grant that silently authorizes nothing.

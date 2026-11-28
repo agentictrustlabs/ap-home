@@ -563,6 +563,9 @@ const faithImpact: WhiteLabelConfig = {
         'workspace-member-invite',
         'workspace-join',
         'service-agent-wire',
+        // the workspace's custodian lets the workspace agent call ONE named agent as the workspace (the ISL coordinator
+        // scientist, 2026-11-27): a session wire with allowedTargets = [that agent], harness.ask only, 90 days
+        'peer-session',
       ],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       serviceAgentConfig: {

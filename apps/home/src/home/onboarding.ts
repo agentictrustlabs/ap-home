@@ -47,7 +47,7 @@ import { connectWallet, personalSign } from '../lib/wallet';
 import { isDemoCustodyHome, demoCustodySignHash } from '../lib/persona-custody';
 import { writeOrganizationMembership } from '../lib/membership-write';
 import { getClient } from '../lib/oidc-clients';
-import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, issueOrgReadDelegation, issueWorkspaceOperatingDelegation, buildApprovedSelfVaultGrant, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, ORG_INTERACTIONS_SESSION_LEAF_LADDER_RUNGS, PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type SelfVaultGrantConfig, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, issueOrgReadDelegation, issueWorkspaceOperatingDelegation, buildApprovedSelfVaultGrant, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, issueServicePeerSessionDelegation, OPEN_DELEGATION, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, ORG_INTERACTIONS_SESSION_LEAF_LADDER_RUNGS, PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type SelfVaultGrantConfig, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
 import { saveStandingGrant, loadStandingGrant, saveStandingGrantWithSelfVault, loadStandingGrantWithSelfVault } from '../lib/grant-cache';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
@@ -1434,6 +1434,45 @@ export async function authorizeServiceAgentWire(
     return { ok: true, identity: who.identity, delegate: who.delegate, skills, expiresAt: stored.expiresAt ?? null };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'could not authorize the service agent' };
+  }
+}
+
+/**
+ * The PEER-SESSION ceremony (2026-11-27): the custodian of a named agent lets the service that acts for it (its endpoint's
+ * KMS key, read from the service exactly as in the service-agent-wire ceremony) call ONE other named agent as that agent.
+ * The service reports its signing key; the custodian signs `issueServicePeerSessionDelegation`; the Home hands it to
+ * the service's `/admin/peer-session`, which checks its shape and stores it for that peer.
+ */
+export async function authorizeServicePeerSession(
+  via: Via,
+  auth: Auth | undefined,
+  opts: { a2aBase: string; idToken: string; peer: Address; identity?: Address },
+  onStep?: (s: string) => void,
+): Promise<Result<{ identity: Address; delegate: Address; peer: Address; expiresAt: string | null }>> {
+  try {
+    const base = opts.a2aBase.replace(/\/$/, '');
+    const authHeader = { authorization: `Bearer ${opts.idToken}` };
+    onStep?.('Reading the service\u2019s signing key\u2026');
+    const who = (await fetch(`${base}/admin/signer-address${opts.identity ? `?identity=${encodeURIComponent(opts.identity)}` : ''}`, { headers: authHeader })
+      .then((r) => r.json())
+      .catch(() => ({}))) as { identity?: Address; delegate?: Address; error?: string };
+    if (!who.identity || !who.delegate) return { ok: false, error: who.error ?? 'the service could not report its signing key' };
+    if (opts.identity && who.identity.toLowerCase() !== opts.identity.toLowerCase()) {
+      return { ok: false, error: `the service answered for ${who.identity}, not the agent named (${opts.identity})` };
+    }
+    onStep?.(`Letting ${who.identity.slice(0, 10)}\u2026 call ${opts.peer.slice(0, 10)}\u2026 as itself\u2026`);
+    const signHash = await signHashFor(via, who.identity, auth);
+    const wire = toWire(await issueServicePeerSessionDelegation(who.identity, who.delegate, opts.peer, signHash));
+    onStep?.('Handing the session to the service\u2026');
+    const stored = (await fetch(`${base}/admin/peer-session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...authHeader },
+      body: JSON.stringify({ target: opts.peer, wire }),
+    }).then((r) => r.json()).catch(() => ({}))) as { ok?: boolean; expiresAt?: string | null; error?: string };
+    if (!stored.ok) return { ok: false, error: stored.error ?? 'the service refused the session' };
+    return { ok: true, identity: who.identity, delegate: who.delegate, peer: opts.peer, expiresAt: stored.expiresAt ?? null };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'could not authorize the peer session' };
   }
 }
 

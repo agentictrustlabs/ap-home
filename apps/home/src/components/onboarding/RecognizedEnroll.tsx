@@ -22,7 +22,7 @@ import { WorkingBar } from './WorkingBar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { givePermission, createOrganization, createGovernedWorkspace, personGrantForOrgCreate, authorizeContentSigningForOwner,
-  authorizeServiceAgentWire, activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded,
+  authorizeServiceAgentWire, authorizeServicePeerSession, activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded,
   isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, signHashFor, type Via, type Auth, homeBearerToken } from '../../home/onboarding';
 import { ensurePlaybook } from '../../home/ensure-playbook';
 import { issueAskAsMeDelegation, issueOrganizationResourceAccessDelegation, issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, toWire, type DelegationWire } from '../../lib/delegation';
@@ -316,6 +316,20 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         setSsoCookie(token, viaLower);
         setPhase('connected');
         setTimeout(() => deliverCollectResult(enroll, api.popupMode, { collected: 1, attempted: 1 }, 'service-agent-wire'), 900);
+        return;
+      }
+      // The PEER SESSION (2026-11-27): the custodian lets the service call ONE named agent (`peer_target`) as the identity.
+      if (enroll.template === 'peer-session') {
+        const cfg = relyingApp?.serviceAgentConfig;
+        if (!cfg) return fail('this app is not configured for service-agent authorization');
+        if (!enroll.collectToken) return fail('missing owner token for the peer session');
+        if (!enroll.peerTarget) return fail('the request names no peer (peer_target)');
+        const psAuth: Auth | undefined = token ? { token } : undefined;
+        const res = await authorizeServicePeerSession(viaLower, psAuth, { a2aBase: cfg.a2aBase, idToken: enroll.collectToken, peer: enroll.peerTarget, ...(enroll.grantOrg ? { identity: enroll.grantOrg } : {}) });
+        if (!res.ok) return fail(res.error);
+        setSsoCookie(token, viaLower);
+        setPhase('connected');
+        setTimeout(() => deliverCollectResult(enroll, api.popupMode, { collected: 1, attempted: 1 }, 'peer-session'), 900);
         return;
       }
       // Spec 397 — `ask-as-me`: the Home MCP (Claude's entrance to this person's agent) asks for ONE thing — a

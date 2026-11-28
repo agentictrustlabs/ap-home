@@ -45,6 +45,7 @@ export interface EnrollReq {
   orgBase?: string; // org_create: the org name to create
   purpose?: string; // org_create: app-level purpose tag (e.g. jp-adopter-org) — ADR-0025
   grantOrg?: Address; // org_create: a broker org SA to also grant scoped read (spec 246)
+  peerTarget?: Address; // `peer-session`: the ONE agent the custodian lets the service call as the identity (allowedTargets = [this])
   member?: Address; // workspace-member-invite: the person SA being granted into the workspace (P4)
   /** workspace-member-invite BY EMAIL, for someone with no Home yet: the Home predicts the person agent that email's
    *  Home will deploy to (`/connect/org-invite/predict`, the derivation the email sign-in performs) and invites THAT. */
@@ -128,6 +129,7 @@ export function parseEnrollReq(): EnrollReq | null {
       orgBase: p.get('org_base') ?? undefined,
       purpose: p.get('org_purpose') ?? undefined,
       grantOrg: (p.get('grant_org') as Address) ?? undefined,
+      peerTarget: /^0x[0-9a-fA-F]{40}$/.test(p.get('peer_target') ?? '') ? (p.get('peer_target') as Address) : undefined,
       member: (p.get('member') as Address) ?? undefined,
       memberEmail: /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p.get('member_email') ?? '') ? (p.get('member_email') as string).trim().toLowerCase() : undefined,
       ...roleOfferFromParam(p.get('role_offer')),
@@ -513,7 +515,7 @@ export function useEnrollReq(): EnrollApi {
  * site-login pipeline — one signature, a bare `?code`, nothing stored — which looks like success from
  * the outside. service-agent-wire was added to three of the six and lost twice to the other three.
  */
-export const CEREMONY_TEMPLATES = ['content-signer', 'subscription-collect', 'service-agent-wire'] as const;
+export const CEREMONY_TEMPLATES = ['content-signer', 'subscription-collect', 'service-agent-wire', 'peer-session'] as const;
 
 /**
  * Templates that DEPLOY A NEW AGENT rather than minting a site-login grant.
