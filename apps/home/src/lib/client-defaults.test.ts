@@ -6,3 +6,8 @@ it('only the Family Field founder client starts its household on the Family Fiel
   // the join client founds no household; every other client keeps the estate default
   for (const [id, d] of Object.entries(CLIENT_DEFAULTS)) if (id !== 'family-field') expect(d.householdArchetype, id).toBeUndefined();
 });
+
+it('a plain Family Field sign-in founds no household; the setup approval still may', () => {
+  expect(CLIENT_DEFAULTS['family-field'].foundOnSignIn).toBe(false);
+  expect(CLIENT_DEFAULTS['family-field'].family).toBe(true); // /household-setup reads this
+});

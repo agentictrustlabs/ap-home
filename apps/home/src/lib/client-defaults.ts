@@ -43,12 +43,16 @@ export interface ClientDefaults {
   /** The archetype a household this client FOUNDS starts with, instead of the estate default (household-steward).
    *  Its digest must also be pinned in `agentic.lock.json#definitions` or the runtime keeps the bare harness. */
   householdArchetype?: { context: string; archetype: string };
+  /** False: a plain sign-in founds NO household even though the client founds them (`family`). The app runs Home's
+   *  /household-setup approval when the person asks for one (Family Field, since 2026-11-28: every plain sign-in used
+   *  to create an unnamed "Our family" household the person never asked for). */
+  foundOnSignIn?: boolean;
   personalBirthright?: boolean;
 }
 
 /** By OIDC client id. The card room is the one app with default coaches today: Bob for hold'em, Carol for canasta. */
 export const CLIENT_DEFAULTS: Record<string, ClientDefaults> = {
-  'family-field': { coaches: [], family: true, personalBirthright: true, householdArchetype: { context: 'wanderwell', archetype: 'wanderwell-household' } },
+  'family-field': { coaches: [], family: true, foundOnSignIn: false, personalBirthright: true, householdArchetype: { context: 'wanderwell', archetype: 'wanderwell-household' } },
   'family-field-join': { coaches: [], personalBirthright: true },
   pokernight: { coaches: [{ game: 'poker', service: 'bob-coach.svc' }, { game: 'canasta', service: 'carol-coach.svc' }], treasury: true },
 };
@@ -90,7 +94,7 @@ export async function applyClientDefaults(clientId: string, onStep?: (line: stri
 
   if (d.personalBirthright) {
     try {
-      await ensureFamilyOnboarding(agent, !!d.family, {
+      await ensureFamilyOnboarding(agent, !!d.family && d.foundOnSignIn !== false, {
         list: () => listManagedAgentsStrict(token),
         treasury: async () => {
           const result = await ensurePersonTreasury({ person: agent, via: route, token, signPerson: await signer() }, onStep);
@@ -116,7 +120,7 @@ export async function applyClientDefaults(clientId: string, onStep?: (line: stri
         },
         receipt: localStorage,
       });
-      out.applied.push(d.family ? 'family-and-personal-treasury' : 'personal-treasury');
+      out.applied.push(d.family && d.foundOnSignIn !== false ? 'family-and-personal-treasury' : 'personal-treasury');
     } catch (e) { out.error = e instanceof Error ? e.message : String(e); }
     return out; // Family apps do not enroll card-room capabilities or coaches.
   }
